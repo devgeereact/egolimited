@@ -111,6 +111,9 @@ import PurchaseOrderForm from "@/pages/ego/procurement/PurchaseOrderForm"
 // 🏗️ EGO LIMITED — asset management (M-C)
 import AssetsList from "@/pages/ego/assets/AssetsList"
 import AssetForm from "@/pages/ego/assets/AssetForm"
+// 🏗️ EGO LIMITED — announcements (M-A)
+import AnnouncementsList from "@/pages/ego/announcements/AnnouncementsList"
+import AnnouncementForm from "@/pages/ego/announcements/AnnouncementForm"
 // 🏗️ EGO LIMITED — scaffolded pages (skeletons)
 import JobsList from "@/pages/ego/jobs/JobsList"
 import JobDetail from "@/pages/ego/jobs/JobDetail"
@@ -280,6 +283,9 @@ export const router = createBrowserRouter (
           children: [
             {path: "ego/settings", element: <SettingsPage /> },
             {path: "ego/team", element: <TeamPage /> },
+            {path: "ego/announcements", element: <AnnouncementsList /> },
+            {path: "ego/announcements/new", element: <AnnouncementForm /> },
+            {path: "ego/announcements/edit", element: <AnnouncementForm /> },
           ],
         },
         // Founder only: integration secrets / API keys

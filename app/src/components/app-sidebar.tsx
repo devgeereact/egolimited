@@ -22,6 +22,7 @@ import {
   Package,
   ClipboardList,
   Boxes,
+  Megaphone,
   type LucideIcon,
 } from "lucide-react"
 
@@ -123,6 +124,7 @@ const NAV: EgoSection[] = [
     label: "Administration",
     items: [
       { title: "Team", url: "ego/team", icon: UsersRound, min: "manager" },
+      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
       { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
       { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
     ],

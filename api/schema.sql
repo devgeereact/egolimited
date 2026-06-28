@@ -450,3 +450,20 @@ CREATE TABLE IF NOT EXISTS ego_asset_services (
   CONSTRAINT fk_ego_asvc_job FOREIGN KEY (job_id) REFERENCES ego_jobs(id) ON DELETE SET NULL,
   CONSTRAINT fk_ego_asvc_eng FOREIGN KEY (engineer_id) REFERENCES ego_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- PLATFORM (M-A): announcements (role-audience broadcast).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_announcements (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  title      VARCHAR(190) NOT NULL,
+  body       TEXT NULL,
+  audience   ENUM('all','engineers','office') NOT NULL DEFAULT 'all',
+  pinned     TINYINT(1) NOT NULL DEFAULT 0,
+  active     TINYINT(1) NOT NULL DEFAULT 1,
+  author_id  INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  INDEX idx_ego_ann_active (active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

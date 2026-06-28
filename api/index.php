@@ -2146,6 +2146,66 @@ switch ("$method $route") {
         send(["ok" => true], 201);
     }
 
+    /* ============================ PLATFORM — Announcements (M-A) ============================ */
+    case "GET /announcements": {
+        $me = require_user($db);
+        // Engineers see 'engineers'+'all'; office-class see 'office'+'all'.
+        $mine = $me["role"] === "engineer" ? "engineers" : "office";
+        $rows = db_all($db,
+            "SELECT id,title,body,audience,pinned,created_at
+             FROM ego_announcements
+             WHERE deleted_at IS NULL AND active=1 AND audience IN ('all', ?)
+             ORDER BY pinned DESC, id DESC LIMIT 50", "s", $mine);
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["pinned"]=(int)$r["pinned"]; }
+        send(["announcements" => $rows]);
+    }
+    case "GET /announcements/manage": {
+        require_min($db, "manager");
+        $rows = db_all($db,
+            "SELECT a.id,a.title,a.body,a.audience,a.pinned,a.active,a.created_at,u.name AS author
+             FROM ego_announcements a LEFT JOIN ego_users u ON u.id=a.author_id
+             WHERE a.deleted_at IS NULL ORDER BY a.pinned DESC, a.id DESC", "");
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["pinned"]=(int)$r["pinned"]; $r["active"]=(int)$r["active"]; }
+        send(["announcements" => $rows]);
+    }
+    case "GET /announcements/get": {
+        require_min($db, "manager");
+        $a = db_one($db, "SELECT * FROM ego_announcements WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$a) fail("Announcement not found", 404);
+        $a["id"]=(int)$a["id"]; $a["pinned"]=(int)$a["pinned"]; $a["active"]=(int)$a["active"];
+        send(["announcement" => $a]);
+    }
+    case "POST /announcements":
+    case "POST /announcements/update": {
+        $actor = require_min($db, "manager");
+        $b = body();
+        $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $audience = in_array($b["audience"] ?? "all", ["all","engineers","office"], true) ? $b["audience"] : "all";
+        $body = trim($b["body"] ?? "") ?: null;
+        $pinned = (int)!!($b["pinned"] ?? 0);
+        $active = isset($b["active"]) ? (int)!!$b["active"] : 1;
+        if ($route === "/announcements/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            if (!db_one($db, "SELECT id FROM ego_announcements WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Announcement not found", 404);
+            db_exec($db, "UPDATE ego_announcements SET title=?,body=?,audience=?,pinned=?,active=? WHERE id=?",
+                "sssiii", $title, $body, $audience, $pinned, $active, $id);
+            log_activity($db, null, (int)$actor["id"], "announcement_updated", ["id" => $id]);
+            send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_announcements (title,body,audience,pinned,active,author_id) VALUES (?,?,?,?,?,?)",
+            "sssiii", $title, $body, $audience, $pinned, $active, (int)$actor["id"]);
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "announcement_created", ["id" => $id, "title" => $title]);
+        send(["id" => $id], 201);
+    }
+    case "POST /announcements/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_announcements SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "announcement_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
     default:
         fail("Not found: $method $route", 404);
 }
