@@ -117,6 +117,13 @@ import AnnouncementForm from "@/pages/ego/announcements/AnnouncementForm"
 // 🏗️ EGO LIMITED — contracts / PPM (M-D)
 import ContractsList from "@/pages/ego/contracts/ContractsList"
 import ContractForm from "@/pages/ego/contracts/ContractForm"
+// 🏗️ EGO LIMITED — compliance suite (M-E)
+import IncidentsList from "@/pages/ego/compliance/IncidentsList"
+import IncidentForm from "@/pages/ego/compliance/IncidentForm"
+import RamsList from "@/pages/ego/compliance/RamsList"
+import RamsForm from "@/pages/ego/compliance/RamsForm"
+import CertificatesList from "@/pages/ego/compliance/CertificatesList"
+import CertificateForm from "@/pages/ego/compliance/CertificateForm"
 // 🏗️ EGO LIMITED — scaffolded pages (skeletons)
 import JobsList from "@/pages/ego/jobs/JobsList"
 import JobDetail from "@/pages/ego/jobs/JobDetail"
@@ -274,6 +281,15 @@ export const router = createBrowserRouter (
             {path: "ego/contracts", element: <ContractsList /> },
             {path: "ego/contracts/new", element: <ContractForm /> },
             {path: "ego/contracts/edit", element: <ContractForm /> },
+            {path: "ego/incidents", element: <IncidentsList /> },
+            {path: "ego/incidents/new", element: <IncidentForm /> },
+            {path: "ego/incidents/edit", element: <IncidentForm /> },
+            {path: "ego/rams", element: <RamsList /> },
+            {path: "ego/rams/new", element: <RamsForm /> },
+            {path: "ego/rams/edit", element: <RamsForm /> },
+            {path: "ego/certificates", element: <CertificatesList /> },
+            {path: "ego/certificates/new", element: <CertificateForm /> },
+            {path: "ego/certificates/edit", element: <CertificateForm /> },
             {path: "ego/dashboard", element: <EgoDashboard /> },
             {path: "ego/invoices", element: <EgoInvoicesList /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },

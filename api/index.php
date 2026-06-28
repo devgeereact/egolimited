@@ -1646,11 +1646,11 @@ switch ("$method $route") {
         $b = body();
         $cid = (int)($b["customer_id"] ?? 0);
         $title = trim($b["title"] ?? "");
-        $unit = in_array($b["interval_unit"] ?? "month", ["day", "week", "month"], true) ? $b["interval_unit"] : "month";
+        $unit = in_array($b["interval_unit"] ?? "month", ["day", "week", "month"], true) ? ($b["interval_unit"] ?? "month") : "month";
         $count = max(1, (int)($b["interval_count"] ?? 1));
         $next = trim($b["next_due"] ?? "") ?: date("Y-m-d");
         if (!$cid || $title === "") fail("Customer and title required");
-        $prio = in_array($b["priority"] ?? "normal", ["low", "normal", "urgent"], true) ? $b["priority"] : "normal";
+        $prio = in_array($b["priority"] ?? "normal", ["low", "normal", "urgent"], true) ? ($b["priority"] ?? "normal") : "normal";
         $quote = isset($b["quoted_amount"]) && $b["quoted_amount"] !== "" ? (float)$b["quoted_amount"] : null;
         db_exec($db,
             "INSERT INTO ego_recurring_plans (customer_id,title,description,priority,quoted_amount,interval_unit,interval_count,next_due)
@@ -1845,7 +1845,7 @@ switch ("$method $route") {
         $ins = trim($b["insurance_expiry"] ?? "") ?: null;
         $dr = ($b["day_rate"] ?? "") !== "" ? (float)$b["day_rate"] : null;
         $rating = ($b["rating"] ?? "") !== "" ? (int)$b["rating"] : null;
-        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? $b["status"] : "active";
+        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? ($b["status"] ?? "active") : "active";
         db_exec($db, "INSERT INTO ego_subcontractors (name,company,trades,coverage_areas,phone,email,insurance_expiry,qualifications,day_rate,rating,status,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             "ssssssssdiss", $name, trim($b["company"] ?? "") ?: null, trim($b["trades"] ?? "") ?: null, trim($b["coverage_areas"] ?? "") ?: null,
             trim($b["phone"] ?? "") ?: null, $email, $ins, trim($b["qualifications"] ?? "") ?: null, $dr, $rating, $status, trim($b["notes"] ?? "") ?: null);
@@ -1863,7 +1863,7 @@ switch ("$method $route") {
         $ins = trim($b["insurance_expiry"] ?? "") ?: null;
         $dr = ($b["day_rate"] ?? "") !== "" ? (float)$b["day_rate"] : null;
         $rating = ($b["rating"] ?? "") !== "" ? (int)$b["rating"] : null;
-        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? $b["status"] : "active";
+        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? ($b["status"] ?? "active") : "active";
         db_exec($db, "UPDATE ego_subcontractors SET name=?,company=?,trades=?,coverage_areas=?,phone=?,email=?,insurance_expiry=?,qualifications=?,day_rate=?,rating=?,status=?,notes=? WHERE id=?",
             "ssssssssdissi", $name, trim($b["company"] ?? "") ?: null, trim($b["trades"] ?? "") ?: null, trim($b["coverage_areas"] ?? "") ?: null,
             trim($b["phone"] ?? "") ?: null, $email, $ins, trim($b["qualifications"] ?? "") ?: null, $dr, $rating, $status, trim($b["notes"] ?? "") ?: null, $id);
@@ -1978,7 +1978,7 @@ switch ("$method $route") {
         $b = body();
         $supplierId = (int)($b["supplier_id"] ?? 0);
         if (!$supplierId) fail("Supplier is required");
-        $status = in_array($b["status"] ?? "draft", ["draft","ordered"], true) ? $b["status"] : "draft";
+        $status = in_array($b["status"] ?? "draft", ["draft","ordered"], true) ? ($b["status"] ?? "draft") : "draft";
         $items = is_array($b["items"] ?? null) ? $b["items"] : [];
         $subtotal = 0.0;
         foreach ($items as $it) { $subtotal += round((float)($it["qty"] ?? 0) * (float)($it["unit_cost"] ?? 0), 2); }
@@ -2099,7 +2099,7 @@ switch ("$method $route") {
         $b = body();
         $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
         $customerId = ($b["customer_id"] ?? "") !== "" ? (int)$b["customer_id"] : null;
-        $status = in_array($b["status"] ?? "ok", ["ok","due","fault","retired"], true) ? $b["status"] : "ok";
+        $status = in_array($b["status"] ?? "ok", ["ok","due","fault","retired"], true) ? ($b["status"] ?? "ok") : "ok";
         $install = trim($b["install_date"] ?? "") ?: null;
         $next = trim($b["next_service_date"] ?? "") ?: null;
         $cols = "name=?,asset_tag=?,customer_id=?,location=?,type=?,make=?,model=?,serial=?,status=?,install_date=?,next_service_date=?,notes=?";
@@ -2133,7 +2133,7 @@ switch ("$method $route") {
         $assetId = (int)($b["asset_id"] ?? 0); if (!$assetId) fail("asset_id required");
         if (!db_one($db, "SELECT id FROM ego_assets WHERE id=? AND deleted_at IS NULL", "i", $assetId)) fail("Asset not found", 404);
         $date = trim($b["service_date"] ?? "") ?: date("Y-m-d");
-        $outcome = in_array($b["outcome"] ?? "ok", ["ok","repaired","fault"], true) ? $b["outcome"] : "ok";
+        $outcome = in_array($b["outcome"] ?? "ok", ["ok","repaired","fault"], true) ? ($b["outcome"] ?? "ok") : "ok";
         $next = trim($b["next_due"] ?? "") ?: null;
         $jobId = ($b["job_id"] ?? "") !== "" ? (int)$b["job_id"] : null;
         db_exec($db, "INSERT INTO ego_asset_services (asset_id,job_id,service_date,engineer_id,outcome,notes,next_due) VALUES (?,?,?,?,?,?,?)",
@@ -2180,7 +2180,7 @@ switch ("$method $route") {
         $actor = require_min($db, "manager");
         $b = body();
         $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
-        $audience = in_array($b["audience"] ?? "all", ["all","engineers","office"], true) ? $b["audience"] : "all";
+        $audience = in_array($b["audience"] ?? "all", ["all","engineers","office"], true) ? ($b["audience"] ?? "all") : "all";
         $body = trim($b["body"] ?? "") ?: null;
         $pinned = (int)!!($b["pinned"] ?? 0);
         $active = isset($b["active"]) ? (int)!!$b["active"] : 1;
@@ -2237,7 +2237,7 @@ switch ("$method $route") {
         $b = body();
         $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
         $customerId = ($b["customer_id"] ?? "") !== "" ? (int)$b["customer_id"] : null;
-        $status = in_array($b["status"] ?? "active", ["active","pending","expired","cancelled"], true) ? $b["status"] : "active";
+        $status = in_array($b["status"] ?? "active", ["active","pending","expired","cancelled"], true) ? ($b["status"] ?? "active") : "active";
         $ni = fn($k) => ($b[$k] ?? "") !== "" ? (int)$b[$k] : null;
         $nd = fn($k) => trim($b[$k] ?? "") ?: null;
         $nf = fn($k) => ($b[$k] ?? "") !== "" ? (float)$b[$k] : null;
@@ -2306,6 +2306,122 @@ switch ("$method $route") {
             "iii", $days, $days, $id);
         log_activity($db, null, (int)$actor["id"], "contract_service_done", ["id" => $id]);
         send(["ok" => true]);
+    }
+
+    /* ============================ COMPLIANCE — RAMS (M-E) ============================ */
+    case "GET /rams": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db, "SELECT id,title,trade,reference,review_date FROM ego_rams_documents WHERE deleted_at IS NULL AND (title LIKE ? OR trade LIKE ? OR reference LIKE ?) ORDER BY title", "sss", $q, $q, $q);
+        foreach ($rows as &$r) $r["id"] = (int)$r["id"];
+        send(["rams" => $rows]);
+    }
+    case "GET /rams/get": {
+        require_role($db, "admin");
+        $r = db_one($db, "SELECT * FROM ego_rams_documents WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$r) fail("RAMS not found", 404);
+        $r["id"] = (int)$r["id"];
+        send(["rams" => $r]);
+    }
+    case "POST /rams":
+    case "POST /rams/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $args = [$title, trim($b["trade"] ?? "") ?: null, trim($b["reference"] ?? "") ?: null, trim($b["review_date"] ?? "") ?: null, trim($b["content"] ?? "") ?: null];
+        if ($route === "/rams/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            db_exec($db, "UPDATE ego_rams_documents SET title=?,trade=?,reference=?,review_date=?,content=? WHERE id=?", "sssssi", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "rams_updated", ["id" => $id]); send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_rams_documents (title,trade,reference,review_date,content) VALUES (?,?,?,?,?)", "sssss", ...$args);
+        $id = (int)$db->insert_id; log_activity($db, null, (int)$actor["id"], "rams_created", ["id" => $id]); send(["id" => $id], 201);
+    }
+    case "POST /rams/delete": {
+        $actor = require_role($db, "admin"); $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_rams_documents SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "rams_deleted", ["id" => $id]); send(["ok" => true]);
+    }
+
+    /* ============================ COMPLIANCE — Incidents (M-E) ============================ */
+    case "GET /incidents": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db, "SELECT id,incident_date,type,severity,location,person,status FROM ego_incidents WHERE deleted_at IS NULL AND (location LIKE ? OR person LIKE ? OR description LIKE ?) ORDER BY incident_date DESC, id DESC", "sss", $q, $q, $q);
+        foreach ($rows as &$r) $r["id"] = (int)$r["id"];
+        send(["incidents" => $rows]);
+    }
+    case "GET /incidents/get": {
+        require_role($db, "admin");
+        $r = db_one($db, "SELECT * FROM ego_incidents WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$r) fail("Incident not found", 404); $r["id"] = (int)$r["id"];
+        send(["incident" => $r]);
+    }
+    case "POST /incidents":
+    case "POST /incidents/update": {
+        $actor = require_role($db, "admin"); $b = body();
+        $type = in_array($b["type"] ?? "near_miss", ["accident","near_miss","injury","property","environmental","other"], true) ? ($b["type"] ?? "near_miss") : "near_miss";
+        $sev = in_array($b["severity"] ?? "low", ["low","medium","high","riddor"], true) ? ($b["severity"] ?? "low") : "low";
+        $status = in_array($b["status"] ?? "open", ["open","investigating","closed"], true) ? ($b["status"] ?? "open") : "open";
+        $args = [trim($b["incident_date"] ?? "") ?: null, $type, $sev, trim($b["location"] ?? "") ?: null, trim($b["person"] ?? "") ?: null,
+                 trim($b["description"] ?? "") ?: null, trim($b["action_taken"] ?? "") ?: null, trim($b["reported_by"] ?? "") ?: null, $status];
+        if ($route === "/incidents/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            db_exec($db, "UPDATE ego_incidents SET incident_date=?,type=?,severity=?,location=?,person=?,description=?,action_taken=?,reported_by=?,status=? WHERE id=?", "sssssssssi", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "incident_updated", ["id" => $id]); send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_incidents (incident_date,type,severity,location,person,description,action_taken,reported_by,status) VALUES (?,?,?,?,?,?,?,?,?)", "sssssssss", ...$args);
+        $id = (int)$db->insert_id; log_activity($db, null, (int)$actor["id"], "incident_created", ["id" => $id, "severity" => $sev]); send(["id" => $id], 201);
+    }
+    case "POST /incidents/delete": {
+        $actor = require_role($db, "admin"); $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_incidents SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "incident_deleted", ["id" => $id]); send(["ok" => true]);
+    }
+
+    /* ============================ COMPLIANCE — Certificates (M-E) ============================ */
+    case "GET /certificates": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db, "SELECT c.id,c.title,c.holder,c.type,c.reference,c.issued_date,c.expiry_date,c.engineer_id,u.name AS engineer
+                             FROM ego_certificates c LEFT JOIN ego_users u ON u.id=c.engineer_id
+                             WHERE c.deleted_at IS NULL AND (c.title LIKE ? OR c.holder LIKE ? OR c.type LIKE ?) ORDER BY c.expiry_date IS NULL, c.expiry_date", "sss", $q, $q, $q);
+        $today = new DateTime("today");
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"]; $r["engineer_id"] = $r["engineer_id"] !== null ? (int)$r["engineer_id"] : null;
+            $r["status"] = "valid";
+            if ($r["expiry_date"]) {
+                $exp = new DateTime($r["expiry_date"]); $days = (int)$today->diff($exp)->format("%r%a");
+                $r["status"] = $days < 0 ? "expired" : ($days <= 30 ? "expiring" : "valid");
+            }
+        }
+        send(["certificates" => $rows]);
+    }
+    case "GET /certificates/get": {
+        require_role($db, "admin");
+        $r = db_one($db, "SELECT * FROM ego_certificates WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$r) fail("Certificate not found", 404);
+        $r["id"] = (int)$r["id"]; $r["engineer_id"] = $r["engineer_id"] !== null ? (int)$r["engineer_id"] : null;
+        send(["certificate" => $r]);
+    }
+    case "POST /certificates":
+    case "POST /certificates/update": {
+        $actor = require_role($db, "admin"); $b = body();
+        $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $engId = ($b["engineer_id"] ?? "") !== "" ? (int)$b["engineer_id"] : null;
+        $args = [$title, trim($b["holder"] ?? "") ?: null, $engId, trim($b["type"] ?? "") ?: null, trim($b["reference"] ?? "") ?: null,
+                 trim($b["issued_date"] ?? "") ?: null, trim($b["expiry_date"] ?? "") ?: null];
+        if ($route === "/certificates/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            db_exec($db, "UPDATE ego_certificates SET title=?,holder=?,engineer_id=?,type=?,reference=?,issued_date=?,expiry_date=? WHERE id=?", "ssissssi", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "certificate_updated", ["id" => $id]); send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_certificates (title,holder,engineer_id,type,reference,issued_date,expiry_date) VALUES (?,?,?,?,?,?,?)", "ssissss", ...$args);
+        $id = (int)$db->insert_id; log_activity($db, null, (int)$actor["id"], "certificate_created", ["id" => $id]); send(["id" => $id], 201);
+    }
+    case "POST /certificates/delete": {
+        $actor = require_role($db, "admin"); $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_certificates SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "certificate_deleted", ["id" => $id]); send(["ok" => true]);
     }
 
     default:

@@ -512,3 +512,54 @@ CREATE TABLE IF NOT EXISTS ego_contract_allocations (
   sort           INT NOT NULL DEFAULT 0,
   CONSTRAINT fk_ego_ctalloc_ct FOREIGN KEY (contract_id) REFERENCES ego_contracts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- COMPLIANCE SUITE (M-E): RAMS documents, incidents, certificates.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_rams_documents (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  title       VARCHAR(190) NOT NULL,
+  trade       VARCHAR(80) NULL,
+  reference   VARCHAR(80) NULL,
+  review_date DATE NULL,
+  content     TEXT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at  DATETIME NULL,
+  INDEX idx_ego_rams_review (review_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_incidents (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  incident_date DATE NULL,
+  type          ENUM('accident','near_miss','injury','property','environmental','other') NOT NULL DEFAULT 'near_miss',
+  severity      ENUM('low','medium','high','riddor') NOT NULL DEFAULT 'low',
+  location      VARCHAR(190) NULL,
+  person        VARCHAR(190) NULL,
+  description   TEXT NULL,
+  action_taken  TEXT NULL,
+  reported_by   VARCHAR(120) NULL,
+  status        ENUM('open','investigating','closed') NOT NULL DEFAULT 'open',
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at    DATETIME NULL,
+  INDEX idx_ego_inc_status (status),
+  INDEX idx_ego_inc_severity (severity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_certificates (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  title        VARCHAR(190) NOT NULL,
+  holder       VARCHAR(190) NULL,
+  engineer_id  INT NULL,
+  type         VARCHAR(120) NULL,
+  reference    VARCHAR(120) NULL,
+  status       ENUM('valid','expiring','expired') NOT NULL DEFAULT 'valid',
+  issued_date  DATE NULL,
+  expiry_date  DATE NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at   DATETIME NULL,
+  INDEX idx_ego_cert_expiry (expiry_date),
+  CONSTRAINT fk_ego_cert_eng FOREIGN KEY (engineer_id) REFERENCES ego_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -24,6 +24,9 @@ import {
   Boxes,
   Megaphone,
   FileSignature,
+  ShieldAlert,
+  FileCheck2,
+  BadgeCheck,
   type LucideIcon,
 } from "lucide-react"
 
@@ -74,6 +77,14 @@ const NAV: EgoSection[] = [
     items: [
       { title: "Assets", url: "ego/assets", icon: Boxes },
       { title: "Contracts & PPM", url: "ego/contracts", icon: FileSignature },
+    ],
+  },
+  {
+    label: "Compliance",
+    items: [
+      { title: "Incidents", url: "ego/incidents", icon: ShieldAlert },
+      { title: "RAMS", url: "ego/rams", icon: FileCheck2 },
+      { title: "Certificates", url: "ego/certificates", icon: BadgeCheck },
     ],
   },
   {
