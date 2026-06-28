@@ -144,7 +144,7 @@ function ai_draft(mysqli $db, string $prompt): string {
         CURLOPT_POSTFIELDS => $payload,
         CURLOPT_HTTPHEADER => [
             "Authorization: Bearer $key", "Content-Type: application/json",
-            "HTTP-Referer: https://soulrefresh.net/egolimited", "X-Title: EGO LIMITED",
+            "HTTP-Referer: https://egolimited.com", "X-Title: EGO LIMITED",
         ],
     ]);
     $resp = curl_exec($ch);
@@ -169,7 +169,7 @@ function mint_track_token(mysqli $db, int $jobId): array {
 /** Public customer-portal URL for a job (mints/reuses the token). Self-hosted, no third party. */
 function track_link(mysqli $db, int $jobId): string {
     $t = mint_track_token($db, $jobId);
-    return "https://soulrefresh.net/egolimited/app/track/" . $t["token"];
+    return "https://egolimited.com/app/track/" . $t["token"];
 }
 /** Verify a portal token → the job_id it scopes to (or null). */
 function verify_track_token(mysqli $db, string $token): ?int {
@@ -860,7 +860,7 @@ switch ("$method $route") {
         if (!is_dir($dir)) mkdir($dir, 0755, true);
         $fname = "job{$job['id']}_" . bin2hex(random_bytes(6)) . ".$ext";
         file_put_contents("$dir/$fname", $bin);
-        $url = "/egolimited/api/uploads/$fname";
+        $url = "/api/uploads/$fname";
         $caption = trim($b["caption"] ?? "") ?: null;
         db_exec($db, "INSERT INTO ego_job_photos (job_id,url,caption,uploaded_by) VALUES (?,?,?,?)", "issi", (int)$job["id"], $url, $caption, (int)$me["id"]);
         log_activity($db, (int)$job["id"], (int)$me["id"], "photo", ["url" => $url]);

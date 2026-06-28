@@ -1,13 +1,14 @@
 {
-  "name": "EGO Engineer — Field Service",
+  "name": "EGO LIMITED — Engineer",
   "short_name": "EGO Engineer",
-  "description": "Field-service app for EGO LIMITED engineers — jobs and invoices.",
-  "start_url": "/egolimited/app/",
+  "description": "Field service jobs for EGO LIMITED engineers.",
+  "start_url": "/egolimited/app/ego/engineer/today",
   "scope": "/egolimited/app/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#0b1020",
   "theme_color": "#0b1020",
   "icons": [
-    { "src": "ego-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/egolimited/app/ego-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }

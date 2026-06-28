@@ -1,0 +1,12 @@
+# EGO LIMITED app — SPA history fallback.
+# Serve real files/dirs as-is; route everything else to index.html so the
+# React Router client routes (e.g. /app/welcome, /ego/jobs) resolve
+# on hard load / refresh instead of 404ing.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /app/
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /app/index.html [L]
+</IfModule>

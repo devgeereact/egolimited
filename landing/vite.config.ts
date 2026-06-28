@@ -1,19 +1,16 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import path from "path"
 
-// EGO LTD marketing site.
-// Dev serves at "/" (port 5011); production build is mounted at /egolimited/
-// on cPanel (soulrefresh.net/egolimited) — base only applies to the build.
-export default defineConfig(({ command }) => ({
-  base: command === "build" ? "/egolimited/" : "/",
-  plugins: [react(), tailwindcss()],
-  server: {
-    port: 5011,
-    strictPort: true, // clash fails loud instead of drifting (workspace rule)
+export default defineConfig({
+  // Local/working base. Deploy under egolimited.com uses base "/" (set at build time).
+  base: "/",
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
   },
-  preview: {
-    port: 5011,
-    strictPort: true,
-  },
-}));
+  server: { port: 5050, strictPort: true },
+  preview: { port: 5050, strictPort: true },
+})

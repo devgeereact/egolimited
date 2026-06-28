@@ -1,16 +1,34 @@
-import { StrictMode } from "react";
-import { createRoot } from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
-import App from "./App.tsx";
-import "./index.css";
+import React from "react"
+import ReactDOM from "react-dom/client"
+import { RouterProvider } from "react-router-dom"
+import { ThemeProvider } from "next-themes"
+import { Toaster } from "sonner"
 
-// Production build is mounted at /egolimited/app/; dev runs at root.
-const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
+import UIThemeProvider from "@/providers/ui-theme-provider"
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <BrowserRouter basename={basename}>
-      <App />
-    </BrowserRouter>
-  </StrictMode>,
-);
+import { router } from "@/routes"
+import "@/index.css"
+
+// Register the engineer-PWA service worker (prod only; dev path 404s harmlessly).
+if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {})
+  })
+}
+
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <React.StrictMode>
+    <ThemeProvider
+      attribute="class"
+      defaultTheme="classic-light"
+      enableSystem
+      disableTransitionOnChange
+    >
+      
+      <UIThemeProvider>
+        <RouterProvider router={router} />
+      </UIThemeProvider>
+    </ThemeProvider>
+    <Toaster position="top-right" richColors closeButton />
+  </React.StrictMode>
+)

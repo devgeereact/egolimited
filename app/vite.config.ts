@@ -1,20 +1,17 @@
-import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
-import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite"
+import react from "@vitejs/plugin-react"
+import path from "path"
 
-// EGO field-service PWA.
-// Dev serves at "/" (port 5012); production build is mounted under
-// /egolimited/app/ on cPanel — base only applies to the built bundle so dev
-// URLs stay clean.
-export default defineConfig(({ command }) => ({
-  base: command === "build" ? "/egolimited/app/" : "/",
-  plugins: [react(), tailwindcss()],
-  server: {
-    port: 5012,
-    strictPort: true, // clash fails loud instead of drifting (workspace rule)
+export default defineConfig({
+  // Local/working base. Deploy under egolimited.com uses base "/app/" (set at build time;
+  // also set the React Router basename to match).
+  base: "/",
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": path.resolve(__dirname, "./src"),
+    },
   },
-  preview: {
-    port: 5012,
-    strictPort: true,
-  },
-}));
+  server: { port: 5051, strictPort: true },
+  preview: { port: 5051, strictPort: true },
+})

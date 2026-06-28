@@ -57,7 +57,7 @@ export default function App() {
         path="/welcome"
         element={
           <Shell title="Welcome">
-            <Card>Scaffold ready. Wire auth against the PHP API (port 8011 / live same-origin).</Card>
+            <Card>Scaffold ready. Wire auth against the PHP API (port 8080 / live same-origin).</Card>
           </Shell>
         }
       />

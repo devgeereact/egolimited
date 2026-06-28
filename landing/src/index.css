@@ -1,26 +1,70 @@
-@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Spectral:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap");
 
-/*
- * EGO LTD landing — warm, trustworthy property-maintenance brand.
- * Charcoal base with a confident amber accent.
- */
-@theme {
-  --color-ink: #1f1d1b;
-  --color-ink-soft: #4b4742;
-  --color-paper: #faf8f5;
-  --color-paper-raised: #ffffff;
-  --color-line: #e6e0d8;
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-  --color-brand: #c2410c;
-  --color-brand-strong: #9a3412;
+@layer base {
+  /* Stone & Ember — warm cream paper, charcoal ink, ember-amber accent. */
+  :root {
+    --background: 44 30% 96%;
+    --foreground: 60 3% 14%;
+    --card: 0 0% 100%;
+    --card-foreground: 60 3% 14%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 60 3% 14%;
+    --primary: 60 3% 13%;
+    --primary-foreground: 44 30% 95%;
+    --secondary: 42 18% 91%;
+    --secondary-foreground: 60 3% 18%;
+    --muted: 42 16% 92%;
+    --muted-foreground: 50 4% 40%;
+    --accent: 33 92% 54%;
+    --accent-foreground: 60 6% 13%;
+    --destructive: 0 72% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 150 52% 36%;
+    --success-soft: 150 50% 92%;
+    --warning: 36 90% 44%;
+    --warning-soft: 40 92% 90%;
+    --danger: 0 72% 48%;
+    --danger-soft: 0 80% 95%;
+    --border: 42 14% 85%;
+    --input: 42 14% 85%;
+    --ring: 33 92% 54%;
+    --radius: 0.75rem;
+  }
 
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  .dark {
+    --background: 60 3% 10%;
+    --foreground: 44 30% 95%;
+    --card: 60 3% 13%;
+    --card-foreground: 44 30% 95%;
+    --popover: 60 3% 13%;
+    --popover-foreground: 44 30% 95%;
+    --primary: 44 30% 95%;
+    --primary-foreground: 60 3% 12%;
+    --secondary: 60 3% 18%;
+    --secondary-foreground: 44 30% 95%;
+    --muted: 60 3% 18%;
+    --muted-foreground: 44 10% 65%;
+    --accent: 33 92% 54%;
+    --accent-foreground: 60 6% 13%;
+    --border: 60 3% 22%;
+    --input: 60 3% 22%;
+  }
+
+  * { border-color: hsl(var(--border)); }
+  html { scroll-behavior: smooth; }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: theme("fontFamily.sans");
+    -webkit-font-smoothing: antialiased;
+  }
 }
 
-body {
-  margin: 0;
-  background: var(--color-paper);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+@layer utilities {
+  .text-pretty { text-wrap: pretty; }
+  .text-balance { text-wrap: balance; }
 }

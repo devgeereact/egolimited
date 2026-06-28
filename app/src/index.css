@@ -1,39 +1,739 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/*
- * PULSE UI — design tokens for the EGO field-service app.
- * Dark-navy surface with an electric "pulse" accent. Tokens are exposed as
- * Tailwind theme values (e.g. bg-surface, text-pulse) via @theme.
- */
-@theme {
-  --color-surface: #0b1020;
-  --color-surface-raised: #141a2e;
-  --color-surface-border: #243049;
+@layer base {
+  :root {
+  --radius: 0.625rem;
 
-  --color-ink: #eef2ff;
-  --color-ink-muted: #97a3c2;
+  /* Base */
+  --background: 0 0% 100%;
+  --foreground: 0 0% 9%;
 
-  --color-pulse: #3b82f6;
-  --color-pulse-strong: #2563eb;
+  /* Surface */
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 9%;
 
-  --color-ok: #34d399;
-  --color-warn: #fbbf24;
-  --color-danger: #f87171;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 9%;
 
-  --radius-card: 1rem;
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  /* Primary */
+  --primary: 0 0% 15%;
+  --primary-foreground: 0 0% 98%;
+
+  /* Secondary */
+  --secondary: 0 0% 96%;
+  --secondary-foreground: 0 0% 15%;
+
+  /* Muted */
+  --muted: 0 0% 96%;
+  --muted-foreground: 0 0% 45%;
+
+  /* Accent */
+  --accent: 0 0% 96%;
+  --accent-foreground: 0 0% 15%;
+
+  /* Destructive */
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 98%;
+
+  /* Borders */
+  --border: 0 0% 90%;
+  --input: 0 0% 90%;
+  --ring: 0 0% 70%;
+
+  /* Charts */
+  --chart-1: 27 87% 60%;   /* Orange */
+  --chart-2: 186 58% 45%;  /* Cyan */
+  --chart-3: 217 37% 32%;  /* Navy */
+  --chart-4: 85 72% 62%;   /* Lime */
+  --chart-5: 45 92% 60%;   /* Amber */
+
+  /* Sidebar */
+  --sidebar-background: 0 0% 98%;
+  --sidebar-foreground: 0 0% 9%;
+
+  --sidebar-primary: 0 0% 15%;
+  --sidebar-primary-foreground: 0 0% 98%;
+
+  --sidebar-accent: 0 0% 96%;
+  --sidebar-accent-foreground: 0 0% 15%;
+
+  --sidebar-border: 0 0% 90%;
+  --sidebar-ring: 0 0% 70%;
 }
 
-html,
-body,
-#root {
-  height: 100%;
+  .dark {
+  /* Base */
+  --background: 0 0% 10%;
+  --foreground: 0 0% 98%;
+
+  /* Surface */
+  --card: 0 0% 15%;
+  --card-foreground: 0 0% 98%;
+
+  --popover: 0 0% 15%;
+  --popover-foreground: 0 0% 98%;
+
+  /* Primary */
+  --primary: 0 0% 92%;
+  --primary-foreground: 0 0% 15%;
+
+  /* Secondary */
+  --secondary: 0 0% 22%;
+  --secondary-foreground: 0 0% 98%;
+
+  /* Muted */
+  --muted: 0 0% 22%;
+  --muted-foreground: 0 0% 65%;
+
+  /* Accent */
+  --accent: 0 0% 22%;
+  --accent-foreground: 0 0% 98%;
+
+  /* Destructive */
+  --destructive: 0 65% 55%;
+  --destructive-foreground: 0 0% 98%;
+
+  /* Borders */
+  --border: 0 0% 100% / 10%;
+  --input: 0 0% 100% / 15%;
+  --ring: 0 0% 56%;
+
+  /* Charts */
+  --chart-1: 248 80% 62%;   /* Indigo */
+  --chart-2: 160 65% 48%;   /* Emerald */
+  --chart-3: 45 95% 58%;    /* Amber */
+  --chart-4: 300 65% 58%;   /* Violet */
+  --chart-5: 12 75% 58%;    /* Orange */
+
+  /* Sidebar */
+  --sidebar-background: 0 0% 15%;
+  --sidebar-foreground: 0 0% 98%;
+
+  --sidebar-primary: 248 80% 62%;
+  --sidebar-primary-foreground: 0 0% 98%;
+
+  --sidebar-accent: 0 0% 22%;
+  --sidebar-accent-foreground: 0 0% 98%;
+
+  --sidebar-border: 0 0% 100% / 10%;
+  --sidebar-ring: 0 0% 56%;
 }
 
-body {
-  margin: 0;
-  background: var(--color-surface);
-  color: var(--color-ink);
-  font-family: var(--font-sans);
-  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================================
+   Pulse UI - Dark Blue Nebula Theme
+============================================ */
+
+.dark-blue {
+  /* Core Colors */
+  --background: 222 45% 8%;
+  --foreground: 210 40% 98%;
+
+  /* Cards */
+  --card: 223 42% 9%;
+  --card-foreground: 210 40% 98%;
+
+  /* Popover */
+  --popover: 223 42% 10%;
+  --popover-foreground: 210 40% 98%;
+
+  /* Brand */
+  --primary: 221 83% 62%;
+  --primary-foreground: 0 0% 100%;
+
+  /* Secondary */
+  --secondary: 222 32% 14%;
+  --secondary-foreground: 210 40% 98%;
+
+  /* Muted */
+  --muted: 222 30% 14%;
+  --muted-foreground: 215 20% 68%;
+
+  /* Accent */
+  --accent: 221 83% 62%;
+  --accent-foreground: 0 0% 100%;
+
+  /* States */
+  --destructive: 0 84% 60%;
+  --destructive-foreground: 0 0% 100%;
+
+  /* Borders */
+  --border: 220 25% 18%;
+  --input: 220 25% 18%;
+  --ring: 221 83% 62%;
+
+
+  /* ============================================
+     Chart Palette
+  ============================================ */
+
+  /* Cyan */
+  --chart-1: 188 94% 48%;
+
+  /* Blue */
+  --chart-2: 217 91% 60%;
+
+  /* Violet */
+  --chart-3: 262 83% 66%;
+
+  /* Emerald */
+  --chart-4: 152 76% 52%;
+
+  /* Amber */
+  --chart-5: 38 92% 58%;
+
+
+  /* ============================================
+     Sidebar
+  ============================================ */
+
+  --sidebar-background: 223 50% 8%;
+  --sidebar-foreground: 210 40% 98%;
+
+  --sidebar-primary: 221 83% 62%;
+  --sidebar-primary-foreground: 0 0% 100%;
+
+  --sidebar-accent: 222 32% 14%;
+  --sidebar-accent-foreground: 210 40% 98%;
+
+  --sidebar-border: 220 25% 16%;
+  --sidebar-ring: 221 83% 62%;
+
+
+  /* ============================================
+     Extra Theme Tokens
+  ============================================ */
+
+  --scroll-track: 223 35% 10%;
+  --scroll-thumb: 221 35% 28%;
+  --scroll-thumb-hover: 221 50% 40%;
+
+  --panel: 223 42% 9%;
+}
+
+.dark-blue body {
+  background:
+    linear-gradient(
+      rgba(6, 11, 29, 0.25),
+      rgba(6, 11, 29, 0.25)
+    ),
+    url("https://codervent.com/maxton/demo/vertical-menu/assets/images/bg-themes/body-background-1.webp")
+    center center / cover fixed no-repeat !important;
+}
+
+.dark-blue .card {
+  background-color: hsl(var(--card) / 0.72);
+
+  backdrop-filter: blur(18px);
+
+  -webkit-backdrop-filter: blur(18px);
+
+  border: 1px solid hsl(var(--border) / 0.7);
+
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.28);
+}
+
+.dark-blue .sidebar {
+  background-color:
+    hsl(var(--sidebar-background) / 0.78);
+
+  backdrop-filter: blur(22px);
+
+  -webkit-backdrop-filter: blur(22px);
+
+  border-right:
+    1px solid hsl(var(--sidebar-border));
+}
+
+.dark-blue .sidebar .nav-link.active {
+  background:
+    linear-gradient(
+      135deg,
+      rgba(59, 130, 246, 0.14),
+      rgba(99, 102, 241, 0.10)
+    );
+
+  color: hsl(var(--foreground));
+
+  border:
+    1px solid rgba(96, 165, 250, 0.12);
+}
+
+.dark-blue ::-webkit-scrollbar {
+  width: 8px;
+}
+
+.dark-blue ::-webkit-scrollbar-track {
+  background:
+    hsl(var(--scroll-track));
+}
+
+.dark-blue ::-webkit-scrollbar-thumb {
+  background:
+    hsl(var(--scroll-thumb));
+
+  border-radius: 999px;
+}
+
+.dark-blue ::-webkit-scrollbar-thumb:hover {
+  background:
+    hsl(var(--scroll-thumb-hover));
+}
+
+/* Gaussian Black Theme */
+.gaussian-black {
+    --background: 0 0% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 0 0 0 / 50%;
+    --card-foreground: 0 0% 98%;
+    --popover: 0 0% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 0 0% 98%;
+    --primary-foreground: 0 0% 9%;
+    --secondary: 0 0% 14.9%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 0 0% 14.9%;
+    --muted-foreground: 0 0% 63.9%;
+    --accent: 0 0% 14.9%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 100% / 0.1;
+    --input: 0 0% 14.9%;
+    --ring: 0 0% 83.1%;
+     
+       /* Charts */
+  --chart-1: 248 80% 62%;   /* Indigo */
+  --chart-2: 160 65% 48%;   /* Emerald */
+  --chart-3: 45 95% 58%;    /* Amber */
+  --chart-4: 300 65% 58%;   /* Violet */
+  --chart-5: 12 75% 58%;    /* Orange */
+
+    --sidebar-background: 0 0 0 / 70%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%
+}
+
+.gaussian-black body {
+  background-color: transparent;
+  /* background-image:
+    radial-gradient(
+      circle at 25% 30%,
+      rgba(168, 85, 247, 0.4),
+      transparent 40%
+    ),
+    radial-gradient(
+      circle at 75% 70%,
+      rgba(139, 92, 246, 0.3),
+      transparent 50%
+    ),
+    linear-gradient(
+      135deg,
+      #020617,
+      #0a0118,
+      #14012e
+    ); */
+    background-image: url(../images/bg-themes/gausian-black.jpg);
+    background-attachment: fixed;
+    background-size: cover;
+    background-repeat: no-repeat;
+}
+
+
+/* Classic Light Theme */
+.classic-light {
+  --background: 210 40% 98%;  /* light base */
+  --foreground: 222 47% 11%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+
+  --primary: 262 83% 58%; /* purple accent */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 210 40% 96%;
+  --secondary-foreground: 222 47% 11%;
+
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 20% 45%;
+
+  --accent: 262 83% 58%;
+  --accent-foreground: 0 0% 100%;
+
+  --border: 210 30% 88%;
+  --input: 210 30% 88%;
+  --ring: 262 83% 58%;
+
+  --chart-1: 262 83% 60%; /* Purple */
+  --chart-2: 217 91% 60%; /* Blue */
+  --chart-3: 160 84% 39%; /* Emerald */
+  --chart-4: 35 92% 58%;  /* Amber */
+  --chart-5: 340 75% 55%; /* Pink */
+
+  /* sidebar */
+  --sidebar-background: 0 0% 100%;
+  --sidebar-foreground: 222 47% 11%;
+  --sidebar-primary: 262 83% 58%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 210 40% 96%;
+  --sidebar-accent-foreground: 222 47% 11%;
+  --sidebar-border: 210 30% 88%;
+  --sidebar-ring: 262 83% 58%;
+}
+
+.classic-light body {
+  background-color: #f8fafc;
+
+  background-image:
+    radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.25), transparent 35%),
+    radial-gradient(circle at 90% 30%, rgba(168, 85, 247, 0.25), transparent 40%),
+    radial-gradient(circle at 50% 80%, rgba(236, 72, 153, 0.15), transparent 45%),
+
+    linear-gradient(
+      135deg,
+      #f8fafc 0%,
+      #eef2ff 40%,
+      #faf5ff 70%,
+      #fdf2f8 100%
+    );
+}
+
+.classic-light .card {
+  background: hsl(var(--card) / 0.85);
+
+  backdrop-filter: blur(12px);
+
+  border: 1px solid hsl(var(--border) / 0.5);
+
+  box-shadow:
+    0 8px 30px rgba(0, 0, 0, 0.06);
+}
+
+.classic-light .bg-sidebar {
+  background-color: hsl(var(--sidebar-background) / 0.5); /* ✅ transparency */
+
+  background-image:
+    radial-gradient(circle at 20% 20%, rgba(99, 102, 241, 0.25), transparent 35%),
+    radial-gradient(circle at 80% 30%, rgba(168, 85, 247, 0.25), transparent 40%),
+    radial-gradient(circle at 50% 80%, rgba(236, 72, 153, 0.15), transparent 45%);
+
+  backdrop-filter: blur(20px);              /* ✅ glass */
+  -webkit-backdrop-filter: blur(20px);
+
+  border-right: 1px solid hsl(var(--sidebar-border) / 0.2);
+
+  box-shadow: 
+    0 8px 32px rgba(0, 0, 0, 0.15),        /* depth */
+    inset 0 1px 0 rgba(255, 255, 255, 0.1); /* subtle highlight */
+}
+
+/* Glass Sidebar Scrollbar */
+.classic-light .bg-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(100, 100, 120, 0.4) transparent;
+}
+
+/* Chrome / Edge / Safari */
+.classic-light .bg-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.classic-light .bg-sidebar::-webkit-scrollbar-track {
+  background: transparent; /* ✅ no ugly track */
+}
+
+.classic-light .bg-sidebar::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    rgba(120, 120, 140, 0.4),
+    rgba(80, 80, 100, 0.4)
+  );
+  border-radius: 999px;
+}
+
+.classic-light .bg-sidebar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(
+    180deg,
+    rgba(120, 120, 140, 0.6),
+    rgba(80, 80, 100, 0.6)
+  );
+}
+
+/* ==========================================
+   Pulse UI - Semi Dark Theme
+========================================== */
+
+.semi-dark {
+  /* Sidebar */
+  --sidebar-background: 224 39% 11%;
+  --sidebar-foreground: 210 40% 98%;
+
+  --sidebar-primary: 217 91% 60%;
+  --sidebar-primary-foreground: 0 0% 100%;
+
+  --sidebar-accent: 224 25% 16%;
+  --sidebar-accent-foreground: 210 40% 98%;
+
+  --sidebar-border: 224 25% 18%;
+  --sidebar-ring: 217 91% 60%;
+}
+
+.semi-dark .bg-sidebar {
+  color: hsl(var(--sidebar-foreground));
+
+  background-color:
+    hsl(var(--sidebar-background));
+
+  border-color:
+    hsl(var(--sidebar-border));
+
+  --border: var(--sidebar-border);
+
+  --muted: var(--sidebar-accent);
+}
+
+.semi-dark .bg-sidebar .nav-link.active {
+  background:
+    linear-gradient(
+      135deg,
+      hsl(var(--sidebar-primary) / 0.18),
+      hsl(var(--sidebar-primary) / 0.08)
+    );
+
+  color:
+    hsl(var(--sidebar-foreground));
+
+  border:
+    1px solid hsl(var(--sidebar-primary) / 0.18);
+}
+
+.semi-dark .bg-sidebar .nav-link:hover {
+  background:
+    hsl(var(--sidebar-accent));
+
+  color:
+    hsl(var(--sidebar-foreground));
+}
+
+
+/* Firefox */
+.semi-dark .bg-sidebar {
+  scrollbar-width: thin;
+
+  scrollbar-color:
+    hsl(224 18% 30%)
+    hsl(var(--sidebar-background));
+}
+
+/* Chrome */
+
+.semi-dark .bg-sidebar::-webkit-scrollbar {
+  width: 8px;
+}
+
+
+.semi-dark .bg-sidebar::-webkit-scrollbar-track {
+  background:
+    hsl(var(--sidebar-background));
+}
+
+.semi-dark .bg-sidebar::-webkit-scrollbar-thumb {
+  background-color:
+    hsl(224 18% 30%);
+
+  border-radius: 999px;
+
+  border: 2px solid
+    hsl(var(--sidebar-background));
+}
+
+.semi-dark .bg-sidebar::-webkit-scrollbar-thumb:hover {
+  background-color:
+    hsl(224 20% 38%);
+}
+/* Preview Indicator for Theme Customizer */
+.dark-blue-preview {
+  background-image: 
+    radial-gradient(
+      circle at 30% 30%,
+      rgba(59, 130, 246, 0.25),
+      transparent 40%
+    ),
+    radial-gradient(
+      circle at 70% 60%,
+      rgba(99, 102, 241, 0.25),
+      transparent 50%
+    ),
+    linear-gradient(
+      135deg,
+      #111827,
+      #1e1b4b
+    );
+}
+
+.gaussian-black-preview {
+  background-image:
+    radial-gradient(
+      circle at 25% 30%,
+      rgba(255, 255, 255, 0.12),
+      transparent 55%
+    ),
+    radial-gradient(
+      circle at 75% 70%,
+      rgba(255, 255, 255, 0.08),
+      transparent 60%
+    ),
+    radial-gradient(
+      circle at 50% 50%,
+      rgba(255, 255, 255, 0.05),
+      transparent 70%
+    ),
+    linear-gradient(
+      135deg,
+      #000000,
+      #020202,
+      #000000
+    );
+}
+
+/* ================================
+   FullCalendar – shadcn Dark Mode
+================================ */
+
+.fc {
+  --fc-border-color: hsl(var(--border));
+  --fc-page-bg-color: hsl(var(--background));
+  --fc-today-bg-color: hsl(var(--muted));
+}
+
+/* Event container */
+.fc .fc-event {
+  background-color: hsl(var(--secondary));
+  border: none;
+  border-radius: 0.5rem;
+  padding: 2px 6px;
+}
+
+/* Event text */
+.fc .fc-event-title,
+.fc .fc-event-time {
+  color: hsl(var(--secondary-foreground)) !important;
+  font-weight: 500;
+}
+
+/* Hover */
+.fc .fc-event:hover {
+  opacity: 0.9;
+}
+
+/* Day number */
+.fc .fc-daygrid-day-number {
+  color: hsl(var(--foreground));
+}
+
+/* Selected / today cell */
+.fc .fc-day-today {
+  background-color: hsl(var(--muted)) !important;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* EGO — readable FullCalendar buttons (prev/next/today + month/week/day) */
+.fc .fc-button {
+  background-color: hsl(var(--secondary));
+  color: hsl(var(--secondary-foreground));
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-transform: capitalize;
+  box-shadow: none;
+  transition: background-color .15s, color .15s;
+}
+.fc .fc-button:hover {
+  background-color: hsl(var(--muted));
+}
+.fc .fc-button:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(var(--ring));
+}
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+  background-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+  border-color: hsl(var(--primary));
+}
+.fc .fc-button:disabled {
+  opacity: 0.45;
+}
+.fc .fc-button-group { gap: 0.35rem; }
+.fc .fc-toolbar-title { font-size: 1.05rem; font-weight: 600; }
+.fc .fc-toolbar.fc-header-toolbar { margin-bottom: 1rem; gap: 0.5rem; flex-wrap: wrap; }
+
+/* Event text always readable on the coloured background */
+.fc .fc-event,
+.fc .fc-event-title,
+.fc .fc-event-time {
+  color: #fff !important;
+}
+.fc .fc-event {
+  border-radius: 0.4rem;
+  padding: 1px 4px;
+  font-weight: 500;
+}
+
+/* Custom scrollbar for dark themes */
+.dark-blue,
+.gaussian-black,
+.classic-light {
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+/* Gradient Backgrounds for Cards and Progress Bars */
+.gradient-red {
+  background-image: linear-gradient(310deg, #ee0979, #ff6a00);
+}
+
+.gradient-blue {
+  background-image: linear-gradient(310deg, #00c6fb, #005bea);
+}
+
+.gradient-green {
+  background-image: linear-gradient(310deg, #17ad37, #98ec2d);
+}
+
+.gradient-purple {
+  background-image: linear-gradient(310deg, #7928ca, #ff0080);
+}
+
+.gradient-orange {
+  background-image: linear-gradient(310deg, #f7971e, #ffd200);
+}
+
+.gradient-violet {
+  background-image: linear-gradient(310deg, #3494e6, #ec6ead);
+}
+
+.gradient-cyan {
+  background-image: linear-gradient(310deg, #2af598, #009efd);
 }

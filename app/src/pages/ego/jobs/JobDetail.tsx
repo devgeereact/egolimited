@@ -1,0 +1,473 @@
+import { useEffect, useState } from "react"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import {
+  ArrowLeft, CalendarClock, CircleUserRound, Copy, Download, FileText, Mail, MapPin, Phone, Loader2, Package, PauseCircle,
+  Sparkles, Plus, X, ListChecks,
+} from "lucide-react"
+import { toast } from "sonner"
+
+import { cn } from "@/lib/utils"
+import { api } from "@/lib/api"
+import { useAuth } from "@/store/auth.store"
+import { isOffice } from "@/lib/roles"
+import { allowedTargets, STATUS_LABEL, type JobStatus } from "@/lib/jobStatus"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
+import { Switch } from "@/components/ui/switch"
+import { StatusPill } from "@/components/ego/StatusPill"
+import ScheduleDialog from "@/components/ego/ScheduleDialog"
+import TrackQr from "@/components/ego/QrCode"
+import QRCode from "qrcode"
+import { PRIORITY_CLASS, PRIORITY_LABEL, gbp, type JobPriority } from "@/lib/mock/jobs"
+
+interface JobDetailData {
+  id: number
+  reference: string
+  title: string
+  summary: string | null
+  description: string | null
+  engineer_brief: string | null
+  checklist: { id: number; label: string; done: number }[]
+  priority: JobPriority
+  status: JobStatus
+  quoted_amount: string | null
+  scheduled_start: string | null
+  scheduled_end: string | null
+  customer_id: number
+  customer_name: string
+  customer_phone: string | null
+  customer_email: string | null
+  engineer_name: string | null
+  address: { line1?: string; city?: string; postcode?: string } | null
+  invoices: { id: number; kind: "quote" | "invoice"; number: string | null; status: string; total: string }[]
+  track_token: string
+  track_short: string
+  hold_reason: string | null
+  parts_required: number
+  parts_note: string | null
+  messages: { id: number; direction: string; channel: string; from_name: string | null; from_email: string | null; subject: string | null; body: string | null; acknowledged: number; visible_to_engineer: number; created_at: string }[]
+}
+
+const PROGRESS_STEPS: { key: JobStatus; label: string }[] = [
+  { key: "new", label: "New" },
+  { key: "scheduled", label: "Scheduled" },
+  { key: "en_route", label: "En route" },
+  { key: "on_site", label: "On site" },
+  { key: "completed", label: "Completed" },
+  { key: "invoiced", label: "Invoiced" },
+  { key: "paid", label: "Paid" },
+]
+const STEP_INDEX: Record<string, number> = {
+  new: 0, scheduled: 1, en_route: 2, on_site: 3, on_hold: 3,
+  completed: 4, invoiced: 5, paid: 6, closed: 6,
+}
+
+function JobProgress({ status }: { status: JobStatus }) {
+  if (status === "cancelled") {
+    return <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-sm font-medium text-red-600 dark:text-red-400">This job was cancelled.</div>
+  }
+  const current = STEP_INDEX[status] ?? 0
+  return (
+    <div className="flex items-start justify-between gap-1">
+      {PROGRESS_STEPS.map((s, i) => {
+        const done = i < current
+        const active = i === current
+        return (
+          <div key={s.key} className="flex flex-1 flex-col items-center text-center">
+            <div className="flex w-full items-center">
+              <span className={cn("h-0.5 flex-1", i === 0 ? "opacity-0" : done || active ? "bg-primary" : "bg-border")} />
+              <span className={cn("flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ring-2",
+                done ? "bg-primary text-primary-foreground ring-primary" : active ? "bg-primary/15 text-primary ring-primary" : "bg-muted text-muted-foreground ring-border")}>
+                {done ? "✓" : i + 1}
+              </span>
+              <span className={cn("h-0.5 flex-1", i === PROGRESS_STEPS.length - 1 ? "opacity-0" : done ? "bg-primary" : "bg-border")} />
+            </div>
+            <span className={cn("mt-1.5 text-[10px] leading-tight", active ? "font-medium text-foreground" : "text-muted-foreground")}>{s.label}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+async function downloadQr(url: string, ref: string) {
+  try {
+    const data = await QRCode.toDataURL(url, { width: 600, margin: 2, errorCorrectionLevel: "M" })
+    const a = document.createElement("a")
+    a.href = data
+    a.download = `${ref}-tracking-qr.png`
+    a.click()
+  } catch { /* ignore */ }
+}
+
+export default function JobDetail() {
+  const [params] = useSearchParams()
+  const id = params.get("id")
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const [job, setJob] = useState<JobDetailData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [busy, setBusy] = useState(false)
+  const [schedOpen, setSchedOpen] = useState(false)
+  const [summary, setSummary] = useState("")
+  const [brief, setBrief] = useState("")
+  const [checklist, setChecklist] = useState<string[]>([])
+  const [newCheck, setNewCheck] = useState("")
+  const [briefBusy, setBriefBusy] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [replyTo, setReplyTo] = useState<number | null>(null)
+  const [replyText, setReplyText] = useState("")
+  const [replyBusy, setReplyBusy] = useState(false)
+
+  function load() {
+    if (!id) return
+    return api<{ job: JobDetailData }>(`/jobs/get?id=${id}`)
+      .then((r) => {
+        setJob(r.job)
+        setSummary(r.job.summary ?? "")
+        setBrief(r.job.engineer_brief ?? "")
+        setChecklist(r.job.checklist?.map((c) => c.label) ?? [])
+      })
+      .catch(() => toast.error("Job not found"))
+      .finally(() => setLoading(false))
+  }
+  useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
+
+  async function aiBrief() {
+    if (!job) return
+    setAiBusy(true)
+    try {
+      const r = await api<{ summary: string; brief: string; checklist: string[] }>("/jobs/ai-brief", { method: "POST", body: { id: job.id } })
+      if (r.summary) setSummary(r.summary)
+      if (r.brief) setBrief(r.brief)
+      if (r.checklist?.length) setChecklist(r.checklist)
+      toast.success("AI draft ready — review, then save")
+    } catch (e) { toast.error(e instanceof Error ? e.message : "AI draft failed") } finally { setAiBusy(false) }
+  }
+
+  async function saveBrief() {
+    if (!job) return
+    setBriefBusy(true)
+    try {
+      await api("/jobs/brief", { method: "POST", body: { id: job.id, summary: summary.trim(), brief: brief.trim(), checklist } })
+      toast.success("Saved — the engineer will see this")
+      await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") } finally { setBriefBusy(false) }
+  }
+
+  async function sendReply(messageId: number) {
+    if (!replyText.trim()) return
+    setReplyBusy(true)
+    try {
+      await api("/messages/reply", { method: "POST", body: { id: messageId, body: replyText.trim() } })
+      toast.success("Reply sent to the customer")
+      setReplyTo(null); setReplyText(""); await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't send") } finally { setReplyBusy(false) }
+  }
+
+  async function changeStatus(to: JobStatus) {
+    if (!job) return
+    setBusy(true)
+    try {
+      await api("/jobs/status", { method: "POST", body: { id: job.id, to } })
+      toast.success(`Marked ${STATUS_LABEL[to]}`)
+      await load()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't update")
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function ackMsg(id: number) { await api("/messages/ack", { method: "POST", body: { id } }); toast.success("Acknowledged"); load() }
+  async function toggleVis(id: number, visible: boolean) { await api("/messages/visibility", { method: "POST", body: { id, visible } }); toast.success(visible ? "Engineer can see it" : "Hidden from engineer"); load() }
+
+  async function createDoc(kind: "invoice" | "quote") {
+    if (!job) return
+    try {
+      const res = await api<{ id: number }>("/invoices", {
+        method: "POST",
+        body: {
+          job_id: job.id,
+          kind,
+          vat_rate: 20,
+          lines: [{ description: job.title, quantity: 1, unit_price: job.quoted_amount ? Number(job.quoted_amount) : 0 }],
+        },
+      })
+      navigate(`/ego/invoices/detail?id=${res.id}`)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't create")
+    }
+  }
+
+  if (loading) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
+  if (!job) return <div className="p-6 text-muted-foreground">Job not found.</div>
+
+  const targets = user ? allowedTargets(job.status, user.role) : []
+  const trackUrl = `${location.origin}${import.meta.env.BASE_URL}track/${job.track_token}`
+
+  return (
+    <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-2">
+          <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
+            <Link to="/ego/jobs"><ArrowLeft /> Jobs</Link>
+          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <h1 className="font-mono text-2xl font-semibold tracking-tight">{job.reference}</h1>
+            <StatusPill status={job.status} />
+            <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", PRIORITY_CLASS[job.priority])}>
+              {PRIORITY_LABEL[job.priority]} priority
+            </span>
+          </div>
+          <p className="text-base">{job.title}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {targets.map((to) =>
+            to === "scheduled" ? (
+              <Button key={to} disabled={busy} onClick={() => setSchedOpen(true)}>
+                Schedule &amp; assign
+              </Button>
+            ) : (
+              <Button key={to} disabled={busy} onClick={() => changeStatus(to)} variant={to === "cancelled" ? "outline" : "default"}>
+                {busy && <Loader2 className="animate-spin" />} {STATUS_LABEL[to]}
+              </Button>
+            )
+          )}
+          {/* Reschedule shortcut once already scheduled */}
+          {(job.status === "scheduled" || job.status === "on_hold") && isOffice(user?.role) && (
+            <Button variant="outline" disabled={busy} onClick={() => setSchedOpen(true)}>
+              Reschedule
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <ScheduleDialog
+        jobId={job.id}
+        open={schedOpen}
+        onOpenChange={setSchedOpen}
+        onDone={load}
+        defaults={{
+          engineer_id: undefined,
+          date: job.scheduled_start ? job.scheduled_start.slice(0, 10) : "",
+          start: job.scheduled_start ? job.scheduled_start.slice(11, 16) : "09:00",
+          end: job.scheduled_end ? job.scheduled_end.slice(11, 16) : "11:00",
+        }}
+      />
+
+      {job.status === "on_hold" && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-4 text-sm">
+          <p className="flex items-center gap-2 font-medium text-amber-700 dark:text-amber-400"><PauseCircle className="size-4" /> On hold</p>
+          {job.hold_reason && <p className="mt-1 text-muted-foreground">{job.hold_reason}</p>}
+          {job.parts_required === 1 && (
+            <p className="mt-2 flex items-start gap-1.5 font-medium"><Package className="mt-0.5 size-4 text-amber-600" /> Order needed{job.parts_note ? `: ${job.parts_note}` : ""}</p>
+          )}
+        </div>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader><CardTitle className="text-base">Progress</CardTitle></CardHeader>
+            <CardContent><JobProgress status={job.status} /></CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle className="text-base">What needs doing</CardTitle></CardHeader>
+            <CardContent className="space-y-2">
+              {job.summary && <p className="text-sm font-medium">{job.summary}</p>}
+              {job.description
+                ? <p className="whitespace-pre-wrap text-sm text-muted-foreground">{job.summary && <span className="font-medium">Client's request: </span>}{job.description}</p>
+                : !job.summary && <p className="text-sm italic text-muted-foreground">No description was added for this job.</p>}
+            </CardContent>
+          </Card>
+
+          {/* Engineer brief + on-site checklist — what the engineer sees in the field */}
+          {isOffice(user?.role) && (
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
+                <CardTitle className="flex items-center gap-2 text-base"><ListChecks className="size-4 text-primary" /> Engineer brief</CardTitle>
+                <Button size="sm" variant="outline" onClick={aiBrief} disabled={aiBusy}>
+                  {aiBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} AI draft
+                </Button>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">One-line summary — the "what needs doing" headline.</p>
+                  <Input value={summary} onChange={(e) => setSummary(e.target.value)} placeholder="e.g. Clean the garden" />
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-xs text-muted-foreground">Detailed brief — the engineer reads this on site.</p>
+                  <Textarea rows={4} value={brief} onChange={(e) => setBrief(e.target.value)} placeholder="e.g. Boiler not firing. Check gas supply and PCB. Customer is elderly — be patient." />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">On-site checklist</p>
+                  {checklist.map((item, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input value={item} onChange={(e) => setChecklist((cs) => cs.map((c, idx) => idx === i ? e.target.value : c))} className="h-9" />
+                      <Button size="icon" variant="ghost" className="size-9 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => setChecklist((cs) => cs.filter((_, idx) => idx !== i))}><X className="size-4" /></Button>
+                    </div>
+                  ))}
+                  <form onSubmit={(e) => { e.preventDefault(); if (newCheck.trim()) { setChecklist((cs) => [...cs, newCheck.trim()]); setNewCheck("") } }} className="flex items-center gap-2">
+                    <Input value={newCheck} onChange={(e) => setNewCheck(e.target.value)} placeholder="Add a check…" className="h-9" />
+                    <Button type="submit" size="icon" variant="outline" className="size-9 shrink-0"><Plus className="size-4" /></Button>
+                  </form>
+                </div>
+                <div className="flex justify-end">
+                  <Button onClick={saveBrief} disabled={briefBusy}>{briefBusy && <Loader2 className="size-4 animate-spin" />} Save for engineer</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {job.messages.length > 0 && (
+            <Card>
+              <CardHeader className="flex-row items-center justify-between space-y-0">
+                <CardTitle>Messages</CardTitle>
+                <span className="text-xs text-muted-foreground">{job.messages.length}</span>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {job.messages.map((m) => (
+                  <div key={m.id} className={cn("rounded-lg border p-3", m.channel === "portal" && !m.acknowledged && "border-amber-500/40 bg-amber-500/5")}>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium">
+                        {m.direction === "inbound" ? (m.from_name || m.from_email || "Customer") : "You"}
+                        {m.channel === "portal" && <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">portal</span>}
+                      </p>
+                      <span className="text-xs text-muted-foreground">{m.created_at?.slice(5, 16)}</span>
+                    </div>
+                    {m.subject && <p className="text-xs text-muted-foreground">{m.subject}</p>}
+                    <p className="mt-1 whitespace-pre-wrap text-sm">{m.body}</p>
+                    {m.direction === "inbound" && (
+                      <div className="mt-2 space-y-2 border-t pt-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          {m.acknowledged ? (
+                            <span className="text-xs text-emerald-600">✓✓ Acknowledged</span>
+                          ) : (
+                            <Button size="sm" variant="outline" onClick={() => ackMsg(m.id)}>Acknowledge</Button>
+                          )}
+                          {m.channel === "portal" && (
+                            <Button size="sm" onClick={() => { setReplyTo(replyTo === m.id ? null : m.id); setReplyText("") }}>Reply</Button>
+                          )}
+                          <label className="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground">
+                            Show engineer
+                            <Switch checked={m.visible_to_engineer === 1} onCheckedChange={(v) => toggleVis(m.id, v)} />
+                          </label>
+                        </div>
+                        {replyTo === m.id && (
+                          <div className="space-y-2">
+                            <Textarea rows={3} value={replyText} onChange={(e) => setReplyText(e.target.value)} placeholder="Reply to the customer — they'll see it on their tracking page (and by email)." />
+                            <div className="flex justify-end gap-2">
+                              <Button size="sm" variant="outline" onClick={() => setReplyTo(null)}>Cancel</Button>
+                              <Button size="sm" onClick={() => sendReply(m.id)} disabled={replyBusy || !replyText.trim()}>{replyBusy && <Loader2 className="size-4 animate-spin" />} Send reply</Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+        </div>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader><CardTitle>Customer</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center gap-2">
+                <CircleUserRound className="size-4 text-muted-foreground" />
+                <Link to={`/ego/customers/detail?id=${job.customer_id}`} className="font-medium hover:underline">{job.customer_name}</Link>
+              </div>
+              <div className="flex items-center gap-2 text-muted-foreground"><Phone className="size-4" /> {job.customer_phone || "—"}</div>
+              <div className="flex items-center gap-2 text-muted-foreground"><Mail className="size-4" /> {job.customer_email || "—"}</div>
+              {job.address && (job.address.line1 || job.address.postcode) && (
+                <>
+                  <Separator />
+                  <div className="flex items-start gap-2 text-muted-foreground">
+                    <MapPin className="mt-0.5 size-4 shrink-0" />
+                    {[job.address.line1, job.address.city, job.address.postcode].filter(Boolean).join(", ")}
+                  </div>
+                </>
+              )}
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>Schedule</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center gap-2">
+                <CalendarClock className="size-4 text-muted-foreground" />
+                {job.scheduled_start ? job.scheduled_start : <span className="text-muted-foreground">Not scheduled</span>}
+              </div>
+              <div className="flex items-center gap-2">
+                <CircleUserRound className="size-4 text-muted-foreground" />
+                {job.engineer_name ?? "Unassigned"}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>Money</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Quoted</span>
+                <span className="font-mono font-medium">{job.quoted_amount ? gbp(Number(job.quoted_amount)) : "—"}</span>
+              </div>
+
+              {job.invoices.length > 0 && (
+                <div className="space-y-1.5 border-t pt-2">
+                  {job.invoices.map((iv) => (
+                    <Link key={iv.id} to={`/ego/invoices/detail?id=${iv.id}`} className="flex items-center justify-between rounded-md border p-2 hover:bg-muted/40">
+                      <span className="flex items-center gap-2">
+                        <FileText className="size-4 text-muted-foreground" />
+                        <span className="font-mono text-xs">{iv.number ?? (iv.kind === "quote" ? "Quote draft" : "Invoice draft")}</span>
+                      </span>
+                      <span className="flex items-center gap-2">
+                        <StatusPill status={iv.status as never} />
+                        <span className="font-mono">{gbp(Number(iv.total))}</span>
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+              )}
+
+              {isOffice(user?.role) && (
+                <div className="flex flex-wrap gap-2 border-t pt-2">
+                  <Button size="sm" variant="outline" onClick={() => createDoc("quote")}>Create quote</Button>
+                  <Button size="sm" onClick={() => createDoc("invoice")} disabled={job.status !== "completed"} title={job.status !== "completed" ? "Available once the job is completed" : ""}>
+                    Create invoice
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader><CardTitle>Customer tracking</CardTitle></CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <p className="text-muted-foreground">Customer scans the code (or opens the link) to follow this job live.</p>
+              <div className="flex flex-col items-center gap-2 rounded-lg border bg-muted/20 p-3">
+                <TrackQr value={trackUrl} size={150} label={job.reference} />
+                <p className="text-xs text-muted-foreground">Code: <span className="font-mono font-medium">{job.track_short}</span></p>
+              </div>
+              <div className="flex gap-2">
+                <input readOnly value={trackUrl} className="flex-1 truncate rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs" />
+                <Button size="sm" variant="outline" onClick={() => { navigator.clipboard?.writeText(trackUrl); toast.success("Link copied") }}>
+                  <Copy className="size-4" /> Copy
+                </Button>
+              </div>
+              <Button size="sm" variant="outline" className="w-full" onClick={() => downloadQr(trackUrl, job.reference)}>
+                <Download className="size-4" /> Download QR
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}

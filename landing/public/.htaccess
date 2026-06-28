@@ -1,0 +1,12 @@
+# EGO LTD landing — SPA history fallback.
+# Real files/dirs (assets, images, api/, app/) serve as-is; every other path
+# routes to index.html so React Router routes (/services, /resources,
+# /areas/north-london, …) resolve on hard load / refresh instead of 404ing.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>

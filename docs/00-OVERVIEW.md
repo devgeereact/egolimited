@@ -1,13 +1,13 @@
 # EGO LIMITED — Project Overview
 
 Property-maintenance business in London. Three surfaces, one cPanel deploy under
-`public_html/egolimited/` → **soulrefresh.net/egolimited**.
+`egolimited.com/` → **egolimited.com**.
 
 | Surface | Path | What it is | Stack | Dev port |
 |---------|------|-----------|-------|----------|
-| `landing/` | `/egolimited/` | EGO LTD marketing site — lead-gen, SEO, "get a quote" | Vite + React 19 + TS + Tailwind v4 | 5011 |
-| `app/` | `/egolimited/app/` | Field-service PWA for engineers/office — jobs, invoices (PULSE UI) | Vite + React 19 + TS + Tailwind v4 | 5012 |
-| `api/` | `/egolimited/api/` | Backend — token auth, jobs, invoicing | PHP + MySQL (mysqli) | 8011 |
+| `landing/` | `/` | EGO LTD marketing site — lead-gen, SEO, "get a quote" | Vite + React 19 + TS + Tailwind v4 | 5050 |
+| `app/` | `/app/` | Field-service PWA for engineers/office — jobs, invoices (PULSE UI) | Vite + React 19 + TS + Tailwind v4 | 5051 |
+| `api/` | `/api/` | Backend — token auth, jobs, invoicing | PHP + MySQL (mysqli) | 8080 |
 
 ## State (2026-06-28)
 
@@ -33,7 +33,7 @@ get an unguessable tokenised job link (`ego_customer_access`).
 
 ## Deploy
 
-- `npm run deploy:app` → builds + rsyncs `app/dist/` to `…/egolimited/app/`.
-- `npm run deploy:landing` → builds + rsyncs `landing/dist/` to `…/egolimited/`
+- `npm run deploy:app` → builds + rsyncs `app/dist/` to `…/app/`.
+- `npm run deploy:landing` → builds + rsyncs `landing/dist/` to `…/`
   (preserves `app/`, `api/`, `images/`). Review before running — outward-facing.
 - `api/` deploys manually (PHP, no build); `config.php` stays on the server.

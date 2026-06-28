@@ -2,7 +2,7 @@
 /**
  * EGO LIMITED — daily cron (CLI). Generates due recurring jobs and emails
  * reminders for overdue invoices (throttled to once / 6 days). No HTTP/auth —
- * runs as the DB user. Schedule in cPanel:  php /home/.../egolimited/api/cron.php
+ * runs as the DB user. Schedule in cPanel:  php /home/.../egolimited.com/api/cron.php
  */
 declare(strict_types=1);
 $cfg = require __DIR__ . "/config.php";

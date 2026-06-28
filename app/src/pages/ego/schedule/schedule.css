@@ -1,0 +1,64 @@
+/* FullCalendar themed to the EGO design tokens (works in every theme). */
+.fc {
+  --fc-border-color: hsl(var(--border) / 0.7);
+  --fc-page-bg-color: transparent;
+  --fc-neutral-bg-color: hsl(var(--muted) / 0.35);
+  --fc-today-bg-color: hsl(var(--primary) / 0.06);
+  --fc-now-indicator-color: hsl(var(--primary));
+  --fc-event-border-color: transparent;
+  font-size: 0.8rem;
+}
+
+.fc .fc-toolbar.fc-header-toolbar { margin-bottom: 0.85rem; }
+.fc .fc-toolbar-title { font-size: 1rem; font-weight: 600; color: hsl(var(--foreground)); }
+
+.fc .fc-col-header-cell { padding: 8px 0; }
+.fc .fc-col-header-cell-cushion,
+.fc .fc-timegrid-axis-cushion,
+.fc .fc-timegrid-slot-label-cushion {
+  color: hsl(var(--muted-foreground));
+  text-decoration: none;
+  font-weight: 500;
+}
+
+/* Toolbar buttons → match the app's button look */
+.fc .fc-button {
+  background: hsl(var(--muted));
+  border: 1px solid hsl(var(--border));
+  color: hsl(var(--foreground));
+  text-transform: capitalize;
+  box-shadow: none;
+  font-size: 0.78rem;
+  font-weight: 500;
+  padding: 5px 11px;
+  border-radius: 8px;
+}
+.fc .fc-button:hover { background: hsl(var(--muted) / 0.7); }
+.fc .fc-button:focus, .fc .fc-button:focus-visible { box-shadow: none; outline: none; }
+.fc .fc-button-primary:disabled { opacity: 0.5; }
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+  background: hsl(var(--primary));
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary-foreground));
+}
+.fc .fc-button-group > .fc-button { border-radius: 0; }
+.fc .fc-button-group > .fc-button:first-child { border-top-left-radius: 8px; border-bottom-left-radius: 8px; }
+.fc .fc-button-group > .fc-button:last-child { border-top-right-radius: 8px; border-bottom-right-radius: 8px; }
+
+/* Grid */
+.fc-theme-standard td, .fc-theme-standard th { border-color: hsl(var(--border) / 0.6); }
+.fc .fc-scrollgrid { border-radius: 10px; overflow: hidden; border-color: hsl(var(--border) / 0.6); }
+.fc .fc-timegrid-slot { height: 2.5em; }
+.fc .fc-timegrid-now-indicator-line { border-color: hsl(var(--primary)); border-width: 2px; }
+
+/* Events — rounded, soft shadow, clean inner padding */
+.fc .ego-event {
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.28);
+  cursor: pointer;
+}
+.fc .fc-timegrid-event .fc-event-main { padding: 1px 2px; }
+.fc .fc-event:hover { filter: brightness(1.06); }
