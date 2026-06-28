@@ -340,3 +340,25 @@ CREATE TABLE IF NOT EXISTS ego_subcontractors (
   INDEX idx_ego_subc_status (status),
   INDEX idx_ego_subc_ins (insurance_expiry)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- PROCUREMENT (M-B slice 2): parts catalogue + pricebook (cost/sale) + stock level.
+CREATE TABLE IF NOT EXISTS ego_parts (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  sku           VARCHAR(60)  NULL,
+  name          VARCHAR(190) NOT NULL,
+  description   TEXT NULL,
+  category      VARCHAR(80)  NULL,
+  supplier_id   INT NULL,
+  unit          VARCHAR(24) NOT NULL DEFAULT 'each',
+  cost_price    DECIMAL(10,2) NOT NULL DEFAULT 0,
+  sale_price    DECIMAL(10,2) NOT NULL DEFAULT 0,
+  stock_qty     DECIMAL(10,2) NOT NULL DEFAULT 0,
+  reorder_level DECIMAL(10,2) NOT NULL DEFAULT 0,
+  active        TINYINT(1) NOT NULL DEFAULT 1,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at    DATETIME NULL,
+  INDEX idx_ego_parts_name (name),
+  INDEX idx_ego_parts_supplier (supplier_id),
+  CONSTRAINT fk_ego_parts_supplier FOREIGN KEY (supplier_id) REFERENCES ego_suppliers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -1878,6 +1878,72 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
 
+    /* ============================ PROCUREMENT — Parts / pricebook ============================ */
+    case "GET /parts": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $low = ($_GET["low"] ?? "") === "1";
+        $lowSql = $low ? "AND p.stock_qty <= p.reorder_level AND p.reorder_level > 0" : "";
+        $rows = db_all($db,
+            "SELECT p.id,p.sku,p.name,p.category,p.unit,p.cost_price,p.sale_price,p.stock_qty,p.reorder_level,p.active,
+                    p.supplier_id, s.name AS supplier_name
+             FROM ego_parts p LEFT JOIN ego_suppliers s ON s.id = p.supplier_id
+             WHERE p.deleted_at IS NULL $lowSql
+               AND (p.name LIKE ? OR p.sku LIKE ? OR p.category LIKE ?)
+             ORDER BY p.name", "sss", $q, $q, $q);
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"]; $r["active"] = (int)$r["active"];
+            $r["supplier_id"] = $r["supplier_id"] !== null ? (int)$r["supplier_id"] : null;
+            foreach (["cost_price","sale_price","stock_qty","reorder_level"] as $k) $r[$k] = (float)$r[$k];
+        }
+        send(["parts" => $rows]);
+    }
+    case "GET /parts/get": {
+        require_role($db, "admin");
+        $p = db_one($db, "SELECT * FROM ego_parts WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$p) fail("Part not found", 404);
+        $p["id"] = (int)$p["id"]; $p["active"] = (int)$p["active"];
+        $p["supplier_id"] = $p["supplier_id"] !== null ? (int)$p["supplier_id"] : null;
+        send(["part" => $p]);
+    }
+    case "POST /parts": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $supplierId = ($b["supplier_id"] ?? "") !== "" ? (int)$b["supplier_id"] : null;
+        db_exec($db, "INSERT INTO ego_parts (sku,name,description,category,supplier_id,unit,cost_price,sale_price,stock_qty,reorder_level,active) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "ssssisddddi",
+            trim($b["sku"] ?? "") ?: null, $name, trim($b["description"] ?? "") ?: null, trim($b["category"] ?? "") ?: null,
+            $supplierId, trim($b["unit"] ?? "") ?: "each",
+            (float)($b["cost_price"] ?? 0), (float)($b["sale_price"] ?? 0), (float)($b["stock_qty"] ?? 0),
+            (float)($b["reorder_level"] ?? 0), (int)($b["active"] ?? 1));
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "part_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /parts/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_parts WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Part not found", 404);
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $supplierId = ($b["supplier_id"] ?? "") !== "" ? (int)$b["supplier_id"] : null;
+        db_exec($db, "UPDATE ego_parts SET sku=?,name=?,description=?,category=?,supplier_id=?,unit=?,cost_price=?,sale_price=?,stock_qty=?,reorder_level=?,active=? WHERE id=?",
+            "ssssisddddii",
+            trim($b["sku"] ?? "") ?: null, $name, trim($b["description"] ?? "") ?: null, trim($b["category"] ?? "") ?: null,
+            $supplierId, trim($b["unit"] ?? "") ?: "each",
+            (float)($b["cost_price"] ?? 0), (float)($b["sale_price"] ?? 0), (float)($b["stock_qty"] ?? 0),
+            (float)($b["reorder_level"] ?? 0), (int)($b["active"] ?? 1), $id);
+        log_activity($db, null, (int)$actor["id"], "part_updated", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /parts/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_parts SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "part_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
     default:
         fail("Not found: $method $route", 404);
 }

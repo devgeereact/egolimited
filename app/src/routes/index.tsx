@@ -104,6 +104,8 @@ import SuppliersList from "@/pages/ego/procurement/SuppliersList"
 import SupplierForm from "@/pages/ego/procurement/SupplierForm"
 import SubcontractorsList from "@/pages/ego/procurement/SubcontractorsList"
 import SubcontractorForm from "@/pages/ego/procurement/SubcontractorForm"
+import PartsList from "@/pages/ego/procurement/PartsList"
+import PartForm from "@/pages/ego/procurement/PartForm"
 // 🏗️ EGO LIMITED — scaffolded pages (skeletons)
 import JobsList from "@/pages/ego/jobs/JobsList"
 import JobDetail from "@/pages/ego/jobs/JobDetail"
@@ -249,6 +251,9 @@ export const router = createBrowserRouter (
             {path: "ego/subcontractors", element: <SubcontractorsList /> },
             {path: "ego/subcontractors/new", element: <SubcontractorForm /> },
             {path: "ego/subcontractors/edit", element: <SubcontractorForm /> },
+            {path: "ego/parts", element: <PartsList /> },
+            {path: "ego/parts/new", element: <PartForm /> },
+            {path: "ego/parts/edit", element: <PartForm /> },
             {path: "ego/dashboard", element: <EgoDashboard /> },
             {path: "ego/invoices", element: <EgoInvoicesList /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },

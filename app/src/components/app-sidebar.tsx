@@ -19,6 +19,7 @@ import {
   Quote,
   Truck,
   HardHat,
+  Package,
   type LucideIcon,
 } from "lucide-react"
 
@@ -58,6 +59,7 @@ const NAV: EgoSection[] = [
   {
     label: "Procurement",
     items: [
+      { title: "Parts", url: "ego/parts", icon: Package },
       { title: "Suppliers", url: "ego/suppliers", icon: Truck },
       { title: "Subcontractors", url: "ego/subcontractors", icon: HardHat },
     ],
