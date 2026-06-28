@@ -70,7 +70,7 @@ function current_user(mysqli $db): ?array {
     $tok = bearer();
     if (!$tok) return null;
     return db_one($db,
-        "SELECT u.id,u.name,u.email,u.role,u.active,u.phone,u.available
+        "SELECT u.id,u.name,u.email,u.role,u.active,u.phone,u.available,u.must_change_password,u.totp_enabled
          FROM ego_sessions s JOIN ego_users u ON u.id = s.user_id
          WHERE s.token = ? AND s.expires_at > NOW() AND u.active = 1 AND u.deleted_at IS NULL",
         "s", $tok
@@ -221,9 +221,20 @@ switch ("$method $route") {
         if (!$email || !$pass) fail("Email and password required");
         $u = db_one($db, "SELECT * FROM ego_users WHERE email = ? AND active = 1 AND deleted_at IS NULL", "s", $email);
         if (!$u || !$u["password_hash"] || !password_verify($pass, $u["password_hash"])) fail("Invalid email or password", 401);
+        // 2FA gate (only for users who opted in — additive, never locks others out).
+        if ((int)($u["totp_enabled"] ?? 0) === 1) {
+            $code = trim((string)($b["totp_code"] ?? $b["code"] ?? ""));
+            if ($code === "") send(["totp_required" => true]); // 200: client prompts for code, no token issued
+            require_once __DIR__ . "/lib/totp.php";
+            if (!totp_verify((string)($u["totp_secret"] ?? ""), $code)) fail("Invalid 2FA code", 401);
+        }
         $token = bin2hex(random_bytes(32));
         db_exec($db, "INSERT INTO ego_sessions (token,user_id,expires_at) VALUES (?,?, DATE_ADD(NOW(), INTERVAL 30 DAY))", "si", $token, $u["id"]);
-        send(["token" => $token, "user" => ["id" => (int)$u["id"], "name" => $u["name"], "email" => $u["email"], "role" => $u["role"]]]);
+        send(["token" => $token, "user" => [
+            "id" => (int)$u["id"], "name" => $u["name"], "email" => $u["email"], "role" => $u["role"],
+            "must_change_password" => (int)($u["must_change_password"] ?? 0),
+            "totp_enabled" => (int)($u["totp_enabled"] ?? 0),
+        ]]);
     }
 
     case "GET /auth/me": {
@@ -2422,6 +2433,52 @@ switch ("$method $route") {
         $actor = require_role($db, "admin"); $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
         db_exec($db, "UPDATE ego_certificates SET deleted_at=NOW() WHERE id=?", "i", $id);
         log_activity($db, null, (int)$actor["id"], "certificate_deleted", ["id" => $id]); send(["ok" => true]);
+    }
+
+    /* ============================ ACCOUNT SECURITY + TOTP 2FA (M-A) ============================ */
+    case "POST /me/change-password": {
+        $me = require_user($db); $b = body();
+        $cur = (string)($b["current_password"] ?? ""); $new = (string)($b["new_password"] ?? "");
+        if (strlen($new) < 8) fail("New password must be at least 8 characters");
+        $row = db_one($db, "SELECT password_hash FROM ego_users WHERE id=?", "i", (int)$me["id"]);
+        if (!$row || !$row["password_hash"] || !password_verify($cur, $row["password_hash"])) fail("Current password is incorrect", 403);
+        db_exec($db, "UPDATE ego_users SET password_hash=?, must_change_password=0, password_changed_at=NOW() WHERE id=?",
+            "si", password_hash($new, PASSWORD_DEFAULT), (int)$me["id"]);
+        log_activity($db, null, (int)$me["id"], "password_changed", []);
+        send(["ok" => true]);
+    }
+    case "POST /me/totp/setup": {
+        $me = require_user($db);
+        require_once __DIR__ . "/lib/totp.php";
+        $secret = totp_secret();
+        db_exec($db, "UPDATE ego_users SET totp_secret=?, totp_enabled=0 WHERE id=?", "si", $secret, (int)$me["id"]);
+        send(["secret" => $secret, "otpauth" => totp_uri($secret, (string)$me["email"])]);
+    }
+    case "POST /me/totp/enable": {
+        $me = require_user($db);
+        require_once __DIR__ . "/lib/totp.php";
+        $row = db_one($db, "SELECT totp_secret FROM ego_users WHERE id=?", "i", (int)$me["id"]);
+        if (!$row || !$row["totp_secret"]) fail("Run 2FA setup first");
+        if (!totp_verify((string)$row["totp_secret"], trim((string)(body()["code"] ?? "")))) fail("Invalid code — check your authenticator", 400);
+        db_exec($db, "UPDATE ego_users SET totp_enabled=1 WHERE id=?", "i", (int)$me["id"]);
+        log_activity($db, null, (int)$me["id"], "totp_enabled", []);
+        send(["ok" => true]);
+    }
+    case "POST /me/totp/disable": {
+        $me = require_user($db);
+        $row = db_one($db, "SELECT password_hash FROM ego_users WHERE id=?", "i", (int)$me["id"]);
+        if (!$row || !password_verify((string)(body()["password"] ?? ""), $row["password_hash"])) fail("Password incorrect", 403);
+        db_exec($db, "UPDATE ego_users SET totp_enabled=0, totp_secret=NULL WHERE id=?", "i", (int)$me["id"]);
+        log_activity($db, null, (int)$me["id"], "totp_disabled", []);
+        send(["ok" => true]);
+    }
+    // Manager+ can force a staff member to set a new password at next login.
+    case "POST /team/force-password-change": {
+        $actor = require_min($db, "manager");
+        $uid = (int)(body()["id"] ?? 0); if (!$uid) fail("id required");
+        db_exec($db, "UPDATE ego_users SET must_change_password=1 WHERE id=? AND deleted_at IS NULL", "i", $uid);
+        log_activity($db, null, (int)$actor["id"], "force_password_change", ["user_id" => $uid]);
+        send(["ok" => true]);
     }
 
     default:

@@ -27,6 +27,8 @@ import {
   ShieldAlert,
   FileCheck2,
   BadgeCheck,
+  ShieldCheck,
+  Lock,
   type LucideIcon,
 } from "lucide-react"
 
@@ -140,6 +142,13 @@ const NAV: EgoSection[] = [
       { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
       { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
       { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
+    ],
+  },
+  {
+    label: "Account",
+    items: [
+      { title: "Security & 2FA", url: "ego/account/security", icon: ShieldCheck },
+      { title: "Lock screen", url: "ego/lock", icon: Lock },
     ],
   },
 ]

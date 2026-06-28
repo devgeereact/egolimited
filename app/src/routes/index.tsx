@@ -91,6 +91,9 @@ import EgoInvoiceDetail from "@/pages/ego/invoices/InvoiceDetail"
 import EgoPayments from "@/pages/ego/finance/PaymentsPage"
 import EgoContacts from "@/pages/ego/comms/ContactsPage"
 import EgoInbox from "@/pages/ego/comms/InboxPage"
+// 🏗️ EGO LIMITED — account security + lock (M-A)
+import AccountSecurity from "@/pages/ego/account/AccountSecurity"
+import LockScreen from "@/pages/ego/account/LockScreen"
 import EgoActivity from "@/pages/ego/workspace/ActivityPage"
 import EgoReviews from "@/pages/ego/workspace/ReviewsPage"
 import EgoDashboard from "@/pages/ego/dashboard/EgoDashboard"
@@ -346,6 +349,8 @@ export const router = createBrowserRouter (
     { path: "ego/login", element: <EgoLogin /> },
     { path: "ego/invite/:token", element: <InviteAccept /> },
     { path: "track/:token", element: <TrackJob /> },
+    { path: "ego/account/security", element: <AccountSecurity /> },
+    { path: "ego/lock", element: <LockScreen /> },
 
     // 🏗️ EGO LIMITED — engineer PWA (mobile shell, role-guarded)
     {

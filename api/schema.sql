@@ -563,3 +563,9 @@ CREATE TABLE IF NOT EXISTS ego_certificates (
   INDEX idx_ego_cert_expiry (expiry_date),
   CONSTRAINT fk_ego_cert_eng FOREIGN KEY (engineer_id) REFERENCES ego_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- PLATFORM (M-A): account security + TOTP 2FA columns on users.
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS must_change_password TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS password_changed_at DATETIME NULL;
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64) NULL;
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS totp_enabled TINYINT(1) NOT NULL DEFAULT 0;
