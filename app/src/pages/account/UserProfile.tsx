@@ -35,7 +35,7 @@ export default function UserProfile() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-6">
+    <div className="space-y-6">
       {/* Header */}
       <Card className="overflow-hidden">
         <div className="h-24 bg-gradient-to-r from-primary to-primary/50" />

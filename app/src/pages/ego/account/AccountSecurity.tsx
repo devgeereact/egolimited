@@ -80,17 +80,7 @@ export default function AccountSecurity() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 md:p-6">
-      <div className="flex items-center gap-3">
-        <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-          <ShieldCheck className="size-5" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-semibold leading-none tracking-tight">Account security</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Manage your password and two-factor authentication.</p>
-        </div>
-      </div>
-
+    <div className="space-y-6">
       {forced && (
         <Card className="border-destructive/40 bg-destructive/5">
           <CardContent className="flex items-center gap-3 py-4 text-sm">
