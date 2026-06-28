@@ -183,7 +183,7 @@ export function AppSidebar({ onHoverChange, ...props }: AppSidebarProps) {
           </ScrollArea>
         </SidebarContent>
 
-        <SidebarFooter className="border-t h-16 justify-center">
+        <SidebarFooter className="sticky bottom-0 z-10 h-16 justify-center border-t bg-sidebar">
           <NavUser user={{ name: user?.name ?? "Admin", email: user?.email ?? "" }} />
         </SidebarFooter>
 

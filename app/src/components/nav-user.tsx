@@ -17,7 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { ChevronsUpDownIcon, User, ShieldCheck, Settings2, Lock, LogOutIcon } from "lucide-react"
+import { ChevronsUpDownIcon, Globe, User, ShieldCheck, Settings2, Lock, LogOutIcon } from "lucide-react"
 
 import { useAuth } from "@/store/auth.store"
 import { atLeast } from "@/lib/roles"
@@ -43,11 +43,11 @@ export function NavUser({ user }: { user: { name: string; email: string } }) {
           <DropdownMenuTrigger asChild>
             {collapsed ? (
               <button className="flex h-12 w-12 items-center justify-center rounded-xl bg-muted mx-auto">
-                <Avatar className="h-9 w-9 rounded-xl"><AvatarFallback>{initials(user.name)}</AvatarFallback></Avatar>
+                <Avatar className="h-9 w-9 rounded-full"><AvatarFallback>{initials(user.name)}</AvatarFallback></Avatar>
               </button>
             ) : (
               <SidebarMenuButton size="lg" className="bg-muted px-2 data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground">
-                <Avatar className="h-9 w-9 rounded-xl shrink-0"><AvatarFallback>{initials(user.name)}</AvatarFallback></Avatar>
+                <Avatar className="h-9 w-9 rounded-full shrink-0"><AvatarFallback>{initials(user.name)}</AvatarFallback></Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
                   <span className="truncate font-medium">{user.name}</span>
                   <span className="truncate text-xs">{user.email}</span>
@@ -66,6 +66,10 @@ export function NavUser({ user }: { user: { name: string; email: string } }) {
                 </div>
               </div>
             </DropdownMenuLabel>
+            <DropdownMenuItem asChild className="gap-2 h-9">
+              <a href="/"><Globe className="!size-5" /> Visit website</a>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator className="my-2" />
             <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/account/profile")}>
               <User className="!size-5" /> Profile
             </DropdownMenuItem>
