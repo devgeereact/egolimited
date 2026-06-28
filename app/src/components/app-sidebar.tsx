@@ -21,6 +21,7 @@ import {
   HardHat,
   Package,
   ClipboardList,
+  Boxes,
   type LucideIcon,
 } from "lucide-react"
 
@@ -64,6 +65,12 @@ const NAV: EgoSection[] = [
       { title: "Purchase Orders", url: "ego/purchase-orders", icon: ClipboardList },
       { title: "Suppliers", url: "ego/suppliers", icon: Truck },
       { title: "Subcontractors", url: "ego/subcontractors", icon: HardHat },
+    ],
+  },
+  {
+    label: "Assets",
+    items: [
+      { title: "Assets", url: "ego/assets", icon: Boxes },
     ],
   },
   {

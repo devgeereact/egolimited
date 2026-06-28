@@ -408,3 +408,45 @@ CREATE TABLE IF NOT EXISTS ego_po_items (
   CONSTRAINT fk_ego_poitem_po FOREIGN KEY (po_id) REFERENCES ego_purchase_orders(id) ON DELETE CASCADE,
   CONSTRAINT fk_ego_poitem_part FOREIGN KEY (part_id) REFERENCES ego_parts(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- ASSET MANAGEMENT (M-C): asset register + service history per asset.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_assets (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  name              VARCHAR(190) NOT NULL,
+  asset_tag         VARCHAR(60) NULL,
+  customer_id       INT NULL,
+  location          VARCHAR(190) NULL,
+  type              VARCHAR(120) NULL,
+  make              VARCHAR(120) NULL,
+  model             VARCHAR(120) NULL,
+  serial            VARCHAR(120) NULL,
+  status            ENUM('ok','due','fault','retired') NOT NULL DEFAULT 'ok',
+  install_date      DATE NULL,
+  next_service_date DATE NULL,
+  notes             TEXT NULL,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at        DATETIME NULL,
+  INDEX idx_ego_asset_status (status),
+  INDEX idx_ego_asset_next (next_service_date),
+  INDEX idx_ego_asset_customer (customer_id),
+  CONSTRAINT fk_ego_asset_customer FOREIGN KEY (customer_id) REFERENCES ego_customers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_asset_services (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  asset_id     INT NOT NULL,
+  job_id       INT NULL,
+  service_date DATE NOT NULL,
+  engineer_id  INT NULL,
+  outcome      ENUM('ok','repaired','fault') NOT NULL DEFAULT 'ok',
+  notes        VARCHAR(255) NULL,
+  next_due     DATE NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ego_asvc_asset (asset_id),
+  CONSTRAINT fk_ego_asvc_asset FOREIGN KEY (asset_id) REFERENCES ego_assets(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ego_asvc_job FOREIGN KEY (job_id) REFERENCES ego_jobs(id) ON DELETE SET NULL,
+  CONSTRAINT fk_ego_asvc_eng FOREIGN KEY (engineer_id) REFERENCES ego_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -108,6 +108,9 @@ import PartsList from "@/pages/ego/procurement/PartsList"
 import PartForm from "@/pages/ego/procurement/PartForm"
 import PurchaseOrdersList from "@/pages/ego/procurement/PurchaseOrdersList"
 import PurchaseOrderForm from "@/pages/ego/procurement/PurchaseOrderForm"
+// 🏗️ EGO LIMITED — asset management (M-C)
+import AssetsList from "@/pages/ego/assets/AssetsList"
+import AssetForm from "@/pages/ego/assets/AssetForm"
 // 🏗️ EGO LIMITED — scaffolded pages (skeletons)
 import JobsList from "@/pages/ego/jobs/JobsList"
 import JobDetail from "@/pages/ego/jobs/JobDetail"
@@ -259,6 +262,9 @@ export const router = createBrowserRouter (
             {path: "ego/purchase-orders", element: <PurchaseOrdersList /> },
             {path: "ego/purchase-orders/new", element: <PurchaseOrderForm /> },
             {path: "ego/purchase-orders/edit", element: <PurchaseOrderForm /> },
+            {path: "ego/assets", element: <AssetsList /> },
+            {path: "ego/assets/new", element: <AssetForm /> },
+            {path: "ego/assets/edit", element: <AssetForm /> },
             {path: "ego/dashboard", element: <EgoDashboard /> },
             {path: "ego/invoices", element: <EgoInvoicesList /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },

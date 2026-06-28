@@ -2063,6 +2063,89 @@ switch ("$method $route") {
         send(["movements" => $rows]);
     }
 
+    /* ============================ ASSET MANAGEMENT (M-C) ============================ */
+    case "GET /assets": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $due = ($_GET["due"] ?? "") === "1";
+        $dueSql = $due ? "AND a.next_service_date IS NOT NULL AND a.next_service_date <= CURDATE()" : "";
+        $rows = db_all($db,
+            "SELECT a.id,a.name,a.asset_tag,a.type,a.location,a.status,a.next_service_date,
+                    a.customer_id, c.name AS customer_name
+             FROM ego_assets a LEFT JOIN ego_customers c ON c.id = a.customer_id
+             WHERE a.deleted_at IS NULL $dueSql
+               AND (a.name LIKE ? OR a.asset_tag LIKE ? OR a.serial LIKE ? OR a.location LIKE ?)
+             ORDER BY a.name", "ssss", $q, $q, $q, $q);
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["customer_id"]=$r["customer_id"]!==null?(int)$r["customer_id"]:null; }
+        send(["assets" => $rows]);
+    }
+    case "GET /assets/get": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $a = db_one($db, "SELECT * FROM ego_assets WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$a) fail("Asset not found", 404);
+        $a["id"]=(int)$a["id"]; $a["customer_id"]=$a["customer_id"]!==null?(int)$a["customer_id"]:null;
+        $svcs = db_all($db,
+            "SELECT s.id,s.service_date,s.outcome,s.notes,s.next_due,s.job_id,u.name AS engineer
+             FROM ego_asset_services s LEFT JOIN ego_users u ON u.id = s.engineer_id
+             WHERE s.asset_id=? ORDER BY s.service_date DESC, s.id DESC", "i", $id);
+        foreach ($svcs as &$s) { $s["id"]=(int)$s["id"]; }
+        $a["services"] = $svcs;
+        send(["asset" => $a]);
+    }
+    case "POST /assets":
+    case "POST /assets/update": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $customerId = ($b["customer_id"] ?? "") !== "" ? (int)$b["customer_id"] : null;
+        $status = in_array($b["status"] ?? "ok", ["ok","due","fault","retired"], true) ? $b["status"] : "ok";
+        $install = trim($b["install_date"] ?? "") ?: null;
+        $next = trim($b["next_service_date"] ?? "") ?: null;
+        $cols = "name=?,asset_tag=?,customer_id=?,location=?,type=?,make=?,model=?,serial=?,status=?,install_date=?,next_service_date=?,notes=?";
+        $types = "ssisssssssss";
+        $args = [$name, trim($b["asset_tag"] ?? "") ?: null, $customerId, trim($b["location"] ?? "") ?: null,
+                 trim($b["type"] ?? "") ?: null, trim($b["make"] ?? "") ?: null, trim($b["model"] ?? "") ?: null,
+                 trim($b["serial"] ?? "") ?: null, $status, $install, $next, trim($b["notes"] ?? "") ?: null];
+        if ($route === "/assets/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            if (!db_one($db, "SELECT id FROM ego_assets WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Asset not found", 404);
+            db_exec($db, "UPDATE ego_assets SET $cols WHERE id=?", $types . "i", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "asset_updated", ["id" => $id]);
+            send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_assets (name,asset_tag,customer_id,location,type,make,model,serial,status,install_date,next_service_date,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            $types, ...$args);
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "asset_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /assets/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_assets SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "asset_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /assets/service": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $assetId = (int)($b["asset_id"] ?? 0); if (!$assetId) fail("asset_id required");
+        if (!db_one($db, "SELECT id FROM ego_assets WHERE id=? AND deleted_at IS NULL", "i", $assetId)) fail("Asset not found", 404);
+        $date = trim($b["service_date"] ?? "") ?: date("Y-m-d");
+        $outcome = in_array($b["outcome"] ?? "ok", ["ok","repaired","fault"], true) ? $b["outcome"] : "ok";
+        $next = trim($b["next_due"] ?? "") ?: null;
+        $jobId = ($b["job_id"] ?? "") !== "" ? (int)$b["job_id"] : null;
+        db_exec($db, "INSERT INTO ego_asset_services (asset_id,job_id,service_date,engineer_id,outcome,notes,next_due) VALUES (?,?,?,?,?,?,?)",
+            "iisisss", $assetId, $jobId, $date, (int)$actor["id"], $outcome, trim($b["notes"] ?? "") ?: null, $next);
+        // Roll the asset's status + next service forward from the latest service.
+        $newStatus = $outcome === "fault" ? "fault" : "ok";
+        db_exec($db, "UPDATE ego_assets SET status=?, next_service_date=COALESCE(?, next_service_date) WHERE id=?",
+            "ssi", $newStatus, $next, $assetId);
+        log_activity($db, null, (int)$actor["id"], "asset_serviced", ["asset_id" => $assetId, "outcome" => $outcome]);
+        send(["ok" => true], 201);
+    }
+
     default:
         fail("Not found: $method $route", 404);
 }
