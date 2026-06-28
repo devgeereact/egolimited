@@ -92,7 +92,6 @@ import EgoPayments from "@/pages/ego/finance/PaymentsPage"
 import EgoContacts from "@/pages/ego/comms/ContactsPage"
 import EgoInbox from "@/pages/ego/comms/InboxPage"
 // 🏗️ EGO LIMITED — account security + lock (M-A)
-import AccountLayout from "@/layouts/AccountLayout"
 import AccountSecurity from "@/pages/ego/account/AccountSecurity"
 import LockScreen from "@/pages/ego/account/LockScreen"
 import EgoActivity from "@/pages/ego/workspace/ActivityPage"
@@ -301,13 +300,7 @@ export const router = createBrowserRouter (
             {path: "ego/payments", element: <EgoPayments /> },
             {path: "ego/contacts", element: <EgoContacts /> },
             {path: "ego/inbox", element: <EgoInbox /> },
-            {
-              element: <AccountLayout />,
-              children: [
-                {path: "ego/account/profile", element: <UserProfile /> },
-                {path: "ego/account/security", element: <AccountSecurity /> },
-              ],
-            },
+            {path: "ego/account/profile", element: <UserProfile /> },
             {path: "ego/activity", element: <EgoActivity /> },
             {path: "ego/reviews", element: <EgoReviews /> },
           ],
@@ -357,6 +350,7 @@ export const router = createBrowserRouter (
     { path: "ego/login", element: <EgoLogin /> },
     { path: "ego/invite/:token", element: <InviteAccept /> },
     { path: "track/:token", element: <TrackJob /> },
+    { path: "ego/account/security", element: <div className="mx-auto w-full max-w-3xl p-4 md:p-6"><AccountSecurity /></div> },
     { path: "ego/lock", element: <LockScreen /> },
 
     // 🏗️ EGO LIMITED — engineer PWA (mobile shell, role-guarded)

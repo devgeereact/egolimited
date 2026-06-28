@@ -27,7 +27,6 @@ import {
   ShieldAlert,
   FileCheck2,
   BadgeCheck,
-  ShieldCheck,
   UserRound,
   type LucideIcon,
 } from "lucide-react"
@@ -109,9 +108,8 @@ const NAV: EgoSection[] = [
   {
     label: "Account",
     items: [
-      { title: "Security & 2FA", url: "ego/account/security", icon: ShieldCheck },
-      { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
       { title: "Profile", url: "ego/account/profile", icon: UserRound },
+      { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
       { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
       { title: "Activity", url: "ego/activity", icon: GanttChartSquare },
     ],

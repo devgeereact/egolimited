@@ -8,7 +8,9 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import ThemePicker from "@/components/ego/ThemePicker"
+import AccountSecurity from "@/pages/ego/account/AccountSecurity"
 
 type Settings = Record<string, string | number | null>
 
@@ -70,6 +72,13 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      <Tabs defaultValue="company" className="w-full">
+        <TabsList>
+          <TabsTrigger value="company">Company</TabsTrigger>
+          <TabsTrigger value="security">Security &amp; 2FA</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="company" className="mt-6 space-y-6">
       <div className="grid gap-6 lg:grid-cols-2">
         {GROUPS.map((g) => {
           const dirty = groupDirty(g)
@@ -115,6 +124,12 @@ export default function SettingsPage() {
           <ThemePicker />
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="security" className="mt-6">
+          <AccountSecurity />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

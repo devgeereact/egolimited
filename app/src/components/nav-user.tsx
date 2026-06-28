@@ -17,7 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { ChevronsUpDownIcon, User, Settings2, ShieldCheck, Lock, LogOutIcon } from "lucide-react"
+import { ChevronsUpDownIcon, User, Settings2, Lock, LogOutIcon } from "lucide-react"
 
 import { useAuth } from "@/store/auth.store"
 import { atLeast } from "@/lib/roles"
@@ -68,9 +68,6 @@ export function NavUser({ user }: { user: { name: string; email: string } }) {
             </DropdownMenuLabel>
             <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/account/profile")}>
               <User className="!size-5" /> Profile
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/account/security")}>
-              <ShieldCheck className="!size-5" /> Security & 2FA
             </DropdownMenuItem>
             {canSettings && (
               <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/settings")}>
