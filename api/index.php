@@ -150,7 +150,9 @@ function ai_draft(mysqli $db, string $prompt): string {
     $resp = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    if ($code !== 200) throw new RuntimeException("OpenRouter error ($code)");
+    if ($code === 429) throw new RuntimeException("AI is busy right now (rate limit) — try again in a moment.");
+    if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key in Settings → Integrations.");
+    if ($code !== 200) throw new RuntimeException("AI service error ($code) — try again shortly.");
     $j = json_decode($resp, true);
     $text = $j["choices"][0]["message"]["content"] ?? "";
     if ($text === "") throw new RuntimeException("OpenRouter returned no text");
