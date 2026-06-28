@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/*
+ * EGO LTD landing — warm, trustworthy property-maintenance brand.
+ * Charcoal base with a confident amber accent.
+ */
+@theme {
+  --color-ink: #1f1d1b;
+  --color-ink-soft: #4b4742;
+  --color-paper: #faf8f5;
+  --color-paper-raised: #ffffff;
+  --color-line: #e6e0d8;
+
+  --color-brand: #c2410c;
+  --color-brand-strong: #9a3412;
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}

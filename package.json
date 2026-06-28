@@ -1,0 +1,20 @@
+{
+  "name": "egolimited",
+  "private": true,
+  "version": "0.0.0",
+  "description": "EGO LTD — property maintenance landing + field-service PWA + PHP/MySQL API. Deploys to soulrefresh.net/egolimited.",
+  "workspaces": [
+    "landing",
+    "app"
+  ],
+  "scripts": {
+    "dev:landing": "npm -w @egolimited/landing run dev",
+    "dev:app": "npm -w @egolimited/app run dev",
+    "build:landing": "npm -w @egolimited/landing run build",
+    "build:app": "npm -w @egolimited/app run build",
+    "build": "npm run build:landing && npm run build:app",
+    "lint": "npm -w @egolimited/landing run lint && npm -w @egolimited/app run lint",
+    "deploy:landing": "npm run build:landing && rsync -az --exclude app/ --exclude api/ --exclude images/ --exclude assets/ landing/dist/ cpanel:public_html/egolimited/ && rsync -az landing/dist/assets/ cpanel:public_html/egolimited/assets/",
+    "deploy:app": "npm run build:app && rsync -az --delete app/dist/ cpanel:public_html/egolimited/app/"
+  }
+}

@@ -1,0 +1,59 @@
+# ============================================================
+#  SECRETS — never commit these (this is what protects your
+#  API keys and passwords). Add new secret files here.
+# ============================================================
+.env
+.env.*
+!.env.example
+*.local
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+
+# API — server-side only (never commit/deploy from repo)
+api/config.php
+api/uploads/
+api/error_log
+api/.impeccable/
+
+# ============================================================
+#  Dependencies
+# ============================================================
+node_modules/
+.pnp
+.pnp.js
+vendor/
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+
+# ============================================================
+#  Build / output
+# ============================================================
+dist/
+build/
+out/
+.next/
+.nuxt/
+.cache/
+coverage/
+*.log
+
+# ============================================================
+#  OS / editor cruft
+# ============================================================
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# TS incremental build info
+*.tsbuildinfo

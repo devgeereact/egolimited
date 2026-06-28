@@ -1,0 +1,19 @@
+# EGO LIMITED API — route everything to the front controller.
+RewriteEngine On
+
+# Preserve the Authorization header (some CGI/FastCGI setups strip it).
+RewriteCond %{HTTP:Authorization} .
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Never web-serve internals: vendored libs, CLI scripts, config.
+RewriteRule ^(lib/|seed\.php|migrate\.php|cron\.php) - [F,L]
+
+# Send all non-file requests to index.php.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
+
+# Never serve secrets / sql / CLI scripts.
+<FilesMatch "\.(sql|md)$|^config\.php$|^(seed|migrate|cron)\.php$">
+  Require all denied
+</FilesMatch>
