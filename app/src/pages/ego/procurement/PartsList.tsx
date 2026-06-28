@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -46,6 +47,7 @@ export default function PartsList() {
     return () => clearTimeout(t)
   }, [q, lowOnly])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -99,7 +101,7 @@ export default function PartsList() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((p) => (
+                pager.slice.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
                       <Link to={`/ego/parts/edit?id=${p.id}`} className="font-medium hover:underline">{p.name}</Link>
@@ -124,6 +126,7 @@ export default function PartsList() {
               )}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="parts" />
         </CardContent>
       </Card>
     </div>

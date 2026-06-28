@@ -7,6 +7,7 @@ import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -55,6 +56,7 @@ export default function JobsList() {
     })
   }, [all, tab, q])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -109,7 +111,7 @@ export default function JobsList() {
                     No jobs match. <Link to="/ego/jobs/new" className="text-primary hover:underline">Create a job</Link>.
                   </TableCell>
                 </TableRow>
-              ) : rows.map((j) => (
+              ) : pager.slice.map((j) => (
                 <TableRow key={j.id} className="cursor-pointer">
                   <TableCell className="font-mono font-medium">
                     <Link to={`/ego/jobs/detail?id=${j.id}`} className="hover:underline">{j.reference}</Link>
@@ -128,6 +130,7 @@ export default function JobsList() {
               ))}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="jobs" />
         </CardContent>
       </Card>
     </div>

@@ -5,6 +5,7 @@ import { FileText, Loader2 } from "lucide-react"
 import { api } from "@/lib/api"
 import { gbp } from "@/lib/invoicing"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
@@ -32,6 +33,7 @@ export default function InvoicesList() {
     api<{ invoices: Row[] }>(`/invoices?${qs}`).then((r) => setRows(r.invoices)).finally(() => setLoading(false))
   }, [kind, status])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex items-center gap-3">
@@ -76,7 +78,7 @@ export default function InvoicesList() {
                 <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
               ) : rows.length === 0 ? (
                 <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No {kind === "quote" ? "quotes" : "invoices"} here. Raise one from a job.</TableCell></TableRow>
-              ) : rows.map((r) => (
+              ) : pager.slice.map((r) => (
                 <TableRow key={r.id} className="cursor-pointer">
                   <TableCell className="font-mono">
                     <Link to={`/ego/invoices/detail?id=${r.id}`} className="hover:underline">{r.number ?? "Draft"}</Link>
@@ -90,6 +92,7 @@ export default function InvoicesList() {
               ))}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="records" />
         </CardContent>
       </Card>
     </div>

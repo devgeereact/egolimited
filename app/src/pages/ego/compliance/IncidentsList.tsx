@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 interface Row {
@@ -22,6 +23,7 @@ export default function IncidentsList() {
     const t = setTimeout(() => { setLoading(true); api<{ incidents: Row[] }>(`/incidents?q=${encodeURIComponent(q)}`).then((r) => setRows(r.incidents)).finally(() => setLoading(false)) }, 250)
     return () => clearTimeout(t)
   }, [q])
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -42,7 +44,7 @@ export default function IncidentsList() {
         <TableBody>
           {loading ? <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
           : rows.length === 0 ? <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">No incidents logged. <Link to="/ego/incidents/new" className="text-primary hover:underline">Report one</Link>.</TableCell></TableRow>
-          : rows.map((r) => (
+          : pager.slice.map((r) => (
             <TableRow key={r.id}>
               <TableCell className="tabular-nums"><Link to={`/ego/incidents/edit?id=${r.id}`} className="font-medium hover:underline">{r.incident_date || "—"}</Link></TableCell>
               <TableCell className="capitalize text-muted-foreground">{r.type.replace("_", " ")}</TableCell>
@@ -52,7 +54,7 @@ export default function IncidentsList() {
             </TableRow>
           ))}
         </TableBody>
-      </Table></CardContent></Card>
+      </Table><Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="reports" /></CardContent></Card>
     </div>
   )
 }

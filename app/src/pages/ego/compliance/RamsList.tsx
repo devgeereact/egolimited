@@ -5,6 +5,7 @@ import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 interface Row { id: number; title: string; trade: string | null; reference: string | null; review_date: string | null }
@@ -16,6 +17,7 @@ export default function RamsList() {
     const t = setTimeout(() => { setLoading(true); api<{ rams: Row[] }>(`/rams?q=${encodeURIComponent(q)}`).then((r) => setRows(r.rams)).finally(() => setLoading(false)) }, 250)
     return () => clearTimeout(t)
   }, [q])
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -34,7 +36,7 @@ export default function RamsList() {
         <TableBody>
           {loading ? <TableRow><TableCell colSpan={4} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
           : rows.length === 0 ? <TableRow><TableCell colSpan={4} className="py-10 text-center text-muted-foreground">No RAMS yet. <Link to="/ego/rams/new" className="text-primary hover:underline">Create one</Link>.</TableCell></TableRow>
-          : rows.map((r) => (
+          : pager.slice.map((r) => (
             <TableRow key={r.id}>
               <TableCell><Link to={`/ego/rams/edit?id=${r.id}`} className="font-medium hover:underline">{r.title}</Link></TableCell>
               <TableCell className="text-muted-foreground">{r.trade || "—"}</TableCell>
@@ -43,7 +45,7 @@ export default function RamsList() {
             </TableRow>
           ))}
         </TableBody>
-      </Table></CardContent></Card>
+      </Table><Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="documents" /></CardContent></Card>
     </div>
   )
 }

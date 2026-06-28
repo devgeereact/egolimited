@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -43,6 +44,7 @@ export default function ContractsList() {
     return () => clearTimeout(t)
   }, [q])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -85,7 +87,7 @@ export default function ContractsList() {
               ) : rows.length === 0 ? (
                 <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No contracts yet. <Link to="/ego/contracts/new" className="text-primary hover:underline">Create one</Link>.</TableCell></TableRow>
               ) : (
-                rows.map((ct) => (
+                pager.slice.map((ct) => (
                   <TableRow key={ct.id}>
                     <TableCell><Link to={`/ego/contracts/edit?id=${ct.id}`} className="font-medium tabular-nums hover:underline">{ct.reference || `#${ct.id}`}</Link></TableCell>
                     <TableCell>{ct.title}</TableCell>
@@ -99,6 +101,7 @@ export default function ContractsList() {
               )}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="contracts" />
         </CardContent>
       </Card>
     </div>

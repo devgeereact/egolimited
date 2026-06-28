@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 
 interface Row {
@@ -20,6 +21,7 @@ export default function CertificatesList() {
     const t = setTimeout(() => { setLoading(true); api<{ certificates: Row[] }>(`/certificates?q=${encodeURIComponent(q)}`).then((r) => setRows(r.certificates)).finally(() => setLoading(false)) }, 250)
     return () => clearTimeout(t)
   }, [q])
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -40,7 +42,7 @@ export default function CertificatesList() {
         <TableBody>
           {loading ? <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
           : rows.length === 0 ? <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">No certificates yet. <Link to="/ego/certificates/new" className="text-primary hover:underline">Add one</Link>.</TableCell></TableRow>
-          : rows.map((r) => (
+          : pager.slice.map((r) => (
             <TableRow key={r.id}>
               <TableCell><Link to={`/ego/certificates/edit?id=${r.id}`} className="font-medium hover:underline">{r.title}</Link>{r.reference && <div className="text-xs text-muted-foreground tabular-nums">{r.reference}</div>}</TableCell>
               <TableCell className="text-muted-foreground">{r.holder || r.engineer || "—"}</TableCell>
@@ -50,7 +52,7 @@ export default function CertificatesList() {
             </TableRow>
           ))}
         </TableBody>
-      </Table></CardContent></Card>
+      </Table><Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="certificates" /></CardContent></Card>
     </div>
   )
 }

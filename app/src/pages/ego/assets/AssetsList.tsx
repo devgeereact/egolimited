@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -50,6 +51,7 @@ export default function AssetsList() {
     return () => clearTimeout(t)
   }, [q, dueOnly])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -103,7 +105,7 @@ export default function AssetsList() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((a) => (
+                pager.slice.map((a) => (
                   <TableRow key={a.id}>
                     <TableCell>
                       <Link to={`/ego/assets/edit?id=${a.id}`} className="font-medium hover:underline">{a.name}</Link>
@@ -128,6 +130,7 @@ export default function AssetsList() {
               )}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="assets" />
         </CardContent>
       </Card>
     </div>

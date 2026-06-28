@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -47,6 +48,7 @@ export default function PurchaseOrdersList() {
     return () => clearTimeout(t)
   }, [q])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -96,7 +98,7 @@ export default function PurchaseOrdersList() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((po) => (
+                pager.slice.map((po) => (
                   <TableRow key={po.id}>
                     <TableCell>
                       <Link to={`/ego/purchase-orders/edit?id=${po.id}`} className="font-medium tabular-nums hover:underline">
@@ -115,6 +117,7 @@ export default function PurchaseOrdersList() {
               )}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="orders" />
         </CardContent>
       </Card>
     </div>

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
@@ -53,6 +54,7 @@ export default function SubcontractorsList() {
     return () => clearTimeout(t)
   }, [q])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -102,7 +104,7 @@ export default function SubcontractorsList() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((r) => {
+                pager.slice.map((r) => {
                   const lapsed = insuranceLapsed(r.insurance_expiry)
                   return (
                     <TableRow key={r.id}>
@@ -130,6 +132,7 @@ export default function SubcontractorsList() {
               )}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="subcontractors" />
         </CardContent>
       </Card>
     </div>
