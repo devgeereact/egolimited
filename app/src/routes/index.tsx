@@ -90,6 +90,7 @@ import EgoInvoicesList from "@/pages/ego/invoices/InvoicesList"
 import EgoInvoiceDetail from "@/pages/ego/invoices/InvoiceDetail"
 import EgoPayments from "@/pages/ego/finance/PaymentsPage"
 import EgoContacts from "@/pages/ego/comms/ContactsPage"
+import EgoInbox from "@/pages/ego/comms/InboxPage"
 import EgoActivity from "@/pages/ego/workspace/ActivityPage"
 import EgoReviews from "@/pages/ego/workspace/ReviewsPage"
 import EgoDashboard from "@/pages/ego/dashboard/EgoDashboard"
@@ -295,6 +296,7 @@ export const router = createBrowserRouter (
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },
             {path: "ego/payments", element: <EgoPayments /> },
             {path: "ego/contacts", element: <EgoContacts /> },
+            {path: "ego/inbox", element: <EgoInbox /> },
             {path: "ego/activity", element: <EgoActivity /> },
             {path: "ego/reviews", element: <EgoReviews /> },
           ],

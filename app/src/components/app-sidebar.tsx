@@ -97,7 +97,7 @@ const NAV: EgoSection[] = [
   {
     label: "Communication",
     items: [
-      { title: "Email", url: "apps/email", icon: Inbox },
+      { title: "Email", url: "ego/inbox", icon: Inbox },
       { title: "Contacts", url: "ego/contacts", icon: Contact },
     ],
   },
