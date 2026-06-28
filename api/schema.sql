@@ -362,3 +362,49 @@ CREATE TABLE IF NOT EXISTS ego_parts (
   INDEX idx_ego_parts_supplier (supplier_id),
   CONSTRAINT fk_ego_parts_supplier FOREIGN KEY (supplier_id) REFERENCES ego_suppliers(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- PROCUREMENT (M-B slice 3): stock movements ledger + purchase orders (header + items).
+CREATE TABLE IF NOT EXISTS ego_stock_movements (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  part_id    INT NOT NULL,
+  qty_delta  DECIMAL(10,2) NOT NULL,
+  reason     VARCHAR(40) NOT NULL DEFAULT 'adjustment',
+  reference  VARCHAR(60) NULL,
+  note       VARCHAR(255) NULL,
+  actor_id   INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ego_stock_part (part_id),
+  CONSTRAINT fk_ego_stock_part FOREIGN KEY (part_id) REFERENCES ego_parts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_purchase_orders (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  reference     VARCHAR(24) NULL UNIQUE,
+  supplier_id   INT NOT NULL,
+  status        ENUM('draft','ordered','received','cancelled') NOT NULL DEFAULT 'draft',
+  order_date    DATE NULL,
+  expected_date DATE NULL,
+  received_date DATE NULL,
+  notes         TEXT NULL,
+  subtotal      DECIMAL(10,2) NOT NULL DEFAULT 0,
+  total         DECIMAL(10,2) NOT NULL DEFAULT 0,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at    DATETIME NULL,
+  INDEX idx_ego_po_supplier (supplier_id),
+  INDEX idx_ego_po_status (status),
+  CONSTRAINT fk_ego_po_supplier FOREIGN KEY (supplier_id) REFERENCES ego_suppliers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_po_items (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  po_id       INT NOT NULL,
+  part_id     INT NULL,
+  description VARCHAR(255) NOT NULL,
+  qty         DECIMAL(10,2) NOT NULL DEFAULT 1,
+  unit_cost   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  line_total  DECIMAL(10,2) NOT NULL DEFAULT 0,
+  sort        INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_ego_poitem_po FOREIGN KEY (po_id) REFERENCES ego_purchase_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ego_poitem_part FOREIGN KEY (part_id) REFERENCES ego_parts(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
