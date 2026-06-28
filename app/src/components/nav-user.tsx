@@ -17,7 +17,7 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { ChevronsUpDownIcon, User, Settings2, LogOutIcon } from "lucide-react"
+import { ChevronsUpDownIcon, User, Settings2, ShieldCheck, Lock, LogOutIcon } from "lucide-react"
 
 import { useAuth } from "@/store/auth.store"
 import { atLeast } from "@/lib/roles"
@@ -66,14 +66,20 @@ export function NavUser({ user }: { user: { name: string; email: string } }) {
                 </div>
               </div>
             </DropdownMenuLabel>
-            <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/account/profile")}>
+            <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/account/profile")}>
               <User className="!size-5" /> Profile
+            </DropdownMenuItem>
+            <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/account/security")}>
+              <ShieldCheck className="!size-5" /> Security & 2FA
             </DropdownMenuItem>
             {canSettings && (
               <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/settings")}>
                 <Settings2 className="!size-5" /> Settings
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem className="gap-2 h-9" onClick={() => navigate("/ego/lock")}>
+              <Lock className="!size-5" /> Lock screen
+            </DropdownMenuItem>
             <DropdownMenuSeparator className="my-2" />
             <DropdownMenuItem className="gap-2 h-9 text-destructive focus:text-destructive" onClick={onLogout}>
               <LogOutIcon className="!size-5" /> Log out

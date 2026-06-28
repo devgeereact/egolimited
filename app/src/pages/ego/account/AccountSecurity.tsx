@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { ShieldCheck, KeyRound, Smartphone, Loader2, Copy, Check, AlertTriangle } from "lucide-react"
+import {
+  ShieldCheck, KeyRound, Smartphone, Loader2, Copy, Check, AlertTriangle, ShieldAlert,
+} from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { useAuth } from "@/store/auth.store"
@@ -8,20 +10,19 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Separator } from "@/components/ui/separator"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function AccountSecurity() {
   const [params] = useSearchParams()
   const forced = params.get("force") === "1"
   const { loadMe } = useAuth()
 
-  // change password
   const [cur, setCur] = useState("")
   const [nw, setNw] = useState("")
   const [confirm, setConfirm] = useState("")
   const [savingPw, setSavingPw] = useState(false)
 
-  // 2fa
   const [enabled, setEnabled] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [secret, setSecret] = useState<string | null>(null)
@@ -38,12 +39,12 @@ export default function AccountSecurity() {
   }, [])
 
   async function changePassword() {
-    if (nw.length < 8) { toast.error("New password must be at least 8 characters"); return }
-    if (nw !== confirm) { toast.error("Passwords don't match"); return }
+    if (nw.length < 8) return toast.error("New password must be at least 8 characters")
+    if (nw !== confirm) return toast.error("Passwords don't match")
     setSavingPw(true)
     try {
       await api("/me/change-password", { method: "POST", body: { current_password: cur, new_password: nw } })
-      toast.success("Password changed")
+      toast.success("Password updated")
       setCur(""); setNw(""); setConfirm("")
       await loadMe()
       if (forced) window.location.href = `${import.meta.env.BASE_URL}ego/dashboard`
@@ -79,66 +80,102 @@ export default function AccountSecurity() {
   }
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex items-center gap-3">
-        <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><ShieldCheck className="size-5" /></div>
+        <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <ShieldCheck className="size-5" />
+        </div>
         <div>
           <h1 className="text-2xl font-semibold leading-none tracking-tight">Account security</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Password &amp; two-factor authentication</p>
+          <p className="mt-1 text-sm text-muted-foreground">Manage your password and two-factor authentication.</p>
         </div>
       </div>
 
       {forced && (
-        <Card className="max-w-xl border-warning/40 bg-warning-soft/40">
+        <Card className="border-destructive/40 bg-destructive/5">
           <CardContent className="flex items-center gap-3 py-4 text-sm">
-            <AlertTriangle className="size-5 shrink-0 text-warning" />
+            <AlertTriangle className="size-5 shrink-0 text-destructive" />
             <span>An administrator requires you to set a new password before continuing.</span>
           </CardContent>
         </Card>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid items-start gap-6 lg:grid-cols-2">
+        {/* Password */}
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><KeyRound className="size-4" /> Change password</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><KeyRound className="size-4 text-muted-foreground" /> Password</CardTitle>
+            <CardDescription>Use at least 8 characters. You'll stay signed in on this device.</CardDescription>
+          </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-1.5"><Label>Current password</Label><Input type="password" value={cur} onChange={(e) => setCur(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>New password</Label><Input type="password" value={nw} onChange={(e) => setNw(e.target.value)} /></div>
-            <div className="space-y-1.5"><Label>Confirm new password</Label><Input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></div>
-            <Button onClick={changePassword} disabled={savingPw || !cur || !nw}>{savingPw && <Loader2 className="animate-spin" />} Update password</Button>
+            <div className="space-y-1.5"><Label htmlFor="cur">Current password</Label>
+              <Input id="cur" type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label htmlFor="nw">New password</Label>
+              <Input id="nw" type="password" autoComplete="new-password" value={nw} onChange={(e) => setNw(e.target.value)} /></div>
+            <div className="space-y-1.5"><Label htmlFor="cf">Confirm new password</Label>
+              <Input id="cf" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></div>
+            <Button onClick={changePassword} disabled={savingPw || !cur || !nw || !confirm}>
+              {savingPw && <Loader2 className="animate-spin" />} Update password
+            </Button>
           </CardContent>
         </Card>
 
+        {/* 2FA */}
         <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2"><Smartphone className="size-4" /> Two-factor authentication
-            {loaded && <Badge variant={enabled ? "default" : "secondary"} className="ml-1">{enabled ? "On" : "Off"}</Badge>}
-          </CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Smartphone className="size-4 text-muted-foreground" /> Two-factor authentication
+              {loaded && <Badge variant={enabled ? "default" : "secondary"} className="ml-1">{enabled ? "On" : "Off"}</Badge>}
+            </CardTitle>
+            <CardDescription>Add a 6-digit code from an authenticator app on top of your password.</CardDescription>
+          </CardHeader>
           <CardContent className="space-y-4">
-            {!loaded ? <Loader2 className="size-5 animate-spin" />
-              : enabled ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">2FA is active. You'll enter a 6-digit code from your authenticator app at login.</p>
-                  <div className="space-y-1.5"><Label>Password to disable</Label><Input type="password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} /></div>
-                  <Button variant="outline" className="text-destructive" onClick={disable} disabled={busy || !disablePw}>{busy && <Loader2 className="animate-spin" />} Disable 2FA</Button>
+            {!loaded ? (
+              <div className="flex justify-center py-6"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+            ) : enabled ? (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3 text-sm">
+                  <ShieldCheck className="mt-0.5 size-4 shrink-0 text-primary" />
+                  <span className="text-muted-foreground">2FA is active. You'll be asked for a code from your authenticator app each time you sign in.</span>
                 </div>
-              ) : secret ? (
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">Add this key to Google Authenticator / 1Password, then enter the 6-digit code to confirm.</p>
-                  <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-3">
-                    <code className="flex-1 break-all text-sm tabular-nums">{secret}</code>
-                    <Button variant="ghost" size="icon" className="size-8" onClick={() => { navigator.clipboard?.writeText(secret); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
-                      {copied ? <Check className="size-4 text-success" /> : <Copy className="size-4" />}
-                    </Button>
-                  </div>
-                  {otpauth && <a href={otpauth} className="text-xs text-primary hover:underline">Open in authenticator app</a>}
-                  <div className="space-y-1.5"><Label>6-digit code</Label><Input inputMode="numeric" maxLength={6} value={code} onChange={(e) => setCode(e.target.value)} placeholder="123456" /></div>
+                <Separator />
+                <div className="space-y-1.5"><Label htmlFor="dpw">Confirm password to disable</Label>
+                  <Input id="dpw" type="password" value={disablePw} onChange={(e) => setDisablePw(e.target.value)} /></div>
+                <Button variant="outline" className="text-destructive hover:text-destructive" onClick={disable} disabled={busy || !disablePw}>
+                  {busy && <Loader2 className="animate-spin" />} <ShieldAlert /> Disable 2FA
+                </Button>
+              </div>
+            ) : secret ? (
+              <div className="space-y-4">
+                <ol className="list-decimal space-y-1 pl-4 text-sm text-muted-foreground">
+                  <li>Open your authenticator app (Google Authenticator, 1Password, Authy).</li>
+                  <li>Add a new account and enter this setup key:</li>
+                </ol>
+                <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-3">
+                  <code className="flex-1 break-all font-mono text-sm tracking-wider">{secret}</code>
+                  <Button variant="ghost" size="icon" className="size-8"
+                    onClick={() => { navigator.clipboard?.writeText(secret); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
+                    {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
+                  </Button>
+                </div>
+                {otpauth && <a href={otpauth} className="inline-block text-xs font-medium text-primary hover:underline">Open in authenticator app →</a>}
+                <Separator />
+                <div className="space-y-1.5"><Label htmlFor="code">Enter the 6-digit code to confirm</Label>
+                  <Input id="code" inputMode="numeric" maxLength={6} value={code} placeholder="123 456"
+                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))} className="max-w-40 font-mono tracking-[0.3em]" /></div>
+                <div className="flex gap-2">
                   <Button onClick={enable} disabled={busy || code.length !== 6}>{busy && <Loader2 className="animate-spin" />} Verify &amp; enable</Button>
+                  <Button variant="ghost" onClick={() => { setSecret(null); setOtpauth(null); setCode("") }}>Cancel</Button>
                 </div>
-              ) : (
-                <div className="space-y-3">
-                  <p className="text-sm text-muted-foreground">Protect your account with a time-based one-time code in addition to your password.</p>
-                  <Button onClick={startSetup} disabled={busy}>{busy && <Loader2 className="animate-spin" />} Set up 2FA</Button>
-                </div>
-              )}
+              </div>
+            ) : (
+              <div className="flex items-start gap-3">
+                <p className="flex-1 text-sm text-muted-foreground">
+                  Your account is protected by your password only. Turn on 2FA for an extra layer of security.
+                </p>
+                <Button onClick={startSetup} disabled={busy}>{busy && <Loader2 className="animate-spin" />} Set up 2FA</Button>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

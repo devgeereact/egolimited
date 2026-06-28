@@ -28,7 +28,7 @@ import {
   FileCheck2,
   BadgeCheck,
   ShieldCheck,
-  Lock,
+  UserRound,
   type LucideIcon,
 } from "lucide-react"
 
@@ -97,17 +97,23 @@ const NAV: EgoSection[] = [
     ],
   },
   {
-    label: "Communication",
+    label: "Workspace",
     items: [
+      { title: "Team", url: "ego/team", icon: UsersRound, min: "manager" },
+      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
+      { title: "Reviews", url: "ego/reviews", icon: Quote },
       { title: "Email", url: "ego/inbox", icon: Inbox },
       { title: "Contacts", url: "ego/contacts", icon: Contact },
     ],
   },
   {
-    label: "Workspace",
+    label: "Account",
     items: [
+      { title: "Security & 2FA", url: "ego/account/security", icon: ShieldCheck },
+      { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
+      { title: "Profile", url: "ego/account/profile", icon: UserRound },
+      { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
       { title: "Activity", url: "ego/activity", icon: GanttChartSquare },
-      { title: "Reviews", url: "ego/reviews", icon: Quote },
     ],
   },
   {
@@ -133,22 +139,6 @@ const NAV: EgoSection[] = [
           { title: "Contact", url: "ego/portal/contact" },
         ],
       },
-    ],
-  },
-  {
-    label: "Administration",
-    items: [
-      { title: "Team", url: "ego/team", icon: UsersRound, min: "manager" },
-      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
-      { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
-      { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
-    ],
-  },
-  {
-    label: "Account",
-    items: [
-      { title: "Security & 2FA", url: "ego/account/security", icon: ShieldCheck },
-      { title: "Lock screen", url: "ego/lock", icon: Lock },
     ],
   },
 ]
