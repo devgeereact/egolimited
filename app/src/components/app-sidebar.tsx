@@ -27,7 +27,6 @@ import {
   ShieldAlert,
   FileCheck2,
   BadgeCheck,
-  UserRound,
   type LucideIcon,
 } from "lucide-react"
 
@@ -65,6 +64,23 @@ const NAV: EgoSection[] = [
     ],
   },
   {
+    label: "Finance",
+    items: [
+      { title: "Invoices", url: "ego/invoices", icon: FileText },
+      { title: "Payments", url: "ego/payments", icon: CreditCard },
+    ],
+  },
+  {
+    label: "Workspace",
+    items: [
+      { title: "Email", url: "ego/inbox", icon: Inbox },
+      { title: "Contacts", url: "ego/contacts", icon: Contact },
+      { title: "Reviews", url: "ego/reviews", icon: Quote },
+      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
+      { title: "Team", url: "ego/team", icon: UsersRound, min: "manager" },
+    ],
+  },
+  {
     label: "Procurement",
     items: [
       { title: "Parts", url: "ego/parts", icon: Package },
@@ -74,7 +90,7 @@ const NAV: EgoSection[] = [
     ],
   },
   {
-    label: "Assets",
+    label: "Assets & Contracts",
     items: [
       { title: "Assets", url: "ego/assets", icon: Boxes },
       { title: "Contracts & PPM", url: "ego/contracts", icon: FileSignature },
@@ -89,29 +105,11 @@ const NAV: EgoSection[] = [
     ],
   },
   {
-    label: "Finance",
+    label: "Admin",
     items: [
-      { title: "Invoices", url: "ego/invoices", icon: FileText },
-      { title: "Payments", url: "ego/payments", icon: CreditCard },
-    ],
-  },
-  {
-    label: "Workspace",
-    items: [
-      { title: "Team", url: "ego/team", icon: UsersRound, min: "manager" },
-      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
-      { title: "Reviews", url: "ego/reviews", icon: Quote },
-      { title: "Email", url: "ego/inbox", icon: Inbox },
-      { title: "Contacts", url: "ego/contacts", icon: Contact },
-    ],
-  },
-  {
-    label: "Account",
-    items: [
-      { title: "Profile", url: "ego/account/profile", icon: UserRound },
+      { title: "Activity", url: "ego/activity", icon: GanttChartSquare },
       { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
       { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
-      { title: "Activity", url: "ego/activity", icon: GanttChartSquare },
     ],
   },
   {
