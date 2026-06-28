@@ -206,38 +206,40 @@ export default function InboxPage() {
 
       {/* Reading modal */}
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden">
+        <DialogContent className="flex h-[88vh] max-h-[88vh] w-[95vw] max-w-4xl flex-col overflow-hidden p-0">
           {!msg ? (
-            <div className="flex h-40 items-center justify-center"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+            <div className="flex flex-1 items-center justify-center"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
           ) : (
             <>
-              <DialogHeader>
-                <DialogTitle className="pr-6">{msg.subject || "(no subject)"}</DialogTitle>
-              </DialogHeader>
-              <div className="flex items-center gap-3 border-b pb-3">
-                <Avatar className="size-9"><AvatarFallback className="text-xs">
-                  {initials(msg.direction === "inbound" ? (msg.from_name || msg.from_email || "?") : (msg.to_email || "?"))}
-                </AvatarFallback></Avatar>
-                <div className="min-w-0 text-sm">
-                  <p className="font-medium">{msg.direction === "inbound" ? (msg.from_name || msg.from_email) : `To: ${msg.to_email}`}</p>
-                  <p className="text-xs text-muted-foreground">{msg.created_at}{msg.customer_name ? ` · ${msg.customer_name}` : ""}{msg.job_reference ? ` · ${msg.job_reference}` : ""}</p>
+              <DialogHeader className="shrink-0 border-b p-5 pb-4">
+                <DialogTitle className="pr-8 text-lg leading-snug">{msg.subject || "(no subject)"}</DialogTitle>
+                <div className="mt-2 flex items-center gap-3">
+                  <Avatar className="size-9"><AvatarFallback className="text-xs">
+                    {initials(msg.direction === "inbound" ? (msg.from_name || msg.from_email || "?") : (msg.to_email || "?"))}
+                  </AvatarFallback></Avatar>
+                  <div className="min-w-0 text-left text-sm">
+                    <p className="font-medium">{msg.direction === "inbound" ? (msg.from_name || msg.from_email) : `To: ${msg.to_email}`}</p>
+                    <p className="text-xs text-muted-foreground">{msg.created_at}{msg.customer_name ? ` · ${msg.customer_name}` : ""}{msg.job_reference ? ` · ${msg.job_reference}` : ""}</p>
+                  </div>
+                  {!!msg.acknowledged && <Badge variant="outline" className="ml-auto"><Check className="size-3" /> Read</Badge>}
                 </div>
-                {!!msg.acknowledged && <Badge variant="outline" className="ml-auto"><Check className="size-3" /> Read</Badge>}
-              </div>
-              <div className="max-h-[40vh] overflow-y-auto text-sm leading-relaxed">
+              </DialogHeader>
+
+              <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm leading-relaxed">
                 {msg.body_html
                   ? <div className="prose prose-sm max-w-none [&_a]:text-primary" dangerouslySetInnerHTML={{ __html: msg.body_html }} />
                   : <p className="whitespace-pre-wrap">{msg.body || "(empty)"}</p>}
               </div>
+
               {msg.direction === "inbound" && (
-                <DialogFooter className="flex-col gap-2 sm:flex-col">
-                  <Textarea rows={3} placeholder="Write a reply…" value={reply} onChange={(e) => setReply(e.target.value)} />
+                <div className="shrink-0 space-y-2 border-t p-4">
+                  <Textarea rows={2} placeholder="Write a reply…" value={reply} onChange={(e) => setReply(e.target.value)} />
                   <div className="flex justify-end">
                     <Button size="sm" onClick={sendReply} disabled={sendingReply || !reply.trim()}>
                       {sendingReply ? <Loader2 className="animate-spin" /> : <Reply />} Send reply
                     </Button>
                   </div>
-                </DialogFooter>
+                </div>
               )}
             </>
           )}

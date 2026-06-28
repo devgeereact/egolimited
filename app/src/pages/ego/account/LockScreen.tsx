@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Navigate, useNavigate } from "react-router-dom"
 import { Lock, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -8,14 +8,21 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 
 export default function LockScreen() {
-  const { user, login, logout } = useAuth()
+  const { user, status, login, logout, loadMe } = useAuth()
   const navigate = useNavigate()
   const [password, setPassword] = useState("")
   const [code, setCode] = useState("")
   const [needCode, setNeedCode] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  if (!user) return <Navigate to="/ego/login" replace />
+  // On a hard refresh the token is in storage but the user isn't loaded yet —
+  // hydrate it so the lock screen stays locked instead of bouncing to login.
+  useEffect(() => { if (status === "loading") void loadMe() }, [status, loadMe])
+
+  if (status === "loading") {
+    return <div className="flex min-h-screen items-center justify-center bg-background"><Loader2 className="size-5 animate-spin text-muted-foreground" /></div>
+  }
+  if (status === "anon" || !user) return <Navigate to="/ego/login" replace />
 
   async function unlock(e: React.FormEvent) {
     e.preventDefault()
