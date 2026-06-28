@@ -1,79 +1,63 @@
-// Public-site photography. To avoid shipping/binary-managing dozens of photos,
-// every image is generated on the fly from a text prompt via Pollinations
-// (no API key, no upload). Swap any prompt here to re-skin the whole site.
-const POLLINATIONS = "https://image.pollinations.ai/prompt"
-const STYLE =
-  "professional editorial photograph, UK property maintenance, natural daylight, " +
-  "realistic, high detail, warm tones, no text, no watermark"
-
-function photo(prompt: string, w = 1600, h = 1000, seed = 7): string {
-  return `${POLLINATIONS}/${encodeURIComponent(`${prompt}. ${STYLE}`)}?width=${w}&height=${h}&nologo=true&seed=${seed}`
-}
+// Central manifest for the public-site photography. Files live in
+// public/site/** and are served from the web root (e.g. "/site/hero/hero-main.jpg").
+// Curated, licence-free photography (Unsplash) chosen to fit EGO's trades and
+// property work. Swap any path here to re-skin the whole site in one place.
 
 export const img = {
   hero: {
-    main: photo("a skilled tradesperson in workwear fixing a timber door in a London home", 1920, 1080, 11),
-    site: photo("a tidy van and tool rack for a property maintenance company", 1600, 1000, 12),
+    main: "/site/hero/hero-main.jpg", // tradesperson working timber
+    site: "/site/hero/hero-site.jpg", // tool rack / trades
   },
+  // Per-page banner backgrounds (darkened behind the page title).
   banner: {
-    about: photo("a friendly maintenance engineer talking to a homeowner at the doorstep", 1600, 900, 21),
-    services: photo("hands using tools on a home repair, close up", 1600, 900, 22),
-    sectors: photo("a London terraced street with residential and commercial property", 1600, 900, 23),
-    contact: photo("a maintenance engineer on the phone outside a London property", 1600, 900, 24),
-    resources: photo("a desk with property maintenance plans and a coffee", 1600, 900, 25),
-    trust: photo("a clipboard, insurance certificate and tools on a workbench", 1600, 900, 26),
+    about: "/site/banner/about.jpg",
+    services: "/site/banner/services.jpg",
+    sectors: "/site/banner/sectors.jpg",
+    contact: "/site/banner/contact.jpg",
+    resources: "/site/banner/resources.jpg",
+    trust: "/site/banner/trust.jpg",
   },
   about: {
-    primary: photo("a maintenance engineer carefully repairing a window frame, tall portrait", 900, 1200, 31),
-    inset: photo("a handshake between a contractor and a happy customer", 800, 800, 32),
+    primary: "/site/misc/about-1.jpg", // handyman at work (tall)
+    inset: "/site/misc/about-2.jpg", // handshake (square)
   },
-  cta: photo("a tradesperson tidying up after finishing a job", 1600, 900, 41),
+  cta: "/site/misc/cta.jpg",
   team: [
-    photo("portrait of a friendly UK tradesperson in workwear", 800, 1000, 51),
-    photo("portrait of a maintenance coordinator on the phone", 800, 1000, 52),
-    photo("portrait of a planned maintenance manager with a clipboard", 800, 1000, 53),
-    photo("portrait of an accounts person at a desk", 800, 1000, 54),
+    "/site/team/1.jpg",
+    "/site/team/2.jpg",
+    "/site/team/3.jpg",
+    "/site/team/4.jpg",
   ],
-  people: [
-    photo("a UK homeowner smiling at home", 800, 800, 61),
-    photo("a landlord outside a rental property", 800, 800, 62),
-    photo("a facilities manager in an office building", 800, 800, 63),
-  ],
+  people: ["/site/people/1.jpg", "/site/people/2.jpg", "/site/people/3.jpg"],
 } as const
 
-const tradePrompt: Record<string, string> = {
-  "carpentry-joinery": "carpenter fitting a wooden door and shelving in a home",
-  "painting-decorating": "decorator painting an interior wall with a roller, tidy",
-  "minor-plumbing": "plumber fixing a kitchen tap under a sink",
-  "walls-tiling": "tiler re-grouting bathroom wall tiles, clean lines",
-  "exterior-grounds": "worker clearing gutters and tidying a garden exterior",
-  "mounting-fitting": "handyman mounting a TV bracket level on a wall",
-  "property-turnarounds": "clean empty rental flat ready for new tenants",
-  "planned-maintenance": "engineer inspecting a property with a checklist",
+// Service slug -> hero/card image.
+export const serviceImage: Record<string, string> = {
+  "carpentry-joinery": "/site/trades/carpentry.jpg",
+  "painting-decorating": "/site/trades/painting.jpg",
+  "minor-plumbing": "/site/trades/plumbing.jpg",
+  "walls-tiling": "/site/trades/tiling.jpg",
+  "exterior-grounds": "/site/trades/exterior.jpg",
+  "mounting-fitting": "/site/trades/mounting.jpg",
+  "property-turnarounds": "/site/trades/turnaround.jpg",
+  "planned-maintenance": "/site/trades/planned.jpg",
 }
-export const serviceImage: Record<string, string> = Object.fromEntries(
-  Object.entries(tradePrompt).map(([slug, p], i) => [slug, photo(p, 1200, 800, 100 + i)]),
-)
 
-const articlePrompt: Record<string, string> = {
-  "winter-checklist-for-landlords": "frosty British house exterior in winter, gutters and roof",
-  "planned-vs-reactive-maintenance": "maintenance schedule and tools on a workbench",
-  "what-to-expect-from-a-good-contractor": "a contractor shaking hands with a homeowner",
+// Article slug -> hero image (articles carry no image of their own).
+export const articleImage: Record<string, string> = {
+  "winter-checklist-for-landlords": "/site/trades/exterior.jpg",
+  "planned-vs-reactive-maintenance": "/site/trades/planned.jpg",
+  "what-to-expect-from-a-good-contractor": "/site/misc/about-2.jpg",
 }
-export const articleImage: Record<string, string> = Object.fromEntries(
-  Object.entries(articlePrompt).map(([slug, p], i) => [slug, photo(p, 1600, 900, 200 + i)]),
-)
-export const fallbackArticleImage = photo("UK property maintenance guide", 1600, 900, 250)
+export const fallbackArticleImage = "/site/banner/resources.jpg"
 export function articleImageFor(slug: string): string {
   return articleImage[slug] ?? fallbackArticleImage
 }
 
-const sectorPrompt: Record<string, string> = {
-  Homeowners: "a comfortable London family home interior",
-  Landlords: "a smart London rental property exterior",
-  "Letting & managing agents": "a row of managed London apartments",
-  "Commercial & facilities": "a modern commercial office building exterior",
+// Sector name -> image.
+export const sectorImage: Record<string, string> = {
+  Homeowners: "/site/sectors/homeowners.jpg",
+  Landlords: "/site/sectors/landlords.jpg",
+  "Letting & managing agents": "/site/sectors/agents.jpg",
+  "Commercial & facilities": "/site/sectors/commercial.jpg",
 }
-export const sectorImage: Record<string, string> = Object.fromEntries(
-  Object.entries(sectorPrompt).map(([name, p], i) => [name, photo(p, 1200, 800, 300 + i)]),
-)

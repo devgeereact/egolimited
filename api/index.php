@@ -1758,6 +1758,126 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
 
+    /* ============================ PROCUREMENT — Suppliers ============================ */
+    case "GET /suppliers": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db,
+            "SELECT id,name,contact,phone,email,account_ref,category,active
+             FROM ego_suppliers WHERE deleted_at IS NULL
+               AND (name LIKE ? OR contact LIKE ? OR email LIKE ? OR category LIKE ?)
+             ORDER BY name", "ssss", $q, $q, $q, $q);
+        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["active"] = (int)$r["active"]; }
+        send(["suppliers" => $rows]);
+    }
+    case "GET /suppliers/get": {
+        require_role($db, "admin");
+        $s = db_one($db, "SELECT * FROM ego_suppliers WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$s) fail("Supplier not found", 404);
+        $s["id"] = (int)$s["id"]; $s["active"] = (int)$s["active"];
+        send(["supplier" => $s]);
+    }
+    case "POST /suppliers": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        db_exec($db, "INSERT INTO ego_suppliers (name,contact,phone,email,account_ref,category,address,notes,active) VALUES (?,?,?,?,?,?,?,?,?)",
+            "ssssssssi", $name, trim($b["contact"] ?? "") ?: null, trim($b["phone"] ?? "") ?: null, $email,
+            trim($b["account_ref"] ?? "") ?: null, trim($b["category"] ?? "") ?: null, trim($b["address"] ?? "") ?: null,
+            trim($b["notes"] ?? "") ?: null, (int)($b["active"] ?? 1));
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "supplier_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /suppliers/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_suppliers WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Supplier not found", 404);
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        db_exec($db, "UPDATE ego_suppliers SET name=?,contact=?,phone=?,email=?,account_ref=?,category=?,address=?,notes=?,active=? WHERE id=?",
+            "ssssssssii", $name, trim($b["contact"] ?? "") ?: null, trim($b["phone"] ?? "") ?: null, $email,
+            trim($b["account_ref"] ?? "") ?: null, trim($b["category"] ?? "") ?: null, trim($b["address"] ?? "") ?: null,
+            trim($b["notes"] ?? "") ?: null, (int)($b["active"] ?? 1), $id);
+        log_activity($db, null, (int)$actor["id"], "supplier_updated", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /suppliers/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_suppliers SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "supplier_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
+    /* ========================== PROCUREMENT — Subcontractors ========================== */
+    case "GET /subcontractors": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db,
+            "SELECT id,name,company,trades,coverage_areas,phone,email,insurance_expiry,day_rate,rating,status
+             FROM ego_subcontractors WHERE deleted_at IS NULL
+               AND (name LIKE ? OR company LIKE ? OR trades LIKE ? OR coverage_areas LIKE ?)
+             ORDER BY name", "ssss", $q, $q, $q, $q);
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"];
+            $r["rating"] = $r["rating"] !== null ? (int)$r["rating"] : null;
+            $r["day_rate"] = $r["day_rate"] !== null ? (float)$r["day_rate"] : null;
+        }
+        send(["subcontractors" => $rows]);
+    }
+    case "GET /subcontractors/get": {
+        require_role($db, "admin");
+        $s = db_one($db, "SELECT * FROM ego_subcontractors WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$s) fail("Subcontractor not found", 404);
+        $s["id"] = (int)$s["id"];
+        send(["subcontractor" => $s]);
+    }
+    case "POST /subcontractors": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        $ins = trim($b["insurance_expiry"] ?? "") ?: null;
+        $dr = ($b["day_rate"] ?? "") !== "" ? (float)$b["day_rate"] : null;
+        $rating = ($b["rating"] ?? "") !== "" ? (int)$b["rating"] : null;
+        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? $b["status"] : "active";
+        db_exec($db, "INSERT INTO ego_subcontractors (name,company,trades,coverage_areas,phone,email,insurance_expiry,qualifications,day_rate,rating,status,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "ssssssssdiss", $name, trim($b["company"] ?? "") ?: null, trim($b["trades"] ?? "") ?: null, trim($b["coverage_areas"] ?? "") ?: null,
+            trim($b["phone"] ?? "") ?: null, $email, $ins, trim($b["qualifications"] ?? "") ?: null, $dr, $rating, $status, trim($b["notes"] ?? "") ?: null);
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "subcontractor_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /subcontractors/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_subcontractors WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Subcontractor not found", 404);
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        $ins = trim($b["insurance_expiry"] ?? "") ?: null;
+        $dr = ($b["day_rate"] ?? "") !== "" ? (float)$b["day_rate"] : null;
+        $rating = ($b["rating"] ?? "") !== "" ? (int)$b["rating"] : null;
+        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? $b["status"] : "active";
+        db_exec($db, "UPDATE ego_subcontractors SET name=?,company=?,trades=?,coverage_areas=?,phone=?,email=?,insurance_expiry=?,qualifications=?,day_rate=?,rating=?,status=?,notes=? WHERE id=?",
+            "ssssssssdissi", $name, trim($b["company"] ?? "") ?: null, trim($b["trades"] ?? "") ?: null, trim($b["coverage_areas"] ?? "") ?: null,
+            trim($b["phone"] ?? "") ?: null, $email, $ins, trim($b["qualifications"] ?? "") ?: null, $dr, $rating, $status, trim($b["notes"] ?? "") ?: null, $id);
+        log_activity($db, null, (int)$actor["id"], "subcontractor_updated", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /subcontractors/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_subcontractors SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "subcontractor_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
     default:
         fail("Not found: $method $route", 404);
 }

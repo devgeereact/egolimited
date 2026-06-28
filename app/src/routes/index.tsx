@@ -99,6 +99,11 @@ import EgoScheduleBoard from "@/pages/ego/schedule/ScheduleBoard"
 import EgoCustomersList from "@/pages/ego/customers/CustomersList"
 import EgoCustomerDetail from "@/pages/ego/customers/CustomerDetail"
 import EgoCustomerForm from "@/pages/ego/customers/CustomerForm"
+// 🏗️ EGO LIMITED — procurement (M-B): suppliers + subcontractors
+import SuppliersList from "@/pages/ego/procurement/SuppliersList"
+import SupplierForm from "@/pages/ego/procurement/SupplierForm"
+import SubcontractorsList from "@/pages/ego/procurement/SubcontractorsList"
+import SubcontractorForm from "@/pages/ego/procurement/SubcontractorForm"
 // 🏗️ EGO LIMITED — scaffolded pages (skeletons)
 import JobsList from "@/pages/ego/jobs/JobsList"
 import JobDetail from "@/pages/ego/jobs/JobDetail"
@@ -238,6 +243,12 @@ export const router = createBrowserRouter (
             {path: "ego/customers/detail", element: <EgoCustomerDetail /> },
             {path: "ego/customers/new", element: <EgoCustomerForm /> },
             {path: "ego/customers/edit", element: <EgoCustomerForm /> },
+            {path: "ego/suppliers", element: <SuppliersList /> },
+            {path: "ego/suppliers/new", element: <SupplierForm /> },
+            {path: "ego/suppliers/edit", element: <SupplierForm /> },
+            {path: "ego/subcontractors", element: <SubcontractorsList /> },
+            {path: "ego/subcontractors/new", element: <SubcontractorForm /> },
+            {path: "ego/subcontractors/edit", element: <SubcontractorForm /> },
             {path: "ego/dashboard", element: <EgoDashboard /> },
             {path: "ego/invoices", element: <EgoInvoicesList /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },

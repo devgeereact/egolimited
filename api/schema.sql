@@ -299,3 +299,44 @@ ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS assignee_id INT NULL;
 
 -- Customer reviews: stored as a message with a star rating + channel='review'
 ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS rating TINYINT NULL;
+
+-- ============================================================================
+-- PROCUREMENT (M-B): suppliers + subcontractors. ego_-prefixed, soft-delete.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_suppliers (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(190) NOT NULL,
+  contact     VARCHAR(190) NULL,
+  phone       VARCHAR(60)  NULL,
+  email       VARCHAR(190) NULL,
+  account_ref VARCHAR(120) NULL,
+  category    VARCHAR(80)  NULL,
+  address     VARCHAR(255) NULL,
+  notes       TEXT NULL,
+  active      TINYINT(1) NOT NULL DEFAULT 1,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at  DATETIME NULL,
+  INDEX idx_ego_supp_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_subcontractors (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  name            VARCHAR(190) NOT NULL,
+  company         VARCHAR(190) NULL,
+  trades          VARCHAR(255) NULL,
+  coverage_areas  VARCHAR(255) NULL,
+  phone           VARCHAR(40)  NULL,
+  email           VARCHAR(190) NULL,
+  insurance_expiry DATE NULL,
+  qualifications  VARCHAR(255) NULL,
+  day_rate        DECIMAL(10,2) NULL,
+  rating          TINYINT NULL,
+  status          ENUM('active','pending','suspended') NOT NULL DEFAULT 'active',
+  notes           TEXT NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at      DATETIME NULL,
+  INDEX idx_ego_subc_status (status),
+  INDEX idx_ego_subc_ins (insurance_expiry)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

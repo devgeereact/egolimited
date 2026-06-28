@@ -1,0 +1,35 @@
+<svg width="1200" height="1200" viewBox="0 0 1200 1200" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#23231f"/>
+      <stop offset="1" stop-color="#161613"/>
+    </linearGradient>
+    <radialGradient id="ember" cx="0.85" cy="0.15" r="0.7">
+      <stop offset="0" stop-color="#ee9b2e" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#ee9b2e" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="54" height="54" patternUnits="userSpaceOnUse">
+      <path d="M54 0 H0 V54" fill="none" stroke="#ee9b2e" stroke-opacity="0.08" stroke-width="1"/>
+    </pattern>
+  </defs>
+
+  <!-- Design is a 1200x630 band, vertically centred in a 1200x1200 canvas so a
+       centre-crop back to 1200x630 lands exactly on it. -->
+  <g transform="translate(0,285)">
+    <rect width="1200" height="630" fill="url(#bg)"/>
+    <rect width="1200" height="630" fill="url(#grid)"/>
+    <rect width="1200" height="630" fill="url(#ember)"/>
+
+    <rect x="90" y="118" width="64" height="5" rx="2.5" fill="#ee9b2e"/>
+    <text x="88" y="92" font-family="Helvetica, Arial, sans-serif" font-size="96" font-weight="800" letter-spacing="2" fill="#F7F5ED">EGO LTD</text>
+
+    <text x="90" y="232" font-family="Helvetica, Arial, sans-serif" font-size="56" font-weight="700" fill="#F7F5ED">General Maintenance — London</text>
+    <text x="90" y="292" font-family="Helvetica, Arial, sans-serif" font-size="30" font-weight="400" fill="#F7F5ED" fill-opacity="0.78">Repairs, planned upkeep, and the small jobs other firms turn down.</text>
+
+    <rect x="90" y="372" width="420" height="80" rx="40" fill="#ee9b2e"/>
+    <text x="300" y="424" font-family="Helvetica, Arial, sans-serif" font-size="40" font-weight="700" fill="#1b1b18" text-anchor="middle">07539 705576</text>
+    <text x="548" y="424" font-family="Helvetica, Arial, sans-serif" font-size="27" font-weight="500" fill="#F7F5ED" fill-opacity="0.7">Fully insured · Fair, fixed prices</text>
+
+    <rect x="0" y="626" width="1200" height="4" fill="#ee9b2e" fill-opacity="0.5"/>
+  </g>
+</svg>

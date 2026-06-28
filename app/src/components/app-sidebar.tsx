@@ -17,6 +17,8 @@ import {
   Contact,
   GanttChartSquare,
   Quote,
+  Truck,
+  HardHat,
   type LucideIcon,
 } from "lucide-react"
 
@@ -51,6 +53,13 @@ const NAV: EgoSection[] = [
       { title: "Schedule", url: "ego/schedule", icon: CalendarDays },
       { title: "Customers", url: "ego/customers", icon: Users },
       { title: "Task Board", url: "apps/task-board", icon: KanbanSquare },
+    ],
+  },
+  {
+    label: "Procurement",
+    items: [
+      { title: "Suppliers", url: "ego/suppliers", icon: Truck },
+      { title: "Subcontractors", url: "ego/subcontractors", icon: HardHat },
     ],
   },
   {

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+# The member CMS is not for indexing.
+Disallow: /app
+Disallow: /login
+
+Sitemap: https://egolimited.com/sitemap.xml

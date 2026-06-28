@@ -1,0 +1,19 @@
+{
+  "name": "EGO Op Dash",
+  "short_name": "EGO Dash",
+  "description": "EGO LTD operations dashboard — jobs, scheduling, clients and compliance.",
+  "start_url": "/app",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#131312",
+  "theme_color": "#f59e0b",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}
