@@ -2206,6 +2206,108 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
 
+    /* ============================ CONTRACTS / PPM (M-D) ============================ */
+    case "GET /contracts": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db,
+            "SELECT ct.id,ct.reference,ct.title,ct.status,ct.value,ct.renewal_date,ct.next_service,ct.next_bill_date,
+                    ct.customer_id, c.name AS customer_name
+             FROM ego_contracts ct LEFT JOIN ego_customers c ON c.id = ct.customer_id
+             WHERE ct.deleted_at IS NULL AND (ct.title LIKE ? OR ct.reference LIKE ? OR c.name LIKE ?)
+             ORDER BY ct.id DESC", "sss", $q, $q, $q);
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["customer_id"]=$r["customer_id"]!==null?(int)$r["customer_id"]:null; $r["value"]=(float)$r["value"]; }
+        send(["contracts" => $rows]);
+    }
+    case "GET /contracts/get": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $ct = db_one($db, "SELECT * FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$ct) fail("Contract not found", 404);
+        $ct["id"]=(int)$ct["id"]; $ct["customer_id"]=$ct["customer_id"]!==null?(int)$ct["customer_id"]:null;
+        foreach (["value","bill_amount"] as $k) $ct[$k]=$ct[$k]!==null?(float)$ct[$k]:null;
+        $allocs = db_all($db, "SELECT id,kind,person_name,role,hours_per_week,rate,notes FROM ego_contract_allocations WHERE contract_id=? ORDER BY sort,id", "i", $id);
+        foreach ($allocs as &$a) { $a["id"]=(int)$a["id"]; $a["hours_per_week"]=$a["hours_per_week"]!==null?(float)$a["hours_per_week"]:null; $a["rate"]=$a["rate"]!==null?(float)$a["rate"]:null; }
+        $ct["allocations"] = $allocs;
+        send(["contract" => $ct]);
+    }
+    case "POST /contracts":
+    case "POST /contracts/update": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $customerId = ($b["customer_id"] ?? "") !== "" ? (int)$b["customer_id"] : null;
+        $status = in_array($b["status"] ?? "active", ["active","pending","expired","cancelled"], true) ? $b["status"] : "active";
+        $ni = fn($k) => ($b[$k] ?? "") !== "" ? (int)$b[$k] : null;
+        $nd = fn($k) => trim($b[$k] ?? "") ?: null;
+        $nf = fn($k) => ($b[$k] ?? "") !== "" ? (float)$b[$k] : null;
+        $cols = "customer_id=?,title=?,value=?,status=?,start_date=?,renewal_date=?,sla_response_hours=?,sla_fix_hours=?,ppm_every_days=?,next_service=?,bill_every_days=?,next_bill_date=?,bill_amount=?,notes=?";
+        $types = "isdsssiiisisds";
+        $args = [$customerId, $title, (float)($b["value"] ?? 0), $status, $nd("start_date"), $nd("renewal_date"),
+                 $ni("sla_response_hours"), $ni("sla_fix_hours"), $ni("ppm_every_days"), $nd("next_service"),
+                 $ni("bill_every_days"), $nd("next_bill_date"), $nf("bill_amount"), $nd("notes")];
+        $allocs = is_array($b["allocations"] ?? null) ? $b["allocations"] : [];
+
+        $db->begin_transaction();
+        try {
+            if ($route === "/contracts/update") {
+                $id = (int)($b["id"] ?? 0); if (!$id) throw new RuntimeException("id required");
+                if (!db_one($db, "SELECT id FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id)) throw new RuntimeException("Contract not found");
+                db_exec($db, "UPDATE ego_contracts SET $cols WHERE id=?", $types . "i", ...array_merge($args, [$id]));
+                db_exec($db, "DELETE FROM ego_contract_allocations WHERE contract_id=?", "i", $id);
+            } else {
+                db_exec($db, "INSERT INTO ego_contracts (customer_id,title,value,status,start_date,renewal_date,sla_response_hours,sla_fix_hours,ppm_every_days,next_service,bill_every_days,next_bill_date,bill_amount,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    $types, ...$args);
+                $id = (int)$db->insert_id;
+                db_exec($db, "UPDATE ego_contracts SET reference=? WHERE id=?", "si", "CT-" . str_pad((string)$id, 4, "0", STR_PAD_LEFT), $id);
+            }
+            $sort = 0;
+            foreach ($allocs as $a) {
+                $person = trim($a["person_name"] ?? ""); if ($person === "") continue;
+                $kind = in_array($a["kind"] ?? "employee", ["employee","subcontractor"], true) ? $a["kind"] : "employee";
+                db_exec($db, "INSERT INTO ego_contract_allocations (contract_id,kind,person_name,role,hours_per_week,rate,notes,sort) VALUES (?,?,?,?,?,?,?,?)",
+                    "isssddsi", $id, $kind, $person, trim($a["role"] ?? "") ?: null,
+                    ($a["hours_per_week"] ?? "") !== "" ? (float)$a["hours_per_week"] : null,
+                    ($a["rate"] ?? "") !== "" ? (float)$a["rate"] : null, trim($a["notes"] ?? "") ?: null, $sort++);
+            }
+            log_activity($db, null, (int)$actor["id"], $route === "/contracts/update" ? "contract_updated" : "contract_created", ["id" => $id]);
+            $db->commit();
+            send(["id" => $id], $route === "/contracts/update" ? 200 : 201);
+        } catch (Throwable $e) {
+            $db->rollback();
+            fail($e->getMessage(), 400);
+        }
+    }
+    case "POST /contracts/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_contracts SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "contract_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /contracts/bill": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        $ct = db_one($db, "SELECT id,bill_every_days,bill_amount FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$ct) fail("Contract not found", 404);
+        $days = (int)($ct["bill_every_days"] ?? 0);
+        db_exec($db, "UPDATE ego_contracts SET last_billed=CURDATE(), next_bill_date = IF(?>0, DATE_ADD(CURDATE(), INTERVAL ? DAY), next_bill_date) WHERE id=?",
+            "iii", $days, $days, $id);
+        log_activity($db, null, (int)$actor["id"], "contract_billed", ["id" => $id, "amount" => (float)($ct["bill_amount"] ?? 0)]);
+        send(["ok" => true]);
+    }
+    case "POST /contracts/service-done": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        $ct = db_one($db, "SELECT id,ppm_every_days FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$ct) fail("Contract not found", 404);
+        $days = (int)($ct["ppm_every_days"] ?? 0);
+        db_exec($db, "UPDATE ego_contracts SET last_service=CURDATE(), next_service = IF(?>0, DATE_ADD(CURDATE(), INTERVAL ? DAY), next_service) WHERE id=?",
+            "iii", $days, $days, $id);
+        log_activity($db, null, (int)$actor["id"], "contract_service_done", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
     default:
         fail("Not found: $method $route", 404);
 }

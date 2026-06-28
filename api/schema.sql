@@ -467,3 +467,48 @@ CREATE TABLE IF NOT EXISTS ego_announcements (
   deleted_at DATETIME NULL,
   INDEX idx_ego_ann_active (active)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- CONTRACTS / PPM (M-D): maintenance contracts + resource allocations + billing/SLA cadence.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_contracts (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  reference          VARCHAR(24) NULL UNIQUE,
+  customer_id        INT NULL,
+  title              VARCHAR(190) NOT NULL,
+  value              DECIMAL(10,2) NOT NULL DEFAULT 0,
+  status             ENUM('active','pending','expired','cancelled') NOT NULL DEFAULT 'active',
+  start_date         DATE NULL,
+  renewal_date       DATE NULL,
+  sla_response_hours INT NULL,
+  sla_fix_hours      INT NULL,
+  ppm_every_days     INT NULL,
+  next_service       DATE NULL,
+  last_service       DATE NULL,
+  bill_every_days    INT NULL,
+  next_bill_date     DATE NULL,
+  last_billed        DATE NULL,
+  bill_amount        DECIMAL(10,2) NULL,
+  notes              TEXT NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at         DATETIME NULL,
+  INDEX idx_ego_ct_status (status),
+  INDEX idx_ego_ct_renewal (renewal_date),
+  INDEX idx_ego_ct_nextbill (next_bill_date),
+  INDEX idx_ego_ct_customer (customer_id),
+  CONSTRAINT fk_ego_ct_customer FOREIGN KEY (customer_id) REFERENCES ego_customers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_contract_allocations (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  contract_id    INT NOT NULL,
+  kind           ENUM('employee','subcontractor') NOT NULL DEFAULT 'employee',
+  person_name    VARCHAR(190) NOT NULL,
+  role           VARCHAR(120) NULL,
+  hours_per_week DECIMAL(6,2) NULL,
+  rate           DECIMAL(10,2) NULL,
+  notes          VARCHAR(255) NULL,
+  sort           INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_ego_ctalloc_ct FOREIGN KEY (contract_id) REFERENCES ego_contracts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

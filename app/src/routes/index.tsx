@@ -114,6 +114,9 @@ import AssetForm from "@/pages/ego/assets/AssetForm"
 // 🏗️ EGO LIMITED — announcements (M-A)
 import AnnouncementsList from "@/pages/ego/announcements/AnnouncementsList"
 import AnnouncementForm from "@/pages/ego/announcements/AnnouncementForm"
+// 🏗️ EGO LIMITED — contracts / PPM (M-D)
+import ContractsList from "@/pages/ego/contracts/ContractsList"
+import ContractForm from "@/pages/ego/contracts/ContractForm"
 // 🏗️ EGO LIMITED — scaffolded pages (skeletons)
 import JobsList from "@/pages/ego/jobs/JobsList"
 import JobDetail from "@/pages/ego/jobs/JobDetail"
@@ -268,6 +271,9 @@ export const router = createBrowserRouter (
             {path: "ego/assets", element: <AssetsList /> },
             {path: "ego/assets/new", element: <AssetForm /> },
             {path: "ego/assets/edit", element: <AssetForm /> },
+            {path: "ego/contracts", element: <ContractsList /> },
+            {path: "ego/contracts/new", element: <ContractForm /> },
+            {path: "ego/contracts/edit", element: <ContractForm /> },
             {path: "ego/dashboard", element: <EgoDashboard /> },
             {path: "ego/invoices", element: <EgoInvoicesList /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },

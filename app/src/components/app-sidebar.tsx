@@ -23,6 +23,7 @@ import {
   ClipboardList,
   Boxes,
   Megaphone,
+  FileSignature,
   type LucideIcon,
 } from "lucide-react"
 
@@ -72,6 +73,7 @@ const NAV: EgoSection[] = [
     label: "Assets",
     items: [
       { title: "Assets", url: "ego/assets", icon: Boxes },
+      { title: "Contracts & PPM", url: "ego/contracts", icon: FileSignature },
     ],
   },
   {
