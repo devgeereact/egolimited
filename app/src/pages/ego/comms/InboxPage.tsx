@@ -63,11 +63,18 @@ export default function InboxPage() {
   const [reply, setReply] = useState("")
   const [sendingReply, setSendingReply] = useState(false)
 
-  function load() {
-    setLoading(true)
-    api<{ messages: MsgRow[] }>("/inbox").then((r) => setRows(r.messages)).finally(() => setLoading(false))
+  function load(silent = false) {
+    if (!silent) setLoading(true)
+    api<{ messages: MsgRow[] }>("/inbox").then((r) => setRows(r.messages)).finally(() => { if (!silent) setLoading(false) })
   }
-  useEffect(() => { load() }, [])
+  // Initial load + light polling so new mail / read state stay current without a refresh.
+  useEffect(() => {
+    load()
+    const t = setInterval(() => load(true), 30000)
+    const onFocus = () => load(true)
+    window.addEventListener("focus", onFocus)
+    return () => { clearInterval(t); window.removeEventListener("focus", onFocus) }
+  }, [])
   useEffect(() => { setPage(1) }, [folder, q])
 
   const counts = useMemo(() => ({
@@ -175,12 +182,14 @@ export default function InboxPage() {
                     <TableRow key={m.id} className="cursor-pointer" onClick={() => openMessage(m.id)}>
                       <TableCell>
                         <div className="flex items-center gap-2.5">
+                          {unread
+                            ? <span className="size-2 shrink-0 rounded-full bg-primary" />
+                            : <span className="size-2 shrink-0" />}
                           <Avatar className="size-7 shrink-0"><AvatarFallback className="text-[11px]">{initials(who)}</AvatarFallback></Avatar>
-                          <span className={cn("truncate", unread && "font-semibold")}>{who}</span>
-                          {unread && <span className="size-2 shrink-0 rounded-full bg-primary" />}
+                          <span className={cn("truncate", unread ? "font-bold text-foreground" : "text-muted-foreground")}>{who}</span>
                         </div>
                       </TableCell>
-                      <TableCell className={cn("max-w-0 truncate", unread ? "font-medium" : "text-muted-foreground")}>{m.subject || "(no subject)"}</TableCell>
+                      <TableCell className={cn("max-w-0 truncate", unread ? "font-bold text-foreground" : "text-muted-foreground")}>{m.subject || "(no subject)"}</TableCell>
                       <TableCell className="hidden text-muted-foreground md:table-cell">{m.customer_name || m.job_reference || "—"}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">{fmtDate(m.created_at)}</TableCell>
                     </TableRow>

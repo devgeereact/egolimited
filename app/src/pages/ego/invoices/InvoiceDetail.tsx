@@ -3,11 +3,13 @@ import { Link, useSearchParams } from "react-router-dom"
 import { jsPDF } from "jspdf"
 import autoTable from "jspdf-autotable"
 import {
-  ArrowLeft, Plus, Trash2, Send, Download, BadgePoundSterling, Ban, Loader2, Wrench, Mail,
+  ArrowLeft, Plus, Trash2, Send, Download, Eye, BadgePoundSterling, Ban, Loader2, Wrench, Mail,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useAuth } from "@/store/auth.store"
+import { atLeast } from "@/lib/roles"
 import { computeTotals, gbp } from "@/lib/invoicing"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -33,6 +35,7 @@ interface Invoice {
 export default function InvoiceDetail() {
   const [params] = useSearchParams()
   const id = params.get("id")
+  const { user } = useAuth()
   const [inv, setInv] = useState<Invoice | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [vatRate, setVatRate] = useState(20)
@@ -106,8 +109,8 @@ export default function InvoiceDetail() {
     toast.success("Voided"); load()
   }
 
-  function downloadPdf() {
-    if (!inv) return
+  function buildPdf() {
+    if (!inv) return null
     const doc = new jsPDF()
     const co = inv.company
     doc.setFontSize(20); doc.setTextColor(37, 99, 235); doc.text(co.company_name || "EGO LIMITED", 14, 20)
@@ -150,7 +153,20 @@ export default function InvoiceDetail() {
       co.bank_account_number ? `Account no: ${co.bank_account_number}` : "",
       `Payment reference: ${inv.payment_reference}`,
     ].filter(Boolean), 14, y)
+    return doc
+  }
+  function downloadPdf() {
+    const doc = buildPdf(); if (!doc || !inv) return
     doc.save(`${inv.number ?? inv.payment_reference}-${label}.pdf`)
+  }
+  function previewPdf() {
+    const doc = buildPdf(); if (!doc) return
+    window.open(doc.output("bloburl"), "_blank") // open in a new tab — preview, no download
+  }
+  async function deleteDoc() {
+    if (!inv || !confirm(`Delete this ${label.toLowerCase()}? This can be recovered.`)) return
+    try { await api("/invoices/delete", { method: "POST", body: { id: inv.id } }); toast.success(`${label} deleted`); window.history.back() }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }
 
   if (loading) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
@@ -167,6 +183,7 @@ export default function InvoiceDetail() {
         <div className="flex flex-wrap gap-2">
           {isDraft && <Button variant="outline" onClick={save} disabled={busy}>Save draft</Button>}
           {(isDraft || inv.status === "draft") && <Button onClick={send} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <Send />} Send</Button>}
+          <Button variant="outline" onClick={previewPdf}><Eye /> Preview</Button>
           <Button variant="outline" onClick={downloadPdf}><Download /> PDF</Button>
           <Button variant="outline" onClick={emailDoc} disabled={busy}><Mail /> Email</Button>
           {inv.kind === "invoice" && (inv.status === "sent" || inv.status === "overdue") && (
@@ -177,6 +194,9 @@ export default function InvoiceDetail() {
           )}
           {inv.status !== "paid" && inv.status !== "void" && (
             <Button variant="outline" className="text-destructive" onClick={voidDoc}><Ban /> Void</Button>
+          )}
+          {atLeast(user?.role, "manager") && (
+            <Button variant="outline" className="text-destructive hover:text-destructive" onClick={deleteDoc}><Trash2 /> Delete</Button>
           )}
         </div>
       </div>

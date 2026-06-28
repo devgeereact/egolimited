@@ -2481,6 +2481,33 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
 
+    /* ============================ ADMIN DELETE (manager+) ============================ */
+    case "POST /jobs/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Job not found", 404);
+        db_exec($db, "UPDATE ego_jobs SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, $id, (int)$actor["id"], "job_deleted", []);
+        send(["ok" => true]);
+    }
+    case "POST /invoices/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Not found", 404);
+        db_exec($db, "UPDATE ego_invoices SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "invoice_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /payments/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        $p = db_one($db, "SELECT id, invoice_id FROM ego_payments WHERE id=?", "i", $id);
+        if (!$p) fail("Payment not found", 404);
+        db_exec($db, "DELETE FROM ego_payments WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "payment_deleted", ["id" => $id, "invoice_id" => (int)$p["invoice_id"]]);
+        send(["ok" => true]);
+    }
+
     default:
         fail("Not found: $method $route", 404);
 }

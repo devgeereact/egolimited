@@ -4,8 +4,6 @@ import {
   Gauge,
   Settings2,
   Briefcase,
-  Users,
-  UsersRound,
   CalendarDays,
   FileText,
   CreditCard,
@@ -59,7 +57,7 @@ const NAV: EgoSection[] = [
     items: [
       { title: "Jobs", url: "ego/jobs", icon: Briefcase },
       { title: "Schedule", url: "ego/schedule", icon: CalendarDays },
-      { title: "Customers", url: "ego/customers", icon: Users },
+      { title: "Contacts", url: "ego/contacts", icon: Contact },
       { title: "Task Board", url: "apps/task-board", icon: KanbanSquare },
     ],
   },
@@ -74,10 +72,8 @@ const NAV: EgoSection[] = [
     label: "Workspace",
     items: [
       { title: "Email", url: "ego/inbox", icon: Inbox },
-      { title: "Contacts", url: "ego/contacts", icon: Contact },
       { title: "Reviews", url: "ego/reviews", icon: Quote },
       { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
-      { title: "Team", url: "ego/team", icon: UsersRound, min: "manager" },
     ],
   },
   {

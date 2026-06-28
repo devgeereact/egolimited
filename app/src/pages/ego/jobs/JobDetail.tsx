@@ -2,14 +2,14 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, CalendarClock, CircleUserRound, Copy, Download, FileText, Mail, MapPin, Phone, Loader2, Package, PauseCircle,
-  Sparkles, Plus, X, ListChecks,
+  Sparkles, Plus, X, ListChecks, Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
 import { useAuth } from "@/store/auth.store"
-import { isOffice } from "@/lib/roles"
+import { isOffice, atLeast } from "@/lib/roles"
 import { allowedTargets, STATUS_LABEL, type JobStatus } from "@/lib/jobStatus"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -241,6 +241,16 @@ export default function JobDetail() {
           {(job.status === "scheduled" || job.status === "on_hold") && isOffice(user?.role) && (
             <Button variant="outline" disabled={busy} onClick={() => setSchedOpen(true)}>
               Reschedule
+            </Button>
+          )}
+          {atLeast(user?.role, "manager") && (
+            <Button variant="outline" className="text-destructive hover:text-destructive" disabled={busy}
+              onClick={async () => {
+                if (!confirm(`Delete job ${job.reference}? This can be recovered.`)) return
+                try { await api("/jobs/delete", { method: "POST", body: { id: job.id } }); toast.success("Job deleted"); navigate("/ego/jobs") }
+                catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
+              }}>
+              <Trash2 /> Delete
             </Button>
           )}
         </div>
