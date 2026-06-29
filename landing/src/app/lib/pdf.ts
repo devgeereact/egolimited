@@ -119,7 +119,7 @@ function watermark(doc: jsPDF): void {
     doc.text("E", cx, cy, { align: "center", baseline: "middle" })
     doc.setFontSize(15)
     doc.setCharSpace(8)
-    doc.text("EGO LIMITED", cx, cy + 80, { align: "center", baseline: "middle" })
+    doc.text("EGO LTD", cx, cy + 80, { align: "center", baseline: "middle" })
     doc.setCharSpace(0)
     doc.restoreGraphicsState()
   } catch {
@@ -270,7 +270,7 @@ function ledger(doc: jsPDF, startY: number, d: PdfDoc): number {
 
 // Invoice / quote: a warm cream page with the EGO logo + big title, a billed-to
 // and payment-method pair, a fully-bordered line-items table with Subtotal / Tax
-// / Grand Total, a terms + contact footer, and a faint "EGO LIMITED" wordmark.
+// / Grand Total, a terms + contact footer, and a faint "EGO LTD" wordmark.
 function buildDocument(d: PdfDoc): jsPDF {
   const doc = new jsPDF({ unit: "pt", format: "a4" })
   const W = doc.internal.pageSize.getWidth()
@@ -399,7 +399,7 @@ function buildDocument(d: PdfDoc): jsPDF {
     doc.setFontSize(22)
     doc.setTextColor(...STONE)
     doc.setCharSpace(7)
-    doc.text("EGO LIMITED", W / 2, H - 47, { align: "center" })
+    doc.text("EGO LTD", W / 2, H - 47, { align: "center" })
     doc.setCharSpace(0)
     doc.restoreGraphicsState()
   } catch {
