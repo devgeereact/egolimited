@@ -117,7 +117,7 @@ function inbox_sync(mysqli $db): int {
         db_exec($db,
             "INSERT INTO ego_messages (customer_id,job_id,direction,channel,from_email,from_name,subject,body,body_html,uid,status)
              VALUES (?,?, 'inbound','email', ?,?,?,?,?,?, 'received')",
-            "iisssssss", $cid, $jobId, $fromEmail, $fromName, $subject, $body, $bodyHtml, $uid);
+            "iissssss", $cid, $jobId, $fromEmail, $fromName, $subject, $body, $bodyHtml, $uid);
         $count++;
     }
     imap_close($conn);
