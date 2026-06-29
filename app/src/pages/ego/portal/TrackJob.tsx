@@ -107,7 +107,7 @@ export default function TrackJob() {
 
           {/* Timeline */}
           {t.cancelled ? (
-            <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm font-medium text-red-600">This job was cancelled.</p>
+            <p className="mt-4 rounded-lg bg-destructive/10 p-3 text-sm font-medium text-destructive">This job was cancelled.</p>
           ) : (
             <ol className="mt-5 space-y-3">
               {STEPS.map((s, i) => {
@@ -115,7 +115,7 @@ export default function TrackJob() {
                 return (
                   <li key={s} className="flex items-center gap-3">
                     <span className={cn("flex size-6 items-center justify-center rounded-full text-xs",
-                      done ? "bg-emerald-500 text-white" : current ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+                      done ? "bg-accent text-accent-foreground" : current ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
                       {done ? <CheckCircle2 className="size-4" /> : i + 1}
                     </span>
                     <span className={cn("text-sm", current ? "font-semibold" : done ? "text-foreground" : "text-muted-foreground")}>{s}</span>
@@ -129,9 +129,9 @@ export default function TrackJob() {
 
       {/* On the way card */}
       {onTheWay && t.job.engineer_name && (
-        <Card className="mb-4 border-amber-500/30">
+        <Card className="mb-4 border-accent/30">
           <CardContent className="flex items-center gap-3 p-4">
-            <Truck className="size-5 text-amber-600" />
+            <Truck className="size-5 text-accent" />
             <p className="text-sm"><span className="font-medium">{t.job.engineer_name}</span> {t.job.status === "on_site" ? "is on site." : "is on the way."}</p>
           </CardContent>
         </Card>
@@ -146,7 +146,7 @@ export default function TrackJob() {
               <span className="font-mono text-lg font-semibold">{gbp(Number(t.invoice.total))}</span>
             </div>
             {t.invoice.status === "paid" ? (
-              <p className="mt-2 rounded-lg bg-emerald-500/10 p-2 text-center text-sm font-medium text-emerald-600">Paid — thank you!</p>
+              <p className="mt-2 rounded-lg bg-accent/10 p-2 text-center text-sm font-medium text-accent">Paid — thank you!</p>
             ) : (
               <div className="mt-3 rounded-lg bg-muted/50 p-3 text-sm">
                 <p className="font-medium">Pay by bank transfer</p>
@@ -180,16 +180,16 @@ export default function TrackJob() {
 
       {/* Leave a review — only once the job is complete */}
       {t.completed && (
-        <Card className="mb-4 border-amber-500/30">
+        <Card className="mb-4 border-accent/30">
           <CardContent className="p-5">
-            <p className="mb-1 flex items-center gap-2 font-medium"><Star className="size-4 text-amber-500" /> {t.review ? "Your review" : "How did we do?"}</p>
+            <p className="mb-1 flex items-center gap-2 font-medium"><Star className="size-4 text-accent" /> {t.review ? "Your review" : "How did we do?"}</p>
             <p className="mb-3 text-sm text-muted-foreground">{t.review ? "Thanks for your feedback — you can update it any time." : "Your feedback helps us improve."}</p>
             <div className="mb-3 flex gap-1">
               {[1, 2, 3, 4, 5].map((n) => {
                 const active = (rating || t.review?.rating || 0) >= n
                 return (
                   <button key={n} type="button" onClick={() => setRating(n)} className="transition-transform hover:scale-110" aria-label={`${n} star${n > 1 ? "s" : ""}`}>
-                    <Star className={cn("size-8", active ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40")} />
+                    <Star className={cn("size-8", active ? "fill-accent text-accent" : "text-muted-foreground/40")} />
                   </button>
                 )
               })}
