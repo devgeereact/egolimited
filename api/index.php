@@ -1461,14 +1461,14 @@ switch ("$method $route") {
     case "GET /inbox": {
         require_role($db, "admin");
         $rows = db_all($db,
-            "SELECT m.id,m.direction,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.created_at,
+            "SELECT m.id,m.direction,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.acknowledged,m.created_at,
                     m.customer_id,m.job_id, c.name AS customer_name, j.reference AS job_reference
              FROM ego_messages m
              LEFT JOIN ego_customers c ON c.id=m.customer_id
              LEFT JOIN ego_jobs j ON j.id=m.job_id
              WHERE (m.channel IS NULL OR m.channel <> 'portal')
              ORDER BY m.id DESC LIMIT 100");
-        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
+        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["acknowledged"] = (int)($r["acknowledged"] ?? 0); $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
         send(["messages" => $rows]);
     }
 
