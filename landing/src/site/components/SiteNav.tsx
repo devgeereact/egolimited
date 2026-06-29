@@ -77,7 +77,6 @@ export default function SiteNav() {
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(false)
   const [servicesOpen, setServicesOpen] = useState(false)
-  const [accountOpen, setAccountOpen] = useState(false)
   const location = useLocation()
   const { user } = useAuth()
 
@@ -91,12 +90,7 @@ export default function SiteNav() {
   useEffect(() => {
     setOpen(false)
     setServicesOpen(false)
-    setAccountOpen(false)
   }, [location.pathname])
-
-  const accountActive =
-    location.pathname.startsWith("/track") ||
-    location.pathname.startsWith("/portal")
 
   return (
     <header className="sticky top-0 z-50 w-full">
@@ -164,10 +158,11 @@ export default function SiteNav() {
               if (e.key === "Escape") setServicesOpen(false)
             }}
           >
-            <Link
-              to="/services"
+            <button
+              type="button"
               aria-haspopup="true"
               aria-expanded={servicesOpen}
+              onClick={() => setServicesOpen((v) => !v)}
               className={cn(
                 navLink,
                 "gap-1",
@@ -178,9 +173,9 @@ export default function SiteNav() {
             >
               Services
               <ChevronDown className={cn("h-4 w-4 transition-transform", servicesOpen && "rotate-180")} />
-            </Link>
+            </button>
             {servicesOpen && (
-              <div className="absolute left-0 top-full z-50 w-[min(52rem,calc(100vw-2rem))] pt-3">
+              <div className="absolute left-0 top-full z-50 w-[min(44rem,calc(100vw-2rem))] pt-3">
                 <div className="grid grid-cols-3 gap-3 rounded-2xl border border-border bg-popover p-3 shadow-2xl ring-1 ring-black/5 animate-in fade-in-0 slide-in-from-top-2 duration-150">
                   <div className="col-span-2">
                     <div className="mb-1 flex items-center justify-between px-2 pt-1">
@@ -254,79 +249,6 @@ export default function SiteNav() {
             </NavLink>
           ))}
 
-          {/* My account dropdown — Track a job + account, merged. */}
-          <div
-            className="relative"
-            onMouseEnter={() => setAccountOpen(true)}
-            onMouseLeave={() => setAccountOpen(false)}
-            onFocus={() => setAccountOpen(true)}
-            onBlur={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node))
-                setAccountOpen(false)
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") setAccountOpen(false)
-            }}
-          >
-            <button
-              type="button"
-              aria-haspopup="true"
-              aria-expanded={accountOpen}
-              className={cn(
-                navLink,
-                "gap-1",
-                accountOpen || accountActive
-                  ? "text-primary after:scale-x-100"
-                  : "text-foreground/80 hover:after:scale-x-100",
-              )}
-            >
-              My account
-              <ChevronDown
-                className={cn(
-                  "h-4 w-4 transition-transform",
-                  accountOpen && "rotate-180",
-                )}
-              />
-            </button>
-            {accountOpen && (
-              <div className="absolute right-0 top-full z-50 w-[22rem] pt-3">
-                <div className="rounded-2xl border border-border bg-popover p-2 shadow-2xl ring-1 ring-black/5 animate-in fade-in-0 slide-in-from-top-2 duration-150">
-                  <div className="px-3 pb-1.5 pt-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                    Already a customer?
-                  </div>
-                  {customer.map((c) => (
-                    <Link
-                      key={c.to}
-                      to={c.to}
-                      className="group/item flex items-start gap-3 rounded-xl p-3 transition-colors hover:bg-secondary"
-                    >
-                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-secondary text-primary transition-colors group-hover/item:bg-accent group-hover/item:text-accent-foreground">
-                        <c.icon className="h-4 w-4" />
-                      </span>
-                      <span>
-                        <span className="block text-sm font-semibold text-foreground">
-                          {c.label}
-                        </span>
-                        <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">
-                          {c.desc}
-                        </span>
-                      </span>
-                    </Link>
-                  ))}
-                  {/* New-customer nudge keeps the menu seamless for everyone. */}
-                  <Link
-                    to="/contact"
-                    className="mt-1 flex items-center justify-between gap-2 rounded-xl bg-primary px-4 py-3 text-primary-foreground transition-colors hover:bg-primary/90"
-                  >
-                    <span className="text-sm font-semibold">
-                      New here? Get a quote
-                    </span>
-                    <ArrowRight className="h-4 w-4 text-accent" />
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
         </nav>
 
         <div className="ml-auto hidden items-center gap-4 lg:flex">
@@ -357,6 +279,13 @@ export default function SiteNav() {
               </a>
             </Button>
           )}
+          {/* Replaces the old Login — customers track/manage their job here. */}
+          <Button asChild variant="outline" size="sm">
+            <Link to="/track">
+              <Navigation className="mr-1.5 h-4 w-4" />
+              Track a job
+            </Link>
+          </Button>
           <Button asChild size="sm" className="shadow-sm shadow-accent/20">
             <Link to="/contact">
               Get a quote
