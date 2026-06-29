@@ -27,9 +27,11 @@ export default function SiteFooter() {
   const company = useCompany()
   const year = new Date().getFullYear()
   const { user } = useAuth()
+  // Public footer points customers at the portal/track, never a login.
+  // Admins (already signed in) get a quiet dashboard shortcut.
   const accountLink = user
     ? { to: "/app/", label: "My dashboard", external: true }
-    : { to: "/app/", label: "Member login", external: true }
+    : { to: "/track", label: "Track a job", external: false }
 
   return (
     <footer className="relative bg-primary text-primary-foreground">
@@ -225,7 +227,9 @@ export default function SiteFooter() {
       <div className="border-t border-white/10">
         <div className="container flex flex-col items-center justify-between gap-3 px-4 py-5 text-xs text-primary-foreground/60 sm:flex-row">
           <span>
-            &copy; {year} {company.name}. {company.companyReg}.
+            &copy; {year} {company.name}. {company.companyReg}
+            {company.companiesHouseNo ? `, company no. ${company.companiesHouseNo}` : ""}.
+            {company.vatNumber ? ` VAT ${company.vatNumber}.` : ""}
           </span>
           <div className="flex items-center gap-5">
             {[

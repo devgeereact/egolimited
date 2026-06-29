@@ -569,3 +569,9 @@ ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS must_change_password TINYINT(1) N
 ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS password_changed_at DATETIME NULL;
 ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64) NULL;
 ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS totp_enabled TINYINT(1) NOT NULL DEFAULT 0;
+
+-- Landing: Companies House number (VAT already exists). Shown on the public site.
+ALTER TABLE ego_company_settings ADD COLUMN IF NOT EXISTS companies_house_no VARCHAR(20) NULL;
+
+-- Reviews: source so app reviews + imported Google reviews live together (M: reviews hub).
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS source VARCHAR(16) NULL;

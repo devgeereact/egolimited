@@ -18,8 +18,11 @@ export const company = {
   emergencyPhone: "07539 705576",
   address: "11 Halesworth Road, London SE13 7TJ",
   hours: "Monday to Friday, 8am to 6pm. Out-of-hours cover by arrangement.",
-  // TODO: add Companies House number when registered.
   companyReg: "Registered in England & Wales",
+  // Live legal identifiers — entered in the App (Settings -> Tax) and merged in at
+  // runtime via /api/public/company. Blank by default until published.
+  vatNumber: "",
+  companiesHouseNo: "",
 }
 
 // The three things EGO does, framed exactly as the Company Profile does.

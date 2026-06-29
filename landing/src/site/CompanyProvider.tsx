@@ -25,13 +25,10 @@ function merge(base: Company, data: Record<string, unknown>): Company {
   }
   return {
     ...base,
-    name: pick("company_name", base.name),
-    tagline: pick("tagline", base.tagline),
-    email: pick("company_email", base.email),
-    phone: pick("company_phone", base.phone),
-    emergencyPhone: pick("emergency_phone", base.emergencyPhone),
-    address: pick("company_address", base.address),
-    hours: pick("working_hours", base.hours),
+    // Only the legal identifiers are App-editable on the public site; the real
+    // public brand/contact details stay authoritative in content.ts.
+    vatNumber: pick("vat_number", base.vatNumber),
+    companiesHouseNo: pick("companies_house_no", base.companiesHouseNo),
   }
 }
 
@@ -47,11 +44,12 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let alive = true
-    fetch(`${API_BASE}/company.php`)
+    fetch(`${API_BASE}/api/public/company`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (alive && data && typeof data === "object") {
-          setValue((prev) => merge(prev, data as Record<string, unknown>))
+        const c = data && typeof data === "object" ? (data as { company?: Record<string, unknown> }).company : null
+        if (alive && c && typeof c === "object") {
+          setValue((prev) => merge(prev, c))
         }
       })
       .catch(() => {

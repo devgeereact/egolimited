@@ -278,7 +278,7 @@ interface ReviewsResponse {
 export function Testimonials() {
   const { data } = useQuery({
     queryKey: ["public-reviews"],
-    queryFn: () => api.get<ReviewsResponse>("reviews.php"),
+    queryFn: () => api.get<ReviewsResponse>("/api/public/reviews"),
     staleTime: 1000 * 60 * 30,
     retry: false,
     // Don't surface backend hiccups to visitors — fall back silently.

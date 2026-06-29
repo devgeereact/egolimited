@@ -10,6 +10,28 @@ declare(strict_types=1);
  * Send mail: try the configured SMTP server; if the socket fails (this host
  * blocks web-initiated outbound TLS), fall back to local sendmail via mail().
  */
+/**
+ * Wrap email content in a clean, branded EGO LTD shell (dark header wordmark,
+ * white card, contact footer). Pass the inner HTML; returns a full document.
+ */
+function ego_email_shell(mysqli $db, string $heading, string $innerHtml): string {
+    $cs = db_one($db, "SELECT company_name,email,phone FROM ego_company_settings ORDER BY id LIMIT 1") ?? [];
+    $name = htmlspecialchars(($cs["company_name"] ?? "") ?: "EGO LTD");
+    $contact = implode("&nbsp;&nbsp;·&nbsp;&nbsp;", array_filter([
+        htmlspecialchars($cs["phone"] ?? ""), htmlspecialchars($cs["email"] ?? ""), "egolimited.com",
+    ]));
+    return "<!doctype html><html><body style=\"margin:0;background:#f4f4f5;padding:24px;font-family:Arial,Helvetica,sans-serif\">"
+        . "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"max-width:560px;margin:0 auto;background:#ffffff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden\">"
+        . "<tr><td style=\"background:#171816;padding:18px 24px\"><span style=\"color:#ffffff;font-size:18px;font-weight:700;letter-spacing:.05em\">$name</span>"
+        . "<span style=\"display:inline-block;width:26px;height:3px;background:#EF9F27;border-radius:2px;margin-left:10px;vertical-align:middle\"></span></td></tr>"
+        . "<tr><td style=\"padding:24px;color:#1f2937;font-size:14px;line-height:1.6\">"
+        . ($heading !== "" ? "<h2 style=\"margin:0 0 14px;font-size:18px;color:#111827\">" . htmlspecialchars($heading) . "</h2>" : "")
+        . $innerHtml
+        . "</td></tr>"
+        . "<tr><td style=\"padding:14px 24px;border-top:1px solid #eee;color:#9ca3af;font-size:12px\">$contact</td></tr>"
+        . "</table></body></html>";
+}
+
 function ego_send_mail(mysqli $db, string $to, ?string $toName, string $subject, string $html): void {
     if (integ($db, "smtp_host")) {
         try { ego_send_smtp($db, $to, $toName, $subject, $html); return; }

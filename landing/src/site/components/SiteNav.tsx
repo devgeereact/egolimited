@@ -180,7 +180,7 @@ export default function SiteNav() {
               <ChevronDown className={cn("h-4 w-4 transition-transform", servicesOpen && "rotate-180")} />
             </Link>
             {servicesOpen && (
-              <div className="absolute left-0 top-full z-50 w-[52rem] pt-3">
+              <div className="absolute left-0 top-full z-50 w-[min(52rem,calc(100vw-2rem))] pt-3">
                 <div className="grid grid-cols-3 gap-3 rounded-2xl border border-border bg-popover p-3 shadow-2xl ring-1 ring-black/5 animate-in fade-in-0 slide-in-from-top-2 duration-150">
                   <div className="col-span-2">
                     <div className="mb-1 flex items-center justify-between px-2 pt-1">
@@ -349,30 +349,20 @@ export default function SiteNav() {
 
           <span aria-hidden className="h-8 w-px bg-border" />
 
-          {user ? (
-            <Button asChild size="sm">
+          {user && (
+            <Button asChild variant="ghost" size="sm">
               <a href="/app/">
                 <LayoutDashboard className="mr-1.5 h-4 w-4" />
                 Dashboard
               </a>
             </Button>
-          ) : (
-            <>
-              <Button asChild variant="ghost" size="sm">
-                <a href="/app/">Login</a>
-              </Button>
-              <Button
-                asChild
-                size="sm"
-                className="shadow-sm shadow-accent/20"
-              >
-                <Link to="/contact">
-                  Get a quote
-                  <ArrowRight className="ml-1 h-4 w-4" />
-                </Link>
-              </Button>
-            </>
           )}
+          <Button asChild size="sm" className="shadow-sm shadow-accent/20">
+            <Link to="/contact">
+              Get a quote
+              <ArrowRight className="ml-1 h-4 w-4" />
+            </Link>
+          </Button>
         </div>
 
         {/* Mobile */}
@@ -462,23 +452,17 @@ export default function SiteNav() {
                   <Siren className="h-4 w-4" />
                   Emergency call-out
                 </a>
-                {user ? (
-                  <Button asChild>
+                {user && (
+                  <Button asChild variant="outline">
                     <a href="/app/">
                       <LayoutDashboard className="mr-1.5 h-4 w-4" />
                       Go to dashboard
                     </a>
                   </Button>
-                ) : (
-                  <>
-                    <Button asChild variant="outline">
-                      <a href="/app/">Member login</a>
-                    </Button>
-                    <Button asChild>
-                      <Link to="/contact">Get a quote</Link>
-                    </Button>
-                  </>
                 )}
+                <Button asChild>
+                  <Link to="/contact">Get a quote</Link>
+                </Button>
               </div>
             </SheetContent>
           </Sheet>

@@ -1256,7 +1256,7 @@ switch ("$method $route") {
         $b = body();
         $s = db_one($db, "SELECT id FROM ego_company_settings ORDER BY id LIMIT 1");
         if (!$s) fail("Settings missing", 500);
-        $fields = ["company_name","address","phone","email","vat_number","default_vat_rate","logo_url",
+        $fields = ["company_name","address","phone","email","vat_number","companies_house_no","default_vat_rate","logo_url",
                    "bank_account_name","bank_sort_code","bank_account_number","invoice_prefix","job_prefix","quote_prefix","payment_terms_days",
                    "notify_on_complete","notify_email"];
         $set = []; $types = ""; $args = [];
@@ -1401,12 +1401,8 @@ switch ("$method $route") {
         $bodyText = trim($b["body"] ?? "");
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) fail("Valid recipient email required");
         if ($subject === "" || $bodyText === "") fail("Subject and body required");
-        $company = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
-        $html = "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0f172a'>"
-            . nl2br(htmlspecialchars($bodyText))
-            . "<hr style='margin-top:20px;border:none;border-top:1px solid #e2e8f0'>"
-            . "<p style='color:#64748b;font-size:13px'>" . htmlspecialchars($company["company_name"] ?? "EGO LIMITED") . "</p></div>";
         require __DIR__ . "/lib/mailer.php";
+        $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyText)));
         try { ego_send_mail($db, $to, trim($b["to_name"] ?? "") ?: null, $subject, $html); }
         catch (Throwable $e) { fail("Email failed: " . $e->getMessage(), 400); }
         $jobId = isset($b["job_id"]) && $b["job_id"] !== "" ? (int)$b["job_id"] : null;
@@ -1512,11 +1508,9 @@ switch ("$method $route") {
         // best-effort email to the customer if we have an address
         $cust = $orig["customer_id"] ? db_one($db, "SELECT name,email FROM ego_customers WHERE id=?", "i", (int)$orig["customer_id"]) : null;
         if ($cust && filter_var($cust["email"] ?? "", FILTER_VALIDATE_EMAIL)) {
-            $co = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
             require_once __DIR__ . "/lib/mailer.php";
-            $html = "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0f172a'>"
-                . "<p>Hi " . htmlspecialchars($cust["name"] ?? "there") . ",</p><p>" . nl2br(htmlspecialchars($bodyTxt)) . "</p>"
-                . "<p style='color:#64748b;font-size:13px'>" . htmlspecialchars($co["company_name"] ?? "EGO LIMITED") . "</p></div>";
+            $inner = "<p style='margin:0 0 10px'>Hi " . htmlspecialchars($cust["name"] ?? "there") . ",</p><p style='margin:0'>" . nl2br(htmlspecialchars($bodyTxt)) . "</p>";
+            $html = ego_email_shell($db, "", $inner);
             try { ego_send_mail($db, $cust["email"], $cust["name"] ?? null, "Re: your message", $html); } catch (Throwable $e) { /* best-effort */ }
         }
         send(["ok" => true]);
@@ -1536,22 +1530,41 @@ switch ("$method $route") {
     case "POST /enquiry": {
         $b = body();
         $name = trim($b["name"] ?? "");
-        $contact = trim($b["contact"] ?? "");
+        // Accept the full website contact form (name/email/phone/address/service/message).
+        $email = trim($b["email"] ?? "");
+        $email = filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : (filter_var(trim($b["contact"] ?? ""), FILTER_VALIDATE_EMAIL) ? trim($b["contact"]) : null);
+        $phone = trim($b["phone"] ?? "");
+        $address = trim($b["address"] ?? "");
+        $service = trim($b["service"] ?? "");
         $message = trim($b["message"] ?? "");
         if ($name === "" || $message === "") fail("Name and message required");
-        $email = filter_var($contact, FILTER_VALIDATE_EMAIL) ? $contact : null;
+
+        // Detail block the office sees in the inbox + notification email.
+        $lines = [];
+        if ($email)   $lines[] = "Email: $email";
+        if ($phone)   $lines[] = "Phone: $phone";
+        if ($address) $lines[] = "Address: $address";
+        if ($service) $lines[] = "Service: $service";
+        $bodyText = ($lines ? implode("\n", $lines) . "\n\n" : "") . $message;
+        $subject = $service !== "" ? "Website enquiry: $service" : "Website enquiry";
+
         db_exec($db,
             "INSERT INTO ego_messages (direction,channel,from_name,from_email,subject,body,status)
              VALUES ('inbound','enquiry',?,?,?,?, 'received')",
-            "ssss", $name, $email, "Website enquiry", ($contact ? "Contact: $contact\n\n" : "") . $message);
+            "ssss", $name, $email, $subject, $bodyText);
+
         $cs = db_one($db, "SELECT company_name,email,notify_email FROM ego_company_settings ORDER BY id LIMIT 1");
         $to = trim($cs["notify_email"] ?? "") ?: trim($cs["email"] ?? "");
         if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
             require_once __DIR__ . "/lib/mailer.php";
-            $html = "<div style='font-family:Arial,sans-serif'><h3>New website enquiry</h3>"
-                . "<p><strong>" . htmlspecialchars($name) . "</strong>" . ($contact ? " &middot; " . htmlspecialchars($contact) : "") . "</p>"
-                . "<p>" . nl2br(htmlspecialchars($message)) . "</p></div>";
-            try { ego_send_mail($db, $to, $cs["company_name"] ?? null, "New website enquiry", $html); } catch (Throwable $e) { /* best-effort */ }
+            $detail = "<p style='margin:0 0 4px'><strong>" . htmlspecialchars($name) . "</strong></p>"
+                . "<table style='border-collapse:collapse;font-size:14px;color:#1f2937'>"
+                . ($email ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Email</td><td>" . htmlspecialchars($email) . "</td></tr>" : "")
+                . ($phone ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Phone</td><td>" . htmlspecialchars($phone) . "</td></tr>" : "")
+                . ($address ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Address</td><td>" . htmlspecialchars($address) . "</td></tr>" : "")
+                . ($service ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Service</td><td>" . htmlspecialchars($service) . "</td></tr>" : "")
+                . "</table><p style='margin:14px 0 0'>" . nl2br(htmlspecialchars($message)) . "</p>";
+            try { ego_send_mail($db, $to, $cs["company_name"] ?? null, $subject, ego_email_shell($db, "New website enquiry", $detail)); } catch (Throwable $e) { /* best-effort */ }
         }
         send(["ok" => true], 201);
     }
@@ -2544,6 +2557,47 @@ switch ("$method $route") {
         // Only drafts and internal notes are deletable here (real inbound/sent mail is kept).
         db_exec($db, "DELETE FROM ego_messages WHERE id=? AND status IN ('draft','note')", "i", $id);
         send(["ok" => true]);
+    }
+
+    /* ============================ PUBLIC (landing — no auth) ============================ */
+    case "GET /public/company": {
+        $cs = db_one($db, "SELECT company_name,phone,email,address,vat_number,companies_house_no FROM ego_company_settings ORDER BY id LIMIT 1") ?? [];
+        send(["company" => [
+            "company_name"       => $cs["company_name"] ?? "",
+            "company_phone"      => $cs["phone"] ?? "",
+            "company_email"      => $cs["email"] ?? "",
+            "company_address"    => $cs["address"] ?? "",
+            "vat_number"         => $cs["vat_number"] ?? "",
+            "companies_house_no" => $cs["companies_house_no"] ?? "",
+        ]]);
+    }
+    case "GET /public/reviews": {
+        // Published customer reviews (4-star+ with text) that feed the landing
+        // testimonials. App reviews + any imported Google reviews (source column).
+        $rows = db_all($db,
+            "SELECT m.rating, m.body, m.from_name, m.created_at, m.source, c.name AS customer_name
+             FROM ego_messages m
+             LEFT JOIN ego_customers c ON c.id = m.customer_id
+             WHERE m.channel='review' AND m.rating >= 4 AND m.body IS NOT NULL AND TRIM(m.body) <> ''
+             ORDER BY m.id DESC LIMIT 12", "");
+        $reviews = []; $sum = 0;
+        foreach ($rows as $r) {
+            $sum += (int)$r["rating"];
+            $reviews[] = [
+                "name"   => trim($r["from_name"] ?? "") ?: ($r["customer_name"] ?? "Customer"),
+                "quote"  => $r["body"],
+                "score"  => (int)$r["rating"],
+                "date"   => $r["created_at"],
+                "source" => $r["source"] ?: "app",
+            ];
+        }
+        $count = count($reviews);
+        send([
+            "source"  => "app",
+            "rating"  => $count ? round($sum / $count, 1) : null,
+            "count"   => $count,
+            "reviews" => $reviews,
+        ]);
     }
 
     default:

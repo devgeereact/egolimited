@@ -47,7 +47,7 @@ export default function Contact() {
     }
     setSending(true)
     try {
-      await api.post("contact.php", { ...form, source: "website" })
+      await api.post("/api/enquiry", { ...form, source: "website" })
       toast.success("Thanks. We have your enquiry and will be in touch shortly.")
       setForm(empty)
     } catch (err) {
