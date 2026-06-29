@@ -161,6 +161,20 @@ function ai_draft(mysqli $db, string $prompt): string {
     return trim($text);
 }
 
+/** Marketing subscribers/contacts list — created lazily so no manual migration
+ *  is needed on deploy. Idempotent. */
+function ensure_subscribers_table(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_subscribers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(190) NOT NULL,
+        name VARCHAR(160) NULL,
+        source VARCHAR(40) NOT NULL DEFAULT 'manual',
+        subscribed TINYINT NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_sub_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
 /** Mint (or reuse) the customer-portal access token for a job. */
 function mint_track_token(mysqli $db, int $jobId): array {
     $ex = db_one($db, "SELECT token,short_code FROM ego_customer_access WHERE job_id=? AND (expires_at IS NULL OR expires_at>NOW()) ORDER BY id DESC LIMIT 1", "i", $jobId);
@@ -1541,6 +1555,14 @@ switch ("$method $route") {
         $message = trim($b["message"] ?? "");
         if ($name === "" || $message === "") fail("Name and message required");
 
+        // Newsletter signups are explicit consent — add them to the marketing list.
+        if (($b["source"] ?? "") === "newsletter" && $email) {
+            ensure_subscribers_table($db);
+            $em = strtolower($email);
+            db_exec($db, "INSERT INTO ego_subscribers (email,name,source) VALUES (?,?, 'newsletter')
+                          ON DUPLICATE KEY UPDATE subscribed=1", "ss", $em, $name === "Newsletter signup" ? null : $name);
+        }
+
         // Detail block the office sees in the inbox + notification email.
         $lines = [];
         if ($email)   $lines[] = "Email: $email";
@@ -2590,6 +2612,90 @@ switch ("$method $route") {
             "sss", $to, $subject, $bodyTxt);
         log_activity($db, null, (int)$actor["id"], "draft_saved", []);
         send(["id" => (int)$db->insert_id], 201);
+    }
+
+    /* ===================== MARKETING: SUBSCRIBERS + CAMPAIGNS ===================== */
+    // Newsletter signups (landing) and admin-added contacts live in ego_subscribers;
+    // customers come from ego_customers. Admins compose + send bulk email to any
+    // audience, with an AI draft helper. Human always approves before send.
+    case "GET /subscribers": {
+        require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $subs = db_all($db, "SELECT id,email,name,source,subscribed,created_at FROM ego_subscribers ORDER BY id DESC");
+        $cust = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL")["c"] ?? 0);
+        send(["subscribers" => $subs, "subscriber_count" => count(array_filter($subs, fn($s) => (int)$s["subscribed"] === 1)), "customer_email_count" => $cust]);
+    }
+    case "POST /subscribers": {
+        $actor = require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $b = body();
+        $email = strtolower(trim($b["email"] ?? ""));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail("A valid email is required");
+        $name = trim($b["name"] ?? "") ?: null;
+        $src = trim($b["source"] ?? "") ?: "manual";
+        db_exec($db, "INSERT INTO ego_subscribers (email,name,source) VALUES (?,?,?)
+                      ON DUPLICATE KEY UPDATE name=COALESCE(VALUES(name),name), subscribed=1", "sss", $email, $name, $src);
+        log_activity($db, null, (int)$actor["id"], "subscriber_added", ["email" => $email]);
+        send(["ok" => true], 201);
+    }
+    case "POST /subscribers/delete": {
+        require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "DELETE FROM ego_subscribers WHERE id=?", "i", $id);
+        send(["ok" => true]);
+    }
+    case "POST /campaigns/draft": {
+        require_role($db, "admin");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe what the message should say");
+        $kind = trim($b["kind"] ?? "marketing") ?: "marketing";
+        $co = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
+        $name = $co["company_name"] ?? "EGO LIMITED";
+        $prompt = "You write $kind emails for $name, a UK property maintenance company. "
+            . "Brand voice: plain, direct, warm, no jargon, no em dashes, never overpromise, give people a clear next step. "
+            . "Write a short punchy subject line, then the email body (a few short paragraphs, sign off as the $name team). "
+            . "Brief from the owner: $brief\n\nReturn EXACTLY as:\nSubject: <subject line>\n\n<email body>";
+        try { $text = ai_draft($db, $prompt); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $subject = ""; $bodyTxt = trim($text);
+        if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
+        send(["subject" => $subject, "body" => $bodyTxt]);
+    }
+    case "POST /campaigns/send": {
+        $actor = require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $b = body();
+        $subject = trim($b["subject"] ?? ""); $bodyTxt = trim($b["body"] ?? "");
+        $audience = (string)($b["audience"] ?? "subscribers");
+        if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
+        // De-duped recipient map: email => name.
+        $rows = [];
+        if ($audience === "list") {
+            foreach ((array)($b["emails"] ?? []) as $e) {
+                $e = strtolower(trim((string)$e));
+                if (filter_var($e, FILTER_VALIDATE_EMAIL)) $rows[$e] = $rows[$e] ?? null;
+            }
+        } else {
+            if ($audience === "subscribers" || $audience === "all")
+                foreach (db_all($db, "SELECT email,name FROM ego_subscribers WHERE subscribed=1") as $r) $rows[strtolower($r["email"])] = $r["name"];
+            if ($audience === "customers" || $audience === "all")
+                foreach (db_all($db, "SELECT email,name FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL") as $r)
+                    $rows[strtolower($r["email"])] = $rows[strtolower($r["email"])] ?? $r["name"];
+        }
+        if (!$rows) fail("No recipients for that audience yet");
+        require_once __DIR__ . "/lib/mailer.php";
+        $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyTxt)));
+        $sent = 0; $failed = 0;
+        foreach ($rows as $email => $name) {
+            try {
+                ego_send_mail($db, $email, $name ?: null, $subject, $html);
+                $sent++;
+                db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subject, $bodyTxt);
+            } catch (Throwable $e) { $failed++; }
+        }
+        log_activity($db, null, (int)$actor["id"], "campaign_sent", ["audience" => $audience, "sent" => $sent, "failed" => $failed]);
+        send(["ok" => true, "sent" => $sent, "failed" => $failed, "recipients" => count($rows)]);
     }
     case "POST /notes": {
         $actor = require_role($db, "admin");

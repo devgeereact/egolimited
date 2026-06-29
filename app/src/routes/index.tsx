@@ -118,6 +118,7 @@ import AssetForm from "@/pages/ego/assets/AssetForm"
 // 🏗️ EGO LIMITED — announcements (M-A)
 import AnnouncementsList from "@/pages/ego/announcements/AnnouncementsList"
 import AnnouncementForm from "@/pages/ego/announcements/AnnouncementForm"
+import CampaignsPage from "@/pages/ego/campaigns/CampaignsPage"
 // 🏗️ EGO LIMITED — contracts / PPM (M-D)
 import ContractsList from "@/pages/ego/contracts/ContractsList"
 import ContractForm from "@/pages/ego/contracts/ContractForm"
@@ -314,6 +315,7 @@ export const router = createBrowserRouter (
             {path: "ego/announcements", element: <AnnouncementsList /> },
             {path: "ego/announcements/new", element: <AnnouncementForm /> },
             {path: "ego/announcements/edit", element: <AnnouncementForm /> },
+            {path: "ego/campaigns", element: <CampaignsPage /> },
           ],
         },
         // Founder only: integration secrets / API keys

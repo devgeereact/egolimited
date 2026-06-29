@@ -21,6 +21,7 @@ import {
   ClipboardList,
   Boxes,
   Megaphone,
+  Send,
   FileSignature,
   ShieldAlert,
   FileCheck2,
@@ -72,6 +73,7 @@ const NAV: EgoSection[] = [
     label: "Workspace",
     items: [
       { title: "Email", url: "ego/inbox", icon: Inbox },
+      { title: "Campaigns", url: "ego/campaigns", icon: Send, min: "manager" },
       { title: "Reviews", url: "ego/reviews", icon: Quote },
       { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
     ],
