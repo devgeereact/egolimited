@@ -41,22 +41,6 @@ const primary = [
   { to: "/resources", label: "Resources" },
 ]
 
-// "Track a job" + "My account" merged into one seamless customer menu.
-const customer = [
-  {
-    to: "/track",
-    label: "Track a job",
-    desc: "Live status from your job reference and surname. No login.",
-    icon: Navigation,
-  },
-  {
-    to: "/portal",
-    label: "My account",
-    desc: "A secure email link to your jobs, invoices and statements.",
-    icon: ShieldCheck,
-  },
-]
-
 // Shared treatment for top-level nav items: subtle text plus an ember underline
 // that wipes in on hover and stays lit on the active route.
 const navLink =
@@ -344,20 +328,14 @@ export default function SiteNav() {
                   </Link>
                 ))}
 
-                {/* My account — Track a job + account, merged. */}
-                <div className="mt-2 px-3 pb-1 pt-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                  My account
-                </div>
-                {customer.map((c) => (
-                  <Link
-                    key={c.to}
-                    to={c.to}
-                    className="flex items-center gap-2.5 rounded-md px-3 py-2 text-base font-medium hover:bg-accent"
-                  >
-                    <c.icon className="h-4 w-4 text-primary" />
-                    {c.label}
-                  </Link>
-                ))}
+                {/* Customer entry — track a job (no login on the public site). */}
+                <Link
+                  to="/track"
+                  className="mt-2 flex items-center gap-2.5 rounded-md px-3 py-2 text-base font-medium hover:bg-accent"
+                >
+                  <Navigation className="h-4 w-4 text-primary" />
+                  Track a job
+                </Link>
               </nav>
               <div className="mt-6 flex flex-col gap-3 border-t border-border pt-6">
                 <a
