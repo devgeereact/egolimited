@@ -1,8 +1,9 @@
-import React from "react"
+import React, { lazy } from "react"
 import ReactDOM from "react-dom/client"
 import {
   createBrowserRouter,
   RouterProvider,
+  Navigate,
   isRouteErrorResponse,
   useRouteError,
 } from "react-router-dom"
@@ -14,24 +15,24 @@ import { AuthProvider } from "@/lib/auth"
 import ErrorPage from "@/components/ErrorPage"
 import "@/index.css"
 
+// Shell + the landing index ship in the initial bundle (most-hit, above the
+// fold). Every other route is code-split so a first-time visitor to "/" no
+// longer downloads the portal, tracker, survey and PDF trigger code up front.
 import SiteLayout from "@/site/SiteLayout"
 import Home from "@/site/pages/Home"
-import About from "@/site/pages/About"
-import Services from "@/site/pages/Services"
-import ServiceDetail from "@/site/pages/ServiceDetail"
-import Sectors from "@/site/pages/Sectors"
-import Areas from "@/site/pages/Areas"
-import AreaDetail from "@/site/pages/AreaDetail"
-import Accreditations from "@/site/pages/Accreditations"
-import Resources from "@/site/pages/Resources"
-import ResourceArticle from "@/site/pages/ResourceArticle"
-import Contact from "@/site/pages/Contact"
-import Track from "@/site/pages/Track"
-import Portal from "@/site/pages/Portal"
-import Survey from "@/site/pages/Survey"
-import Verify from "@/site/pages/Verify"
-import Legal from "@/site/pages/Legal"
-import SiteNotFound from "@/site/pages/NotFound"
+const About = lazy(() => import("@/site/pages/About"))
+const Services = lazy(() => import("@/site/pages/Services"))
+const ServiceDetail = lazy(() => import("@/site/pages/ServiceDetail"))
+const Sectors = lazy(() => import("@/site/pages/Sectors"))
+const Areas = lazy(() => import("@/site/pages/Areas"))
+const AreaDetail = lazy(() => import("@/site/pages/AreaDetail"))
+const Accreditations = lazy(() => import("@/site/pages/Accreditations"))
+const Contact = lazy(() => import("@/site/pages/Contact"))
+const Track = lazy(() => import("@/site/pages/Track"))
+const Survey = lazy(() => import("@/site/pages/Survey"))
+const Verify = lazy(() => import("@/site/pages/Verify"))
+const Legal = lazy(() => import("@/site/pages/Legal"))
+const SiteNotFound = lazy(() => import("@/site/pages/NotFound"))
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 5 * 60 * 1000, retry: 1, refetchOnWindowFocus: false } },
@@ -68,11 +69,12 @@ const router = createBrowserRouter(
         { path: "areas", element: <Areas /> },
         { path: "areas/:slug", element: <AreaDetail /> },
         { path: "accreditations", element: <Accreditations /> },
-        { path: "resources", element: <Resources /> },
-        { path: "resources/:slug", element: <ResourceArticle /> },
         { path: "contact", element: <Contact /> },
         { path: "track", element: <Track /> },
-        { path: "portal", element: <Portal /> },
+        // The real customer portal is the token link (/app/track/:token), surfaced
+        // by the tracker. Keep /portal working as a redirect for any old links.
+        { path: "portal", element: <Navigate to="/track" replace /> },
+        { path: "resources", element: <Navigate to="/accreditations" replace /> },
         { path: "survey", element: <Survey /> },
         { path: "verify/:id", element: <Verify /> },
         { path: "privacy", element: <Legal kind="privacy" /> },

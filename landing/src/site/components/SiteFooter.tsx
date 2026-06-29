@@ -184,9 +184,9 @@ export default function SiteFooter() {
             {[
               { to: "/about", label: "About us" },
               { to: "/accreditations", label: "Trust & insurance" },
-              { to: "/resources", label: "Resources" },
-              { to: "/track", label: "Track a job" },
               { to: "/contact", label: "Contact" },
+              // accountLink = "Track a job" (logged out) or "My dashboard" (admin),
+              // so we never list "Track a job" twice.
               accountLink,
             ].map((l) => (
               <li key={l.to}>

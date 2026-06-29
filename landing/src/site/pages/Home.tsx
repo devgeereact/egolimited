@@ -114,7 +114,7 @@ export default function Home() {
                 href={`tel:${company.emergencyPhone.replace(/\s/g, "")}`}
                 className="inline-flex w-full items-center justify-center gap-1.5 rounded-full border border-destructive/40 bg-destructive/15 px-3.5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-destructive/25 sm:w-auto sm:py-2"
               >
-                <Siren className="h-4 w-4 text-danger" />
+                <Siren className="h-4 w-4 text-red-300" />
                 Emergency call-out
               </a>
             </div>
@@ -525,11 +525,11 @@ export default function Home() {
                 cta: "Track now",
               },
               {
-                to: "/portal",
+                to: "/track",
                 icon: ShieldCheck,
                 title: "My account",
-                body: "Get a secure email link to view jobs, invoices and statements. No password.",
-                cta: "Get my link",
+                body: "Look up your job, then open your secure portal for full detail, invoices and updates.",
+                cta: "Open my portal",
               },
             ].map((c, i) => (
               <Reveal key={c.title} delay={i * 0.06}>

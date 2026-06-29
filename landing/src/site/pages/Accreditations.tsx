@@ -8,6 +8,9 @@ import {
   Zap,
   HardHat,
   ArrowRight,
+  CalendarCheck,
+  PiggyBank,
+  ClipboardCheck,
 } from "lucide-react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
@@ -147,6 +150,52 @@ export default function Accreditations() {
               <h3 className="mt-4 font-serif text-lg font-bold">{r.title}</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 {r.body}
+              </p>
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* Good to know — evergreen, practical guidance (no blog to maintain). */}
+      <Section>
+        <div className="mb-10 max-w-2xl">
+          <Eyebrow>Good to know</Eyebrow>
+          <h2 className="mt-3 font-serif text-3xl font-bold md:text-4xl">
+            Practical advice, from the people who do the work
+          </h2>
+          <p className="mt-3 text-muted-foreground">
+            No jargon and nothing to sell you that you do not need. A few honest
+            pointers on keeping a property in good order.
+          </p>
+        </div>
+        <div className="grid gap-6 md:grid-cols-3">
+          {[
+            {
+              icon: PiggyBank,
+              title: "Planned beats reactive",
+              body: "Waiting for things to break feels cheaper, but emergency repairs usually cost several times more than the same work on a schedule. A planned visit catches the failing seal or blocked gutter before it does damage.",
+            },
+            {
+              icon: CalendarCheck,
+              title: "A few seasonal checks save a scramble",
+              body: "Before winter: bleed the radiators, lag exposed pipes, test the heating, clear the gutters and check the seals. None of it takes long, and all of it is cheaper than an emergency call-out in the first frost.",
+            },
+            {
+              icon: ClipboardCheck,
+              title: "What a good contractor looks like",
+              body: "Turning up on time is the floor, not the ceiling. Look for a price confirmed before work starts, a clear record of what was done, and one person you can call who actually knows your property.",
+            },
+          ].map((g) => (
+            <div
+              key={g.title}
+              className="rounded-2xl border border-border bg-card p-7"
+            >
+              <div className="grid h-11 w-11 place-items-center rounded-lg bg-accent text-accent-foreground">
+                <g.icon className="h-5 w-5" />
+              </div>
+              <h3 className="mt-4 font-serif text-lg font-bold">{g.title}</h3>
+              <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                {g.body}
               </p>
             </div>
           ))}

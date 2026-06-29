@@ -118,6 +118,12 @@ export default {
           ring: "hsl(var(--sidebar-ring))",
         },
       },
+      // Brand easing — the one curve used across motion (mirrors --ease in CSS).
+      // Named so arbitrary `ease-[cubic-bezier(…,…)]` (ambiguous to Tailwind's
+      // comma parser) isn't needed in class strings.
+      transitionTimingFunction: {
+        brand: "cubic-bezier(0.22, 1, 0.36, 1)",
+      },
       keyframes: {
         "accordion-down": {
           from: { height: "0" },

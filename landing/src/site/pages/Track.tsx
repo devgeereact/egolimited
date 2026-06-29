@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Circle,
   AlertCircle,
+  ArrowRight,
   Phone,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -24,23 +25,14 @@ interface TrackResult {
   title: string
   status: string
   status_label: string
-  priority: string
+  step: number
+  stages: string[]
   scheduled_for: string | null
   engineer: string | null
   updated_at: string | null
+  cancelled: boolean
+  portal_url: string
 }
-
-// The forward path a job moves through. "cancelled" is handled separately.
-// Mirrors the internal lifecycle in src/app/lib/jobStatus.ts.
-const STEPS = [
-  { key: "booked", label: "Booked in" },
-  { key: "quoted", label: "Quote sent" },
-  { key: "approved", label: "Approved" },
-  { key: "en_route", label: "En route" },
-  { key: "on_site", label: "On site" },
-  { key: "done", label: "Completed" },
-  { key: "invoiced", label: "Invoiced" },
-]
 
 function fmt(dt: string | null): string {
   if (!dt) return "To be confirmed"
@@ -69,7 +61,10 @@ export default function Track() {
     setError(null)
     setResult(null)
     try {
-      const r = await api.post<TrackResult>("track.php", { reference, surname })
+      const r = await api.post<TrackResult>("/api/track/lookup", {
+        reference: reference.trim(),
+        surname: surname.trim(),
+      })
       setResult(r)
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not find that job.")
@@ -78,12 +73,10 @@ export default function Track() {
     }
   }
 
-  const cancelled = result?.status === "cancelled"
-  // "awaiting_parts" is a pause during on-site work — show it at the on-site step.
-  const trackKey = result?.status === "awaiting_parts" ? "on_site" : result?.status
-  const currentIndex = result
-    ? STEPS.findIndex((s) => s.key === trackKey)
-    : -1
+  // Server returns the canonical stage list + the current step index.
+  const stages = result?.stages ?? []
+  const currentIndex = result?.step ?? -1
+  const cancelled = result?.cancelled ?? false
 
   return (
     <>
@@ -164,11 +157,11 @@ export default function Track() {
                   </p>
                 ) : (
                   <ol className="space-y-0">
-                    {STEPS.map((s, i) => {
+                    {stages.map((label, i) => {
                       const done = i < currentIndex
                       const active = i === currentIndex
                       return (
-                        <li key={s.key} className="flex gap-3">
+                        <li key={label} className="flex gap-3">
                           <div className="flex flex-col items-center">
                             {done ? (
                               <CheckCircle2 className="h-5 w-5 text-primary" />
@@ -180,7 +173,7 @@ export default function Track() {
                             ) : (
                               <Circle className="h-5 w-5 text-border" />
                             )}
-                            {i < STEPS.length - 1 && (
+                            {i < stages.length - 1 && (
                               <span
                                 className={
                                   "my-1 w-0.5 flex-1 " +
@@ -193,14 +186,12 @@ export default function Track() {
                             <div
                               className={
                                 "text-sm font-medium " +
-                                (active
+                                (active || done
                                   ? "text-foreground"
-                                  : done
-                                    ? "text-foreground"
-                                    : "text-muted-foreground")
+                                  : "text-muted-foreground")
                               }
                             >
-                              {s.label}
+                              {label}
                             </div>
                           </div>
                         </li>
@@ -223,6 +214,30 @@ export default function Track() {
                     </span>
                   </div>
                 </div>
+
+                {/* Direct, one-tap route into the customer's own portal — full
+                    detail, documents, invoices and a secure message thread. */}
+                {result.portal_url && (
+                  <div className="mt-5 flex flex-col gap-3 rounded-xl border border-accent/40 bg-accent/10 p-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-sm">
+                      <div className="font-semibold">Open your customer portal</div>
+                      <div className="text-muted-foreground">
+                        See full detail, documents and invoices, and message us about this job.
+                      </div>
+                    </div>
+                    <Button asChild size="sm" className="shrink-0">
+                      <a href={result.portal_url}>
+                        Go to my portal
+                        <ArrowRight className="ml-1 h-4 w-4" />
+                      </a>
+                    </Button>
+                  </div>
+                )}
+                {result.updated_at && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Last updated {fmt(result.updated_at)}.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -236,12 +251,12 @@ export default function Track() {
             <div className="mt-6 grid gap-4 sm:grid-cols-2">
               {[
                 { label: "Booked in", body: "We have your job logged and are preparing your quote." },
-                { label: "Quote sent", body: "Your quote is with you. We start work once you approve it, so there are no surprises." },
-                { label: "Approved", body: "You have approved the quote. We are scheduling an engineer and a slot." },
+                { label: "Scheduled", body: "Your quote is approved and we have set an engineer and a slot." },
                 { label: "En route", body: "Your engineer is on the way to the property within the agreed window." },
                 { label: "On site", body: "We are at the property carrying out the work, and will flag anything unexpected before doing it." },
                 { label: "Completed", body: "The work is done, the area is tidied, and we have confirmed you are happy with it." },
                 { label: "Invoiced", body: "A clear, itemised invoice has been sent, with payment details and terms on it." },
+                { label: "Paid", body: "Payment is settled and the job is closed. Thanks for choosing EGO." },
               ].map((s, i) => (
                 <div
                   key={s.label}

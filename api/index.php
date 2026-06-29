@@ -1572,6 +1572,54 @@ switch ("$method $route") {
     }
 
     /* ===================== M11: CUSTOMER PORTAL (public, token-scoped) ===================== */
+    // Public job tracker for the marketing site: reference + surname -> live
+    // status, plus a one-tap link into the customer's own portal (token URL).
+    // No auth: the surname is the shared secret that gates the reference.
+    case "POST /track/lookup": {
+        $b = body();
+        $ref = strtoupper(trim($b["reference"] ?? ""));
+        $surname = trim($b["surname"] ?? "");
+        if ($ref === "" || $surname === "") fail("Enter your job reference and the surname on the booking.");
+        // Generic message either way so the form can't be used to enumerate refs.
+        $notFound = "We couldn't find a job with that reference and surname. Check your booking confirmation, or give us a call.";
+        $job = db_one($db,
+            "SELECT j.id, j.reference, j.title, j.status, j.scheduled_start, j.updated_at,
+                    u.name AS engineer_name, c.name AS customer_name
+             FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id
+             LEFT JOIN ego_users u ON u.id=j.engineer_id
+             WHERE UPPER(j.reference)=? AND j.deleted_at IS NULL LIMIT 1", "s", $ref);
+        if (!$job) fail($notFound, 404);
+        // Verify the surname against any token of the customer's name (case-insensitive).
+        $name = strtolower($job["customer_name"] ?? "");
+        $sn = strtolower($surname);
+        $tokens = preg_split('/\s+/', $name, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $ok = in_array($sn, $tokens, true) || ($sn !== "" && str_contains($name, $sn));
+        if (!$ok) fail($notFound, 404);
+
+        // Canonical 7-stage customer-facing track. on_hold pauses at "On site".
+        $order  = ["new"=>0,"scheduled"=>1,"en_route"=>2,"on_site"=>3,"on_hold"=>3,"completed"=>4,"invoiced"=>5,"paid"=>6,"closed"=>6];
+        $labels = ["Booked in","Scheduled","En route","On site","Completed","Invoiced","Paid"];
+        $status = $job["status"];
+        $cancelled = $status === "cancelled";
+        $step = $order[$status] ?? 0;
+        $statusLabel = $cancelled ? "Cancelled" : ($status === "on_hold" ? "On hold" : ($labels[$step] ?? "In progress"));
+
+        send([
+            "reference"     => $job["reference"],
+            "title"         => $job["title"],
+            "status"        => $status,
+            "status_label"  => $statusLabel,
+            "step"          => $step,
+            "stages"        => $labels,
+            "scheduled_for" => $job["scheduled_start"],
+            "engineer"      => $job["engineer_name"],
+            "updated_at"    => $job["updated_at"],
+            "cancelled"     => $cancelled,
+            // One-tap deep link into the customer's own portal (mints/reuses token).
+            "portal_url"    => track_link($db, (int)$job["id"]),
+        ]);
+    }
+
     case "GET /track": {
         $jobId = verify_track_token($db, $_GET["token"] ?? "");
         if (!$jobId) fail("This link has expired or is invalid", 404);

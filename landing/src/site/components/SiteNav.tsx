@@ -12,6 +12,7 @@ import {
   ShieldCheck,
   Wrench,
   Navigation,
+  CheckCircle2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
@@ -38,7 +39,6 @@ const primary = [
   { to: "/sectors", label: "Who we help" },
   { to: "/areas", label: "Areas" },
   { to: "/accreditations", label: "Trust" },
-  { to: "/resources", label: "Resources" },
 ]
 
 // Shared treatment for top-level nav items: subtle text plus an ember underline
@@ -216,6 +216,19 @@ export default function SiteNav() {
                         Send us the list. You get one clear price and a date we
                         can keep, from a dripping tap to a whole portfolio.
                       </p>
+                      <ul className="relative mt-4 space-y-2">
+                        {["Fully insured", "Fixed prices up front", "Most jobs the same week"].map(
+                          (t) => (
+                            <li
+                              key={t}
+                              className="flex items-center gap-2 text-xs font-medium text-primary-foreground/85"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-accent" />
+                              {t}
+                            </li>
+                          ),
+                        )}
+                      </ul>
                     </div>
                     <span className="relative mt-4 inline-flex items-center gap-1 text-sm font-semibold text-accent">
                       Get a free quote

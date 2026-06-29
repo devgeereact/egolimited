@@ -457,13 +457,14 @@ export function NewsletterBand({
     if (!email.trim()) return
     setJoining(true)
     try {
-      // No newsletter endpoint exists; record it through contact.php, which
-      // requires a name + message, so we synthesise both and tag the source.
-      await api.post("contact.php", {
+      // No dedicated newsletter endpoint — record it as a website enquiry
+      // (/api/enquiry needs name + message, so we synthesise both and tag it
+      // as a newsletter signup in the service field for the office inbox).
+      await api.post("/api/enquiry", {
         name: "Newsletter signup",
         email: email.trim(),
+        service: "Newsletter / upkeep list",
         message: "Newsletter / upkeep-list signup from the website.",
-        kind: "newsletter",
         source: "newsletter",
       })
       toast.success("You're on the list. We'll be in touch with seasonal upkeep tips.")
