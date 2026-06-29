@@ -27,7 +27,7 @@ import {
   CarouselPrevious,
 } from "@/components/ui/carousel"
 import { cn } from "@/lib/utils"
-import { counters, testimonials, team } from "@/site/content"
+import { counters, reviews, team } from "@/site/content"
 import { useCompany } from "@/site/CompanyProvider"
 import { img } from "@/site/images"
 import { Eyebrow, Reveal } from "./Bits"
@@ -256,9 +256,10 @@ export function AboutSplit({
 }
 
 /* ------------------------------------------------------------------ *
- * Testimonials — live reviews from our own app (moderated promoter NPS)
- * or Google, served by /reviews.php. Falls back to the curated copy when
- * nothing is published yet, so the section is never empty.
+ * Reviews — live customer reviews from our own app (moderated) or Google,
+ * served by /api/public/reviews. Falls back to the bundled copy when nothing
+ * is published yet, so the section is never empty. One word across the whole
+ * product: "reviews" (formerly split across surveys/testimonials/reviews).
  * ------------------------------------------------------------------ */
 interface ApiReview {
   name: string
@@ -275,7 +276,7 @@ interface ReviewsResponse {
   reviews: ApiReview[]
 }
 
-export function Testimonials() {
+export function Reviews() {
   const { data } = useQuery({
     queryKey: ["public-reviews"],
     queryFn: () => api.get<ReviewsResponse>("/api/public/reviews"),
@@ -289,7 +290,7 @@ export function Testimonials() {
   const live = data?.reviews?.length ? data.reviews : null
   const items: ApiReview[] =
     live ??
-    testimonials.map((t) => ({
+    reviews.map((t) => ({
       name: t.name,
       quote: t.quote,
       role: t.role,

@@ -37,7 +37,7 @@ import {
   FeatureCards3,
   AboutSplit,
   Counter,
-  Testimonials,
+  Reviews,
   NewsletterBand,
 } from "@/site/components/Sections"
 import { serviceIcon } from "@/site/components/serviceIcons"
@@ -289,7 +289,7 @@ export default function Home() {
       </Section>
 
       {/* What customers say */}
-      <Testimonials />
+      <Reviews />
 
       {/* Ways to work with us — service plans */}
       <Section>

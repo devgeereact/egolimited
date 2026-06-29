@@ -17,7 +17,7 @@ import "@/index.css"
 
 // Shell + the landing index ship in the initial bundle (most-hit, above the
 // fold). Every other route is code-split so a first-time visitor to "/" no
-// longer downloads the portal, tracker, survey and PDF trigger code up front.
+// longer downloads the tracker and other sub-page code up front.
 import SiteLayout from "@/site/SiteLayout"
 import Home from "@/site/pages/Home"
 const About = lazy(() => import("@/site/pages/About"))
@@ -29,7 +29,6 @@ const AreaDetail = lazy(() => import("@/site/pages/AreaDetail"))
 const Accreditations = lazy(() => import("@/site/pages/Accreditations"))
 const Contact = lazy(() => import("@/site/pages/Contact"))
 const Track = lazy(() => import("@/site/pages/Track"))
-const Survey = lazy(() => import("@/site/pages/Survey"))
 const Verify = lazy(() => import("@/site/pages/Verify"))
 const Legal = lazy(() => import("@/site/pages/Legal"))
 const SiteNotFound = lazy(() => import("@/site/pages/NotFound"))
@@ -75,7 +74,9 @@ const router = createBrowserRouter(
         // by the tracker. Keep /portal working as a redirect for any old links.
         { path: "portal", element: <Navigate to="/track" replace /> },
         { path: "resources", element: <Navigate to="/accreditations" replace /> },
-        { path: "survey", element: <Survey /> },
+        // Reviews are collected in the customer portal's review form (one path,
+        // one name). The old standalone NPS survey is retired -> send to tracker.
+        { path: "survey", element: <Navigate to="/track" replace /> },
         { path: "verify/:id", element: <Verify /> },
         { path: "privacy", element: <Legal kind="privacy" /> },
         { path: "terms", element: <Legal kind="terms" /> },

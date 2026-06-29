@@ -598,18 +598,20 @@ export const counters: CounterStat[] = [
   { value: 4, suffix: "", label: "Sectors we look after" },
 ]
 
-// PLACEHOLDER testimonials. Attributed by role + London area rather than full
-// names so nothing is presented as a verified named review. Swap in real,
-// permissioned customer quotes before go-live. See brand voice: never publish a
-// claim the business cannot back up.
-export interface Testimonial {
+// PLACEHOLDER reviews — the bundled fallback for the public reviews section
+// when the live /api/public/reviews feed is empty. Attributed by role + London
+// area rather than full names so nothing is presented as a verified named
+// review. Swap in real, permissioned customer reviews before go-live. See brand
+// voice: never publish a claim the business cannot back up.
+// (We use one word across the product — "reviews" — for surveys/testimonials/reviews.)
+export interface Review {
   quote: string
   name: string
   role: string
   avatar?: string
 }
 
-export const testimonials: Testimonial[] = [
+export const reviews: Review[] = [
   {
     quote:
       "They turned up in the window they gave me, fixed the door and two other things off my list, and the price was exactly what was quoted. First contractor in a while I would actually call again.",

@@ -10,7 +10,7 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { PageHero, Section, Eyebrow, BannerCtas } from "@/site/components/Bits"
-import { Testimonials } from "@/site/components/Sections"
+import { Reviews } from "@/site/components/Sections"
 import Seo from "@/site/components/Seo"
 import { sectors, process } from "@/site/content"
 import { img, sectorImage } from "@/site/images"
@@ -165,7 +165,7 @@ export default function Sectors() {
         </div>
       </Section>
 
-      <Testimonials />
+      <Reviews />
     </>
   )
 }
