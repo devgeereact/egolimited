@@ -120,6 +120,8 @@ function integration_fields(): array {
         "openrouter_key" => true, "openrouter_model" => false,
         // Inbound email (provider IMAP)
         "imap_host" => false, "imap_port" => false, "imap_user" => false, "imap_pass" => true, "imap_secure" => false,
+        // Google reviews import (Places API)
+        "google_places_key" => true, "google_place_id" => false,
     ];
 }
 /** Read one integration value (server-side only). */
@@ -1221,7 +1223,7 @@ switch ("$method $route") {
         $page = max(1, (int)($_GET["page"] ?? 1));
         $offset = ($page - 1) * $per;
         $rows = db_all($db,
-            "SELECT m.id,m.rating,m.body,m.from_name,m.created_at,m.acknowledged,m.job_id,
+            "SELECT m.id,m.rating,m.body,m.from_name,m.created_at,m.acknowledged,m.job_id,m.source,
                     j.reference AS job_reference, c.name AS customer_name
              FROM ego_messages m
              LEFT JOIN ego_jobs j ON j.id=m.job_id
@@ -2598,6 +2600,52 @@ switch ("$method $route") {
             "count"   => $count,
             "reviews" => $reviews,
         ]);
+    }
+
+    /* ============================ REVIEWS HUB — add / import Google ============================ */
+    case "POST /reviews/add": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $rating = max(0, min(5, (int)($b["rating"] ?? 0)));
+        $bodyTxt = trim($b["body"] ?? "");
+        $name = trim($b["name"] ?? "") ?: "Customer";
+        $source = in_array($b["source"] ?? "google", ["app","google"], true) ? $b["source"] : "google";
+        if ($rating < 1 || $bodyTxt === "") fail("Rating and review text required");
+        db_exec($db,
+            "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,acknowledged)
+             VALUES ('inbound','review',?,?,?, 'received',?,1)",
+            "ssis", $name, $bodyTxt, $rating, $source);
+        log_activity($db, null, (int)$actor["id"], "review_added", ["source" => $source]);
+        send(["id" => (int)$db->insert_id], 201);
+    }
+    case "POST /reviews/import-google": {
+        $actor = require_min($db, "manager");
+        $key = integ($db, "google_places_key");
+        $place = integ($db, "google_place_id");
+        if (!$key || !$place) fail("Add a Google Places API key and Place ID in Settings → Integrations first", 400);
+        $url = "https://maps.googleapis.com/maps/api/place/details/json?place_id=" . urlencode($place)
+             . "&fields=reviews&reviews_no_translations=true&key=" . urlencode($key);
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
+        $resp = curl_exec($ch); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+        if ($code !== 200) fail("Google API error ($code) — check the key/Place ID", 400);
+        $data = json_decode($resp ?: "[]", true);
+        $revs = $data["result"]["reviews"] ?? [];
+        $n = 0;
+        foreach ($revs as $r) {
+            $rating = (int)($r["rating"] ?? 0); if ($rating < 1) continue;
+            $text = trim($r["text"] ?? ""); if ($text === "") continue;
+            $name = trim($r["author_name"] ?? "") ?: "Google user";
+            $uid = "google:" . md5($name . ($r["time"] ?? "") . $text);
+            if (db_one($db, "SELECT id FROM ego_messages WHERE uid=?", "s", $uid)) continue; // dedupe
+            db_exec($db,
+                "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,uid,acknowledged)
+                 VALUES ('inbound','review',?,?,?, 'received','google',?,1)",
+                "ssis", $name, $text, $rating, $uid);
+            $n++;
+        }
+        log_activity($db, null, (int)$actor["id"], "google_reviews_imported", ["count" => $n]);
+        send(["imported" => $n]);
     }
 
     default:

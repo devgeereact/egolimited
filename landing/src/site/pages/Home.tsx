@@ -78,9 +78,7 @@ export default function Home() {
 
             <h1 className="font-serif text-[2.9rem] font-bold leading-[0.98] tracking-tight text-balance drop-shadow-[0_2px_10px_rgba(0,0,0,0.55)] sm:text-6xl md:text-7xl">
               The jobs that need doing,{" "}
-              <span className="bg-gradient-to-r from-[hsl(36_92%_68%)] via-[hsl(36_86%_56%)] to-[hsl(46_30%_92%)] bg-clip-text text-transparent">
-                done properly.
-              </span>
+              <span className="text-accent">done properly.</span>
             </h1>
 
             <p className="mt-6 max-w-xl text-lg leading-relaxed text-white/85 text-pretty [text-shadow:0_1px_8px_rgb(0_0_0/0.55)]">
@@ -210,7 +208,7 @@ export default function Home() {
                     <div className="relative overflow-hidden">
                       <img
                         src={serviceImage[s.slug]}
-                        alt=""
+                        alt={`${s.name} in London — EGO LTD`}
                         className="aspect-[16/10] w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         loading="lazy"
                       />
