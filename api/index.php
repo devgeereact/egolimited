@@ -1461,7 +1461,7 @@ switch ("$method $route") {
     case "GET /inbox": {
         require_role($db, "admin");
         $rows = db_all($db,
-            "SELECT m.id,m.direction,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.acknowledged,m.created_at,
+            "SELECT m.id,m.direction,m.channel,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.acknowledged,m.created_at,
                     m.customer_id,m.job_id, c.name AS customer_name, j.reference AS job_reference
              FROM ego_messages m
              LEFT JOIN ego_customers c ON c.id=m.customer_id
@@ -2507,6 +2507,42 @@ switch ("$method $route") {
         if (!$p) fail("Payment not found", 404);
         db_exec($db, "DELETE FROM ego_payments WHERE id=?", "i", $id);
         log_activity($db, null, (int)$actor["id"], "payment_deleted", ["id" => $id, "invoice_id" => (int)$p["invoice_id"]]);
+        send(["ok" => true]);
+    }
+
+    /* ============================ MAIL — drafts + notes ============================ */
+    case "POST /email/draft": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $to = trim($b["to"] ?? "") ?: null;
+        $subject = trim($b["subject"] ?? "");
+        $bodyTxt = trim($b["body"] ?? "");
+        if ($subject === "" && $bodyTxt === "") fail("Nothing to save");
+        $id = (int)($b["id"] ?? 0);
+        if ($id) {
+            db_exec($db, "UPDATE ego_messages SET to_email=?,subject=?,body=? WHERE id=? AND status='draft'", "sssi", $to, $subject, $bodyTxt, $id);
+            send(["id" => $id]);
+        }
+        db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','email',?,?,?, 'draft')",
+            "sss", $to, $subject, $bodyTxt);
+        log_activity($db, null, (int)$actor["id"], "draft_saved", []);
+        send(["id" => (int)$db->insert_id], 201);
+    }
+    case "POST /notes": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $bodyTxt = trim($b["body"] ?? ""); if ($bodyTxt === "") fail("Note is empty");
+        $title = trim($b["title"] ?? "") ?: "Note";
+        db_exec($db, "INSERT INTO ego_messages (direction,channel,from_name,subject,body,status) VALUES ('outbound','note',?,?,?, 'note')",
+            "sss", $actor["name"], $title, $bodyTxt);
+        log_activity($db, null, (int)$actor["id"], "note_added", ["title" => $title]);
+        send(["id" => (int)$db->insert_id], 201);
+    }
+    case "POST /messages/delete": {
+        require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        // Only drafts and internal notes are deletable here (real inbound/sent mail is kept).
+        db_exec($db, "DELETE FROM ego_messages WHERE id=? AND status IN ('draft','note')", "i", $id);
         send(["ok" => true]);
     }
 
