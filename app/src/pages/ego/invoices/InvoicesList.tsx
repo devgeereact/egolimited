@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { FileText, Loader2 } from "lucide-react"
+import { FileText, Loader2, Download } from "lucide-react"
+import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { gbp } from "@/lib/invoicing"
+import { buildInvoicePdf, type InvoiceDoc } from "@/lib/invoicePdf"
+import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { usePager, Pager } from "@/components/ego/Pager"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -20,11 +23,24 @@ interface Row {
 
 const STATUS_FILTERS = ["all", "draft", "sent", "overdue", "paid"]
 
-export default function InvoicesList() {
-  const [kind, setKind] = useState<"invoice" | "quote">("invoice")
+export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?: "invoice" | "quote" } = {}) {
+  const [kind, setKind] = useState<"invoice" | "quote">(defaultKind)
   const [status, setStatus] = useState("all")
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+  const [downloadingId, setDownloadingId] = useState<number | null>(null)
+
+  // Download the branded PDF straight from the list — handy for emailing a
+  // quote/invoice during correspondence without opening the record first.
+  async function downloadRow(id: number) {
+    setDownloadingId(id)
+    try {
+      const { invoice } = await api<{ invoice: InvoiceDoc }>(`/invoices/get?id=${id}`)
+      const label = invoice.kind === "quote" ? "Quote" : "Invoice"
+      buildInvoicePdf(invoice).save(`${invoice.number ?? invoice.payment_reference}-${label}.pdf`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't build the PDF") }
+    finally { setDownloadingId(null) }
+  }
 
   useEffect(() => {
     setLoading(true)
@@ -71,13 +87,14 @@ export default function InvoicesList() {
                 <TableHead>Status</TableHead>
                 <TableHead>Due</TableHead>
                 <TableHead className="text-right">Total</TableHead>
+                <TableHead className="text-right">PDF</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
               ) : rows.length === 0 ? (
-                <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No {kind === "quote" ? "quotes" : "invoices"} here. Raise one from a job.</TableCell></TableRow>
+                <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No {kind === "quote" ? "quotes" : "invoices"} here. Raise one from a job.</TableCell></TableRow>
               ) : pager.slice.map((r) => (
                 <TableRow key={r.id} className="cursor-pointer">
                   <TableCell className="font-mono">
@@ -88,6 +105,12 @@ export default function InvoicesList() {
                   <TableCell><StatusPill status={r.status} /></TableCell>
                   <TableCell className="text-muted-foreground">{r.due_date ?? "—"}</TableCell>
                   <TableCell className="text-right font-mono">{gbp(Number(r.total))}</TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon" className="size-8" disabled={downloadingId === r.id}
+                      onClick={() => downloadRow(r.id)} aria-label={`Download ${r.kind} ${r.number ?? ""}`}>
+                      {downloadingId === r.id ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>

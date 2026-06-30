@@ -4,16 +4,12 @@ import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
 import EngineerLayout from "@/layouts/EngineerLayout"
 
-import ChartsPage from "@/pages/charts/recharts/ReChartsPage"
-
-
 import LoginPage from "@/auth/basic/LoginPage"
 import RegisterPage from "@/auth/basic/RegisterPage"
 import ForgotPasswordPage from "@/auth/basic/ForgotPasswordPage"
 
 import NotFound from "@/pages/NotFound"
 import ErrorPage from "@/pages/ErrorPage"
-import Documentation from "@/pages/Documentation"
 import { ResetPasswordForm } from "@/auth/basic/ResetPasswordForm"
 import { VerifyEmailForm } from "@/auth/basic/VerifyEmailForm"
 import { PasswordResetSuccess } from "@/auth/basic/PasswordResetSuccess"
@@ -23,58 +19,7 @@ import CoverRegisterPage from "@/auth/cover/CoverRegisterPage"
 import CoverResetPasswordPage from "@/auth/cover/CoverResetPasswordPage"
 import CoverVerifyEmailPage from "@/auth/cover/CoverVerifyEmailPage"
 import CoverPasswordResetSuccessPage from "@/auth/cover/CoverPasswordResetSuccessPage"
-import ProductList from "@/pages/eCommerce/ProductList"
-import ProductGrid from "@/pages/eCommerce/ProductGrid"
-import AddProduct from "@/pages/eCommerce/AddProduct"
-import CategoryList from "@/pages/eCommerce/CategoryList"
-import OrderList from "@/pages/eCommerce/OrderList"
-import OrderDetails from "@/pages/eCommerce/OrderDetails"
-import InvoicePage from "@/pages/eCommerce/Invoice"
-import InvoiceCard from "@/pages/eCommerce/InvoiceCard"
-import CustomerList from "@/pages/eCommerce/CustomerList"
-import CustomerDetails from "@/pages/eCommerce/CustomerDetails"
-import ChatBox from "@/pages/apps/Chatbox"
-import CalendarPage from "@/pages/apps/CalendarPage"
-import FileManagerPage from "@/pages/apps/FileManager"
-import AlertsPage from "@/pages/alerts/AlertsPage"
-import AccordionPage from "@/pages/accordion/AccordionPage"
-import SoonerPage from "@/pages/sooner/SoonerPage"
-import BadgesPage from "@/pages/badges/BadgesPage"
-import ButtonsPage from "@/pages/buttons/ButtonsPage"
-import CardsPage from "@/pages/cards/CardsPage"
-import ListGroupPage from "@/pages/listgroups/ListGroupPage"
-import CarouselPage from "@/pages/carousels/CarouselPage"
-import AvatarShowcase from "@/pages/mediaobject/AvatarShowcase"
-import NavbarsPage from "@/pages/navbars/NavbarsPage"
-import ProgressPage from "@/pages/progressbars/ProgressPage"
-import SpinnerExamples from "@/pages/spinners/SpinnerExamples"
-import Boxicons from "@/pages/icons/Boxicons"
-import IconBootstrap from "@/pages/icons/Bootstrap"
-import LucideIconsPage from "@/pages/icons/LucideIconsPage"
-import PricingPage from "@/pages/pricing/PricingPage"
-import FAQPage from "@/pages/FAQPage"
-import Error404 from "@/pages/error/Error404"
-import Error500 from "@/pages/error/Error500"
-import ComingSoon from "@/pages/error/ComingSoon"
-import ReChartsPage from "@/pages/charts/recharts/ReChartsPage"
-import ApexChartsPage from "@/pages/charts/apexcharts/ApexChartsPage"
 import UserProfile from "@/pages/account/UserProfile"
-import EditProfile from "@/pages/account/EditProfile"
-import PasswordSettings from "@/pages/account/PasswordSettings"
-import NotificationSettings from "@/pages/account/NotificationSettings"
-import BasicTables from "@/pages/tables/BasicTables"
-import AdvanceTablesPage from "@/pages/tables/advance-tables/AdvanceTable"
-import DataTablePage from "@/pages/tables/DataTablePage"
-import BasicInput from "@/pages/forms/BasicInputs"
-import FormInputGroup from "@/pages/forms/FormInputGroup"
-import ChecksAndRadios from "@/pages/forms/ChecksAndRadios"
-import FormLayouts from "@/pages/forms/FormLayouts"
-import WizardPage from "@/pages/forms/wizard/WizardPage"
-import FormTextEditor from "@/pages/forms/FormTextEditor"
-import FileUpload01 from "@/pages/forms/fileupload/FileUpload01"
-import DatePickerPage from "@/pages/forms/datepicker/DatePickerPage"
-import SelectExamplesPage from "@/pages/forms/select/SelectExamplesPage"
-import FormRepeater from "@/pages/forms/FormRepeater"
 
 // 🏗️ EGO LIMITED — auth + guards
 import RequireRole from "@/components/ego/RequireRole"
@@ -129,7 +74,7 @@ import RamsList from "@/pages/ego/compliance/RamsList"
 import RamsForm from "@/pages/ego/compliance/RamsForm"
 import CertificatesList from "@/pages/ego/compliance/CertificatesList"
 import CertificateForm from "@/pages/ego/compliance/CertificateForm"
-// 🏗️ EGO LIMITED — scaffolded pages (skeletons)
+// 🏗️ EGO LIMITED — jobs + engineer field app
 import JobsList from "@/pages/ego/jobs/JobsList"
 import JobDetail from "@/pages/ego/jobs/JobDetail"
 import JobForm from "@/pages/ego/jobs/JobForm"
@@ -140,17 +85,8 @@ import EngineerProfile from "@/pages/ego/engineer/EngineerProfile"
 import TrackJob from "@/pages/ego/portal/TrackJob"
 import PortalContact from "@/pages/ego/portal/PortalContact"
 import SettingsPage from "@/pages/ego/settings/SettingsPage"
-// Extra / template additions
-import EmailInbox from "@/pages/email/EmailInbox"
+// 🏗️ EGO LIMITED — task board (kanban)
 import TaskBoard from "@/pages/kanban/TaskBoard"
-import BlogList from "@/pages/blog/BlogList"
-import BlogDetail from "@/pages/blog/BlogDetail"
-import TimelinePage from "@/pages/timeline/TimelinePage"
-import TeamsBoard from "@/pages/teams/TeamsBoard"
-import TestimonialPage from "@/pages/testimonial/TestimonialPage"
-import PaymentForm from "@/pages/payment/PaymentForm"
-import DesignStudio from "@/pages/design-studio/DesignStudio"
-import ContactList from "@/pages/contacts/ContactList"
 
 export const router = createBrowserRouter (
   [
@@ -172,11 +108,6 @@ export const router = createBrowserRouter (
         {path: "auth/cover/new-password", element: <CoverResetPasswordPage /> },
         {path: "auth/cover/password-reset-success", element: <CoverPasswordResetSuccessPage /> },
         {path: "auth/cover/verify-email", element: <CoverVerifyEmailPage /> },
-
-        {path: "error/error-404", element: <Error404 /> },
-        {path: "error/error-500", element: <Error500 /> },
-        {path: "error/coming-soon", element: <ComingSoon /> },
-
       ],
     },
 
@@ -186,75 +117,6 @@ export const router = createBrowserRouter (
       errorElement: <ErrorPage />,
       children: [
         {index: true, element: <HomeRedirect /> },
-
-        {path: "dashboard/charts", element: <ChartsPage /> },
-        {path: "docs", element: <Documentation /> },
-
-        // 🛍️ E-COMMERCE
-        {path: "eCommerce/product-list", element: <ProductList /> },
-        {path: "eCommerce/product-grid", element: <ProductGrid /> },
-        {path: "eCommerce/add-product", element: <AddProduct /> },
-        {path: "eCommerce/categories", element: <CategoryList /> },
-        {path: "eCommerce/order-list", element: <OrderList /> },
-        {path: "eCommerce/order-details", element: <OrderDetails /> },
-        {path: "eCommerce/customer-list", element: <CustomerList /> },
-        {path: "eCommerce/customer-details", element: <CustomerDetails /> },
-        {path: "eCommerce/invoice", element: <InvoicePage /> },
-
-        // application routes
-        {path: "app/chatbox", element: <ChatBox /> },
-        {path: "app/invoice-card", element: <InvoiceCard/> },
-        {path: "app/calendar", element: <CalendarPage /> },
-        {path: "app/file-manager", element: <FileManagerPage /> },
-
-        // component 
-        {path: "components/alerts", element: <AlertsPage /> },
-        {path: "components/accordion", element: <AccordionPage/>},
-        {path: "components/sooner", element: <SoonerPage/>},
-        {path: "components/badges", element: <BadgesPage/>},
-        {path: "components/buttons", element: <ButtonsPage/>},
-        {path: "components/cards", element: <CardsPage/>},
-        {path: "components/list-groups", element: <ListGroupPage/>},
-        {path: "components/carousels", element: <CarouselPage/>},
-        {path: "components/media-object", element: <AvatarShowcase/>},
-        {path: "components/navbars", element: <NavbarsPage/>},
-        {path: "components/progress", element: <ProgressPage/>},
-        {path: "components/spinners", element: <SpinnerExamples/>},
-
-         // boxicons
-        {path: "icons/boxicons", element: <Boxicons/>},
-        {path: "icons/bootstrap", element: <IconBootstrap/>},
-        {path: "icons/lucide", element: <LucideIconsPage/>},
-        {path: "pricing/pricing-tables", element: <PricingPage/>},
-        {path: "faq", element: <FAQPage/>},
-
-        // charts
-        {path: "charts/recharts", element: <ReChartsPage/>},
-        {path: "charts/apex-charts", element: <ApexChartsPage/>},
-
-        // account
-        {path: "account/profile", element: <UserProfile/>},
-        {path: "account/edit-profile", element: <EditProfile/>},
-        {path: "account/password-setting", element: <PasswordSettings/>},
-        {path: "account/notifications", element: <NotificationSettings/>},
-
-        // Tables
-        {path: "tables/basic-tables", element: <BasicTables/>},
-        {path: "tables/advanced-tables", element: <AdvanceTablesPage/>},
-        {path: "tables/data-tables", element: <DataTablePage/>},
-
-        // Forms
-        {path: "forms/basic-inputs", element: <BasicInput/>},
-        {path: "forms/input-groups", element: <FormInputGroup/>},
-        {path: "forms/radio-checkboxes", element: <ChecksAndRadios/>},
-        {path: "forms/form-layouts", element: <FormLayouts/>},
-        {path: "forms/form-wizard", element: <WizardPage/>},
-        {path: "forms/text-editor", element: <FormTextEditor/>},
-        {path: "forms/file-upload", element: <FileUpload01/>},
-        {path: "forms/date-pickers", element: <DatePickerPage/>},
-        {path: "forms/select", element: <SelectExamplesPage/>},
-        {path: "forms/form-repeat", element: <FormRepeater/>},
-
 
         // 🏗️ EGO LIMITED — Office (Employee Admin) and up (role-guarded; server enforces too)
         {
@@ -297,10 +159,12 @@ export const router = createBrowserRouter (
             {path: "ego/certificates/edit", element: <CertificateForm /> },
             {path: "ego/dashboard", element: <EgoDashboard /> },
             {path: "ego/invoices", element: <EgoInvoicesList /> },
+            {path: "ego/quotes", element: <EgoInvoicesList defaultKind="quote" /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },
             {path: "ego/payments", element: <EgoPayments /> },
             {path: "ego/contacts", element: <EgoContacts /> },
             {path: "ego/inbox", element: <EgoInbox /> },
+            {path: "ego/tasks", element: <TaskBoard /> },
             {path: "ego/account/profile", element: <UserProfile /> },
             {path: "ego/activity", element: <EgoActivity /> },
             {path: "ego/reviews", element: <EgoReviews /> },
@@ -325,22 +189,9 @@ export const router = createBrowserRouter (
             {path: "ego/integrations", element: <EgoIntegrations /> },
           ],
         },
-        // Engineer routes moved to their own mobile shell (below, outside AppLayout)
-        // Customer portal (public stub)
+        // Customer portal (in-app shell)
         {path: "ego/portal/track", element: <TrackJob /> },
         {path: "ego/portal/contact", element: <PortalContact /> },
-
-        // ➕ EXTRA / TEMPLATE additions (scaffold)
-        {path: "apps/email", element: <EmailInbox /> },
-        {path: "apps/task-board", element: <TaskBoard /> },
-        {path: "apps/contacts", element: <ContactList /> },
-        {path: "apps/timeline", element: <TimelinePage /> },
-        {path: "apps/teams-board", element: <TeamsBoard /> },
-        {path: "apps/design-studio", element: <DesignStudio /> },
-        {path: "blog", element: <BlogList /> },
-        {path: "blog/detail", element: <BlogDetail /> },
-        {path: "testimonials", element: <TestimonialPage /> },
-        {path: "payment", element: <PaymentForm /> },
 
         // ✅ 404 HANDLER
         { path: "*", element: <NotFound /> },

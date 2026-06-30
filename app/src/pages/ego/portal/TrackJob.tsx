@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import {
-  Wrench, CheckCircle2, Truck, CalendarClock, Loader2, Send, Building2, BadgePoundSterling, AlertCircle, Star,
+  Wrench, CheckCircle2, Truck, CalendarClock, Loader2, Send, Building2, BadgePoundSterling, AlertCircle, Star, Download,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { buildInvoicePdf, type InvoiceDoc } from "@/lib/invoicePdf"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,7 +17,7 @@ interface Track {
   company: { company_name: string; logo_url: string | null; phone: string | null; email: string | null }
   bank: { account_name: string; sort_code: string; account_number: string } | null
   invoice: { number: string | null; total: string; status: string; payment_reference: string; due_date: string | null } | null
-  documents: { kind: string; number: string | null; total: string; status: string; payment_reference: string; issue_date: string | null; due_date: string | null }[]
+  documents: { id: number; kind: string; number: string | null; total: string; status: string; payment_reference: string; issue_date: string | null; due_date: string | null }[]
   messages: { direction: "inbound" | "outbound"; from_name: string | null; body: string; acknowledged: number; created_at: string }[]
   step: number
   cancelled: boolean
@@ -37,6 +38,7 @@ export default function TrackJob() {
   const [rating, setRating] = useState(0)
   const [reviewBody, setReviewBody] = useState("")
   const [savingReview, setSavingReview] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<number | null>(null)
 
   function load() {
     return api<Track>(`/track?token=${encodeURIComponent(token)}`, { auth: false }).then(setT)
@@ -57,6 +59,20 @@ export default function TrackJob() {
       load().catch(() => {})   // pull the message back so it shows in the thread
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't send") }
     finally { setSending(false) }
+  }
+
+  // Download a quote/invoice as the same branded PDF staff generate — fetched
+  // through the token-scoped endpoint, built client-side with the shared builder.
+  async function downloadDoc(doc: Track["documents"][number]) {
+    setDownloadingId(doc.id)
+    try {
+      const { invoice } = await api<{ invoice: InvoiceDoc }>(
+        `/track/document?token=${encodeURIComponent(token)}&id=${doc.id}`, { auth: false },
+      )
+      const label = invoice.kind === "quote" ? "Quote" : "Invoice"
+      buildInvoicePdf(invoice).save(`${invoice.number ?? invoice.payment_reference}-${label}.pdf`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't download that document") }
+    finally { setDownloadingId(null) }
   }
 
   async function submitReview() {
@@ -165,12 +181,17 @@ export default function TrackJob() {
             <p className="mb-3 font-medium">Your quotes &amp; invoices</p>
             <div className="space-y-2">
               {t.documents.map((doc, i) => (
-                <div key={i} className="flex items-center justify-between rounded-lg border p-3 text-sm">
-                  <div>
+                <div key={i} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+                  <div className="min-w-0">
                     <p className="font-medium capitalize">{doc.kind} <span className="font-mono text-xs text-muted-foreground">{doc.number}</span></p>
                     <p className="text-xs capitalize text-muted-foreground">{doc.status}{doc.due_date ? ` · due ${doc.due_date}` : ""}</p>
                   </div>
-                  <span className="font-mono font-semibold">{gbp(Number(doc.total))}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="font-mono font-semibold">{gbp(Number(doc.total))}</span>
+                    <Button variant="outline" size="sm" onClick={() => downloadDoc(doc)} disabled={downloadingId === doc.id} aria-label={`Download ${doc.kind} ${doc.number ?? ""}`}>
+                      {downloadingId === doc.id ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} PDF
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>

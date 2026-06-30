@@ -15,6 +15,7 @@ import {
   Contact,
   GanttChartSquare,
   Quote,
+  ScrollText,
   Truck,
   HardHat,
   Package,
@@ -59,13 +60,14 @@ const NAV: EgoSection[] = [
       { title: "Jobs", url: "ego/jobs", icon: Briefcase },
       { title: "Schedule", url: "ego/schedule", icon: CalendarDays },
       { title: "Contacts", url: "ego/contacts", icon: Contact },
-      { title: "Task Board", url: "apps/task-board", icon: KanbanSquare },
+      { title: "Task Board", url: "ego/tasks", icon: KanbanSquare },
     ],
   },
   {
     label: "Finance",
     items: [
       { title: "Invoices", url: "ego/invoices", icon: FileText },
+      { title: "Quotes", url: "ego/quotes", icon: ScrollText },
       { title: "Payments", url: "ego/payments", icon: CreditCard },
     ],
   },

@@ -5,11 +5,11 @@ import { cn } from "@/lib/utils"
 import { useUIThemeStore } from "@/store/ui-theme.store"
 import { Button } from "@/components/ui/button"
 
-// EGO ships two on-brand modes: Classic Light (default day) and Gaussian Black
-// (night). Both carry the ember accent. Swatches preview cream/black + ember.
 const THEMES = [
-  { id: "classic-light", label: "Classic Light", swatch: "from-[#f4f1e8] to-[#EF9F27]" },
-  { id: "gaussian-black", label: "Gaussian Black", swatch: "from-[#0a0a0a] to-[#EF9F27]" },
+  { id: "dark-blue", label: "Dark Blue", swatch: "from-[#1e1b4b] to-[#2563eb]" },
+  { id: "gaussian-black", label: "Gaussian Black", swatch: "from-[#0a0a0a] to-[#262626]" },
+  { id: "classic-light", label: "Classic Light", swatch: "from-gray-100 to-gray-300" },
+  { id: "semi-dark", label: "Semi Dark", swatch: "from-gray-400 to-gray-900" },
 ]
 
 /** Appearance picker — lives inside Settings (no floating widget). */
@@ -19,7 +19,7 @@ export default function ThemePicker() {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {THEMES.map((t) => {
           const active = theme === t.id
           return (
