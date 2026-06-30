@@ -96,6 +96,8 @@ function inbox_sync(mysqli $db): int {
             }
             continue;
         }
+        // Office already deleted this one — don't resurrect it on re-sync.
+        if (db_one($db, "SELECT 1 FROM ego_deleted_uids WHERE uid=?", "s", $uid)) continue;
 
         $fromEmail = ""; $fromName = "";
         if (!empty($h->from[0])) {

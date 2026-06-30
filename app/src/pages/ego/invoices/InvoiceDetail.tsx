@@ -139,7 +139,7 @@ export default function InvoiceDetail() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
-          <Link to="/ego/invoices"><ArrowLeft /> {label}s</Link>
+          <Link to={inv.kind === "quote" ? "/ego/quotes" : "/ego/invoices"}><ArrowLeft /> {label}s</Link>
         </Button>
         <div className="flex flex-wrap gap-2">
           {isDraft && <Button variant="outline" onClick={save} disabled={busy}>Save draft</Button>}

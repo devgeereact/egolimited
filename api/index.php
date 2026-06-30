@@ -255,6 +255,21 @@ function ensure_message_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS flagged TINYINT(1) NOT NULL DEFAULT 0");
 }
 
+/** Tombstone of deleted IMAP uids — so an inbox re-sync never resurrects mail the
+ *  office already deleted. Idempotent. */
+function ensure_deleted_uids(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_deleted_uids (
+        uid VARCHAR(255) PRIMARY KEY,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+/** Record the uids of the given message ids before they're deleted (so sync skips them). */
+function tombstone_uids(mysqli $db, string $idClause, string $types, array $ids): void {
+    ensure_deleted_uids($db);
+    db_exec($db, "INSERT IGNORE INTO ego_deleted_uids (uid)
+                  SELECT uid FROM ego_messages WHERE $idClause AND uid IS NOT NULL AND uid<>''", $types, ...$ids);
+}
+
 /** Saved email templates — created + seeded with the EGO brand sequences on first
  *  use, so the office has on-brand starting points. Idempotent. */
 function ensure_email_templates(mysqli $db): void {
@@ -1689,6 +1704,7 @@ switch ("$method $route") {
     case "POST /inbox/sync": {
         require_role($db, "admin");
         require __DIR__ . "/lib/inbox.php";
+        ensure_deleted_uids($db); // tombstone table must exist before sync reads it
         try { $n = inbox_sync($db); }
         catch (Throwable $e) { fail($e->getMessage(), 400); }
         send(["synced" => $n]);
@@ -2975,6 +2991,7 @@ switch ("$method $route") {
         $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
         // Office can clear anything from their own mailbox (inbox/sent/drafts/notes).
         // Portal threads stay (they belong to the customer's job record).
+        tombstone_uids($db, "id=?", "i", [$id]); // keep it deleted across re-syncs
         db_exec($db, "DELETE FROM ego_messages WHERE id=? AND (channel IS NULL OR channel <> 'portal')", "i", $id);
         send(["ok" => true]);
     }
@@ -3006,7 +3023,7 @@ switch ("$method $route") {
         $place = implode(",", array_fill(0, count($ids), "?"));
         $types = str_repeat("i", count($ids));
         switch ($action) {
-            case "delete":    $sql = "DELETE FROM ego_messages WHERE id IN ($place) AND (channel IS NULL OR channel <> 'portal')"; break;
+            case "delete":    tombstone_uids($db, "id IN ($place)", $types, $ids); $sql = "DELETE FROM ego_messages WHERE id IN ($place) AND (channel IS NULL OR channel <> 'portal')"; break;
             case "archive":   $sql = "UPDATE ego_messages SET archived=1 WHERE id IN ($place)"; break;
             case "unarchive": $sql = "UPDATE ego_messages SET archived=0 WHERE id IN ($place)"; break;
             case "flag":      $sql = "UPDATE ego_messages SET flagged=1 WHERE id IN ($place)"; break;
