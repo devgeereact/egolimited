@@ -24,7 +24,10 @@ interface Row {
 const STATUS_FILTERS = ["all", "draft", "sent", "overdue", "paid"]
 
 export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?: "invoice" | "quote" } = {}) {
-  const [kind, setKind] = useState<"invoice" | "quote">(defaultKind)
+  // Kind is fixed by the route (Invoices vs Quotes are separate pages). Driving it
+  // straight from the prop (no local toggle) means switching routes always reloads
+  // the right list instead of sticking on whichever loaded first.
+  const kind = defaultKind
   const [status, setStatus] = useState("all")
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,13 +76,7 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs value={kind} onValueChange={(v) => setKind(v as "invoice" | "quote")}>
-          <TabsList>
-            <TabsTrigger value="invoice">Invoices</TabsTrigger>
-            <TabsTrigger value="quote">Quotes</TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <div className="flex flex-wrap items-center justify-end gap-3">
         <Tabs value={status} onValueChange={setStatus}>
           <TabsList>
             {STATUS_FILTERS.map((s) => <TabsTrigger key={s} value={s} className="capitalize">{s}</TabsTrigger>)}
