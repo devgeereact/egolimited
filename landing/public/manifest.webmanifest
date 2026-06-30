@@ -1,13 +1,13 @@
 {
-  "name": "EGO Op Dash",
-  "short_name": "EGO Dash",
-  "description": "EGO LTD operations dashboard — jobs, scheduling, clients and compliance.",
-  "start_url": "/app",
+  "name": "EGO LIMITED — General Maintenance, London",
+  "short_name": "EGO LTD",
+  "description": "EGO LTD — general maintenance for homes and commercial property across London.",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#131312",
-  "theme_color": "#f59e0b",
+  "background_color": "#171816",
+  "theme_color": "#171816",
   "icons": [
     {
       "src": "/favicon.svg",

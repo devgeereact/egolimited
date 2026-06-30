@@ -1705,6 +1705,7 @@ switch ("$method $route") {
         require_role($db, "admin");
         require __DIR__ . "/lib/inbox.php";
         ensure_deleted_uids($db); // tombstone table must exist before sync reads it
+        ensure_message_cols($db); // archived/flagged columns — bounces arrive pre-archived
         try { $n = inbox_sync($db); }
         catch (Throwable $e) { fail($e->getMessage(), 400); }
         send(["synced" => $n]);
@@ -2992,6 +2993,8 @@ switch ("$method $route") {
         // Office can clear anything from their own mailbox (inbox/sent/drafts/notes).
         // Portal threads stay (they belong to the customer's job record).
         tombstone_uids($db, "id=?", "i", [$id]); // keep it deleted across re-syncs
+        require_once __DIR__ . "/lib/inbox.php";
+        try { inbox_delete_remote($db, [$id]); } catch (Throwable $e) { /* best-effort: also delete on the IMAP server */ }
         db_exec($db, "DELETE FROM ego_messages WHERE id=? AND (channel IS NULL OR channel <> 'portal')", "i", $id);
         send(["ok" => true]);
     }
@@ -3023,7 +3026,11 @@ switch ("$method $route") {
         $place = implode(",", array_fill(0, count($ids), "?"));
         $types = str_repeat("i", count($ids));
         switch ($action) {
-            case "delete":    tombstone_uids($db, "id IN ($place)", $types, $ids); $sql = "DELETE FROM ego_messages WHERE id IN ($place) AND (channel IS NULL OR channel <> 'portal')"; break;
+            case "delete":
+                tombstone_uids($db, "id IN ($place)", $types, $ids);
+                require_once __DIR__ . "/lib/inbox.php";
+                try { inbox_delete_remote($db, $ids); } catch (Throwable $e) { /* best-effort server-side delete */ }
+                $sql = "DELETE FROM ego_messages WHERE id IN ($place) AND (channel IS NULL OR channel <> 'portal')"; break;
             case "archive":   $sql = "UPDATE ego_messages SET archived=1 WHERE id IN ($place)"; break;
             case "unarchive": $sql = "UPDATE ego_messages SET archived=0 WHERE id IN ($place)"; break;
             case "flag":      $sql = "UPDATE ego_messages SET flagged=1 WHERE id IN ($place)"; break;

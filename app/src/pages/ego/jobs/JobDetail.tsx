@@ -197,7 +197,7 @@ export default function JobDetail() {
           lines: [{ description: job.title, quantity: 1, unit_price: job.quoted_amount ? Number(job.quoted_amount) : 0 }],
         },
       })
-      navigate(`/ego/invoices/detail?id=${res.id}`)
+      navigate(`/ego/${kind === "quote" ? "quotes" : "invoices"}/detail?id=${res.id}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't create")
     }
@@ -432,7 +432,7 @@ export default function JobDetail() {
               {job.invoices.length > 0 && (
                 <div className="space-y-1.5 border-t pt-2">
                   {job.invoices.map((iv) => (
-                    <Link key={iv.id} to={`/ego/invoices/detail?id=${iv.id}`} className="flex items-center justify-between rounded-md border p-2 hover:bg-muted/40">
+                    <Link key={iv.id} to={`/ego/${iv.kind === "quote" ? "quotes" : "invoices"}/detail?id=${iv.id}`} className="flex items-center justify-between rounded-md border p-2 hover:bg-muted/40">
                       <span className="flex items-center gap-2">
                         <FileText className="size-4 text-muted-foreground" />
                         <span className="font-mono text-xs">{iv.number ?? (iv.kind === "quote" ? "Quote draft" : "Invoice draft")}</span>

@@ -161,6 +161,7 @@ export const router = createBrowserRouter (
             {path: "ego/invoices", element: <EgoInvoicesList key="invoices" /> },
             {path: "ego/quotes", element: <EgoInvoicesList key="quotes" defaultKind="quote" /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },
+            {path: "ego/quotes/detail", element: <EgoInvoiceDetail /> },
             {path: "ego/payments", element: <EgoPayments /> },
             {path: "ego/contacts", element: <EgoContacts /> },
             {path: "ego/inbox", element: <EgoInbox /> },

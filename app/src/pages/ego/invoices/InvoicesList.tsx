@@ -106,7 +106,7 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
               ) : pager.slice.map((r) => (
                 <TableRow key={r.id} className="cursor-pointer">
                   <TableCell className="font-mono">
-                    <Link to={`/ego/invoices/detail?id=${r.id}`} className="hover:underline">{r.number ?? "Draft"}</Link>
+                    <Link to={`/ego/${kind === "quote" ? "quotes" : "invoices"}/detail?id=${r.id}`} className="hover:underline">{r.number ?? "Draft"}</Link>
                   </TableCell>
                   <TableCell className="font-mono text-muted-foreground">{r.payment_reference}</TableCell>
                   <TableCell>{r.customer_name}</TableCell>

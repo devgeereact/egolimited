@@ -70,6 +70,20 @@ export default function CampaignsPage() {
     toast.success(`Loaded "${t.name}" — personalise the {{tokens}} before sending`)
   }
 
+  // Save the current subject/body back as a reusable brand template (e.g. an email
+  // sequence step) so it's there next time. Lands in the same picker above.
+  async function saveAsTemplate() {
+    if (!subject.trim() && !bodyText.trim()) { toast.error("Write a subject or message first"); return }
+    const name = window.prompt("Save this as a template called:")
+    if (!name?.trim()) return
+    try {
+      await api("/email-templates", { method: "POST", body: { name: name.trim(), subject, body: bodyText, kind: "campaign" } })
+      const r = await api<{ templates: Template[] }>("/email-templates")
+      setTemplates(r.templates)
+      toast.success(`Saved "${name.trim()}" to your templates`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save template") }
+  }
+
   async function genImage() {
     if (!imagePrompt.trim()) { toast.error("Describe the image you want"); return }
     setImaging(true)
@@ -202,7 +216,12 @@ export default function CampaignsPage() {
             <div className="space-y-2">
               <Label htmlFor="body">Message</Label>
               <Textarea id="body" rows={10} value={bodyText} onChange={(e) => setBodyText(e.target.value)} placeholder="Write your message, or generate a draft above…" />
-              <p className="text-xs text-muted-foreground">Sends on the EGO branded email template. Plain line breaks become paragraphs.</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">Sends on the EGO branded email template. Plain line breaks become paragraphs.</p>
+                <Button type="button" variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={saveAsTemplate}>
+                  <Plus className="size-4" /> Save as template
+                </Button>
+              </div>
             </div>
 
             {/* AI header image — makes the campaign read like a post */}

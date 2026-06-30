@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { KeyRound, Loader2, ShieldCheck, Mail, CloudSun, Sparkles, Inbox } from "lucide-react"
+import { KeyRound, Loader2, ShieldCheck, Mail, CloudSun, Sparkles, Inbox, MessageSquareQuote } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
-type Field = { key: string; label: string; secret?: boolean; type?: string; placeholder?: string; multiline?: boolean; hint?: string }
+type Field = { key: string; label: string; secret?: boolean; type?: string; placeholder?: string; multiline?: boolean; rows?: number; hint?: string }
 type Section = { id: string; title: string; icon: typeof Mail; fields: Field[] }
 
 const SECTIONS: Section[] = [
@@ -40,6 +40,13 @@ const SECTIONS: Section[] = [
         hint: "Optional. One per line (or comma-separated). Tried in order if the primary is busy or unavailable." },
       { key: "openrouter_image_model", label: "Image model (email marketing)", placeholder: "google/gemini-2.5-flash-image-preview",
         hint: "Optional. Used to generate header images for marketing emails." },
+    ],
+  },
+  {
+    id: "brand", title: "Brand voice", icon: MessageSquareQuote, fields: [
+      { key: "brand_voice", label: "Company voice", multiline: true, rows: 10,
+        placeholder: "Leave blank to use the built-in EGO LTD voice…",
+        hint: "The voice every AI draft and email uses — announcements, tasks, incidents, procurement, the inbox composer and marketing campaigns. Leave blank to use the built-in EGO voice (plain-spoken, straight, British, no hype). Paste your own to override it everywhere." },
     ],
   },
   {
@@ -121,7 +128,7 @@ export default function IntegrationsPage() {
                     <Label htmlFor={f.key}>{f.label}</Label>
                     {f.multiline ? (
                       <Textarea
-                        id={f.key} rows={3} autoComplete="off"
+                        id={f.key} rows={f.rows ?? 3} autoComplete="off"
                         value={vals[f.key] ?? ""}
                         placeholder={f.placeholder}
                         onChange={(e) => setVals((p) => ({ ...p, [f.key]: e.target.value }))}
