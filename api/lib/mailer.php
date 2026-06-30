@@ -32,6 +32,28 @@ function ego_email_shell(mysqli $db, string $heading, string $innerHtml): string
         . "</table></body></html>";
 }
 
+/** Stable, non-trivial one-click unsubscribe token for a recipient (UK PECR opt-out). */
+function ego_unsub_token(string $email): string {
+    return substr(hash_hmac("sha256", strtolower(trim($email)), "ego-unsub-v1"), 0, 24);
+}
+
+/** Readable plain-text from our HTML emails — for the multipart/alternative fallback. */
+function ego_html_to_text(string $html): string {
+    $t = preg_replace('/<(br|\/p|\/div|\/h[1-6]|\/tr|\/li)\b[^>]*>/i', "\n", $html);
+    $t = strip_tags($t);
+    $t = html_entity_decode($t, ENT_QUOTES | ENT_HTML5, "UTF-8");
+    $t = preg_replace('/[ \t]+/', " ", $t);
+    $t = preg_replace('/\n{3,}/', "\n\n", (string) $t);
+    return trim((string) $t);
+}
+
+/** Build a multipart/alternative body (text/plain then text/html) for the given boundary. */
+function ego_mime_alt(string $html, string $boundary): string {
+    $text = ego_html_to_text($html);
+    return "--$boundary\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\n$text\r\n\r\n"
+        . "--$boundary\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n$html\r\n\r\n--$boundary--\r\n";
+}
+
 function ego_send_mail(mysqli $db, string $to, ?string $toName, string $subject, string $html): void {
     if (integ($db, "smtp_host")) {
         try { ego_send_smtp($db, $to, $toName, $subject, $html); return; }
@@ -45,9 +67,11 @@ function ego_send_phpmail(mysqli $db, string $to, ?string $toName, string $subje
     $from = integ($db, "smtp_from") ?: integ($db, "smtp_user");
     if (!$from) throw new RuntimeException("No sender address (Settings → Integrations)");
     $fromName = integ($db, "smtp_from_name") ?: "EGO LIMITED";
+    $boundary = "=_ego_" . bin2hex(random_bytes(8));
     $headers = "From: =?UTF-8?B?" . base64_encode($fromName) . "?= <$from>\r\n"
-        . "Reply-To: $from\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n";
-    if (!@mail($to, $subject, $html, $headers, "-f$from")) throw new RuntimeException("Local mail() failed");
+        . "Reply-To: $from\r\nMIME-Version: 1.0\r\n"
+        . "Content-Type: multipart/alternative; boundary=\"$boundary\"\r\n";
+    if (!@mail($to, $subject, ego_mime_alt($html, $boundary), $headers, "-f$from")) throw new RuntimeException("Local mail() failed");
 }
 
 function ego_send_smtp(mysqli $db, string $to, ?string $toName, string $subject, string $html): void {
@@ -100,11 +124,12 @@ function ego_send_smtp(mysqli $db, string $to, ?string $toName, string $subject,
     $expect("RCPT TO:<$to>", ["250", "251"]);
     $expect("DATA", ["354"]);
 
+    $boundary = "=_ego_" . bin2hex(random_bytes(8));
     $headers = "From: " . mb_encode_mimeheader($fromName) . " <$from>\r\n"
         . "To: " . ($toName ? mb_encode_mimeheader($toName) . " <$to>" : $to) . "\r\n"
         . "Subject: " . mb_encode_mimeheader($subject) . "\r\n"
-        . "MIME-Version: 1.0\r\nContent-Type: text/html; charset=UTF-8\r\n";
-    $body = preg_replace('/^\./m', '..', $html); // dot-stuffing
+        . "MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"$boundary\"\r\n";
+    $body = preg_replace('/^\./m', '..', ego_mime_alt($html, $boundary)); // dot-stuffing
     fwrite($fp, $headers . "\r\n" . $body . "\r\n.\r\n");
     $expect("", ["250"]);
     @fwrite($fp, "QUIT\r\n");
@@ -135,11 +160,11 @@ function render_invoice_email(array $inv, ?array $company, ?string $trackUrl = n
         $track = "<div style='margin:18px 0;padding:14px;border:1px solid #e2e8f0;border-radius:8px;text-align:center'>"
             . "<p style='margin:0 0 10px;font-size:14px'><strong>Track your job online</strong><br>"
             . "<span style='color:#64748b;font-size:13px'>Live progress, your documents and a scannable code.</span></p>"
-            . "<a href='$u' style='display:inline-block;padding:10px 18px;background:#2563eb;color:#fff;border-radius:8px;text-decoration:none;font-weight:600'>Open job tracker</a>"
+            . "<a href='$u' style='display:inline-block;padding:10px 18px;background:#EF9F27;color:#171816;border-radius:8px;text-decoration:none;font-weight:700'>Open job tracker</a>"
             . "<p style='margin:10px 0 0;font-size:12px;color:#64748b;word-break:break-all'>$u</p></div>";
     }
     return "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0f172a'>"
-        . "<h2 style='color:#2563eb'>$coName</h2><p>Hi $name,</p>"
+        . "<h2 style='color:#171816'>$coName<span style='display:inline-block;width:24px;height:3px;background:#EF9F27;border-radius:2px;margin-left:8px;vertical-align:middle'></span></h2><p>Hi $name,</p>"
         . "<p>Please find your <strong>$label $num</strong> for <strong>&pound;$total</strong>.</p>"
         . $bankLine
         . $track

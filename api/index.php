@@ -205,10 +205,10 @@ function notify_job_completed(mysqli $db, int $jobId): void {
     $job = db_one($db, "SELECT j.reference,j.title,u.name AS engineer_name,c.name AS customer_name FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id LEFT JOIN ego_users u ON u.id=j.engineer_id WHERE j.id=?", "i", $jobId);
     if (!$job) return;
     require_once __DIR__ . "/lib/mailer.php";
-    $html = "<div style='font-family:Arial,sans-serif'><h3>Job completed — ready to invoice</h3>"
-        . "<p><strong>{$job['reference']}</strong> — " . htmlspecialchars($job["title"]) . "</p>"
+    $inner = "<p><strong>{$job['reference']}</strong> — " . htmlspecialchars($job["title"]) . "</p>"
         . "<p>Customer: " . htmlspecialchars($job["customer_name"]) . "<br>Engineer: " . htmlspecialchars($job["engineer_name"] ?? "—") . "</p>"
-        . "<p>Raise the invoice from the job in the admin app.</p></div>";
+        . "<p>Raise the invoice from the job in the admin app.</p>";
+    $html = ego_email_shell($db, "Job completed — ready to invoice", $inner);
     try { ego_send_mail($db, $to, $cs["company_name"] ?? null, "Ready to invoice: {$job['reference']}", $html); } catch (Throwable $e) { /* best-effort */ }
 }
 
@@ -1659,8 +1659,9 @@ switch ("$method $route") {
         if ($inv && $inv["status"] === "sent" && $inv["due_date"] && $inv["due_date"] < date("Y-m-d")) $inv["status"] = "overdue";
         // all quotes + invoices the customer should see for this job
         $docs = db_all($db,
-            "SELECT kind,number,total,status,payment_reference,issue_date,due_date FROM ego_invoices
+            "SELECT id,kind,number,total,status,payment_reference,issue_date,due_date FROM ego_invoices
              WHERE job_id=? AND deleted_at IS NULL AND status NOT IN ('draft','void') ORDER BY id DESC", "i", $jobId);
+        foreach ($docs as &$d0) { $d0["id"] = (int)$d0["id"]; } unset($d0);
         foreach ($docs as &$dd) { if ($dd["kind"] === "invoice" && $dd["status"] === "sent" && $dd["due_date"] && $dd["due_date"] < date("Y-m-d")) $dd["status"] = "overdue"; }
         // timeline progress from the job status
         $order = ["new" => 0, "scheduled" => 1, "en_route" => 2, "on_site" => 3, "completed" => 4, "invoiced" => 4, "paid" => 5, "closed" => 5];
@@ -1685,6 +1686,28 @@ switch ("$method $route") {
             "completed" => $completed,
             "review" => $review,
         ]);
+    }
+
+    case "GET /track/document": {
+        // Customer downloads one of their own quotes/invoices from the portal.
+        // Scoped to the job the access token unlocks; drafts/voids never exposed.
+        $jobId = verify_track_token($db, $_GET["token"] ?? "");
+        if (!$jobId) fail("Invalid link", 404);
+        $id = (int)($_GET["id"] ?? 0);
+        $inv = db_one($db,
+            "SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
+                    j.reference AS job_reference, j.title AS job_title
+             FROM ego_invoices i JOIN ego_customers c ON c.id=i.customer_id JOIN ego_jobs j ON j.id=i.job_id
+             WHERE i.id=? AND i.job_id=? AND i.deleted_at IS NULL AND i.status NOT IN ('draft','void')",
+            "ii", $id, $jobId);
+        if (!$inv) fail("Not found", 404);
+        $inv["id"] = (int)$inv["id"];
+        $inv["lines"] = db_all($db, "SELECT description,quantity,unit_price,line_total FROM ego_invoice_lines WHERE invoice_id=? ORDER BY sort,id", "i", $id);
+        $cust = db_one($db, "SELECT a.line1,a.line2,a.city,a.postcode FROM ego_addresses a WHERE a.customer_id=? AND a.is_primary=1", "i", (int)$inv["customer_id"]);
+        $inv["customer_address"] = $cust;
+        $inv["company"] = db_one($db, "SELECT company_name,address,phone,email,vat_number,logo_url,bank_account_name,bank_sort_code,bank_account_number,payment_terms_days FROM ego_company_settings ORDER BY id LIMIT 1");
+        if ($inv["kind"] === "invoice" && $inv["status"] === "sent" && $inv["due_date"] && $inv["due_date"] < date("Y-m-d")) $inv["status"] = "overdue";
+        send(["invoice" => $inv]);
     }
 
     case "POST /track/review": {
@@ -2683,11 +2706,23 @@ switch ("$method $route") {
                 foreach (db_all($db, "SELECT email,name FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL") as $r)
                     $rows[strtolower($r["email"])] = $rows[strtolower($r["email"])] ?? $r["name"];
         }
+        // Honour opt-outs across EVERY audience (suppression list) — UK PECR.
+        foreach (db_all($db, "SELECT email FROM ego_subscribers WHERE subscribed=0") as $r) unset($rows[strtolower($r["email"])]);
         if (!$rows) fail("No recipients for that audience yet");
         require_once __DIR__ . "/lib/mailer.php";
-        $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyTxt)));
+        $bodyHtml = nl2br(htmlspecialchars($bodyTxt));
+        $coName = htmlspecialchars((db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED");
+        $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
+        $unsubBase = "$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe";
         $sent = 0; $failed = 0;
         foreach ($rows as $email => $name) {
+            // Throttle so a big send doesn't saturate the SMTP relay (~8/sec).
+            if ($sent + $failed > 0) usleep(120000);
+            // Per-recipient unsubscribe link so every marketing email carries a real opt-out.
+            $link = htmlspecialchars($unsubBase . "?e=" . rawurlencode($email) . "&t=" . ego_unsub_token($email));
+            $foot = "<p style='margin:18px 0 0;color:#9ca3af;font-size:12px'>You're receiving this from $coName. "
+                . "<a href='$link' style='color:#9ca3af'>Unsubscribe</a>.</p>";
+            $html = ego_email_shell($db, "", $bodyHtml . $foot);
             try {
                 ego_send_mail($db, $email, $name ?: null, $subject, $html);
                 $sent++;
@@ -2716,6 +2751,29 @@ switch ("$method $route") {
     }
 
     /* ============================ PUBLIC (landing — no auth) ============================ */
+    case "GET /unsubscribe": {
+        // One-click marketing opt-out (UK PECR). Token is HMAC-derived from the email,
+        // so the link is stable and not trivially guessable. Idempotent.
+        require_once __DIR__ . "/lib/mailer.php";
+        ensure_subscribers_table($db);
+        $e = strtolower(trim((string)($_GET["e"] ?? "")));
+        $t = (string)($_GET["t"] ?? "");
+        $ok = filter_var($e, FILTER_VALIDATE_EMAIL) && hash_equals(ego_unsub_token($e), $t);
+        if ($ok) db_exec($db, "INSERT INTO ego_subscribers (email,source,subscribed) VALUES (?,'unsubscribe',0)
+                               ON DUPLICATE KEY UPDATE subscribed=0", "s", $e);
+        $co = htmlspecialchars((db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED");
+        $msg = $ok
+            ? "<h2 style='color:#171816;margin:0 0 8px'>You're unsubscribed</h2><p style='color:#4b5563'>You won't receive any more marketing emails from $co. You'll still get essential messages about jobs you book with us.</p>"
+            : "<h2 style='color:#171816;margin:0 0 8px'>Link not valid</h2><p style='color:#4b5563'>This unsubscribe link has expired or is incorrect. Reply to any email from us and we'll remove you.</p>";
+        header("Content-Type: text/html; charset=UTF-8");
+        echo "<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Unsubscribe</title></head>"
+            . "<body style='margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif'>"
+            . "<div style='max-width:480px;margin:48px auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden'>"
+            . "<div style='background:#171816;padding:16px 24px'><span style='color:#fff;font-weight:700;letter-spacing:.05em'>$co</span>"
+            . "<span style='display:inline-block;width:24px;height:3px;background:#EF9F27;border-radius:2px;margin-left:10px;vertical-align:middle'></span></div>"
+            . "<div style='padding:28px 24px'>$msg</div></div></body></html>";
+        exit;
+    }
     case "GET /public/company": {
         $cs = db_one($db, "SELECT company_name,phone,email,address,vat_number,companies_house_no FROM ego_company_settings ORDER BY id LIMIT 1") ?? [];
         send(["company" => [
