@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react"
 import { useParams } from "react-router-dom"
 import {
-  Wrench, CheckCircle2, Truck, CalendarClock, Loader2, Send, Building2, BadgePoundSterling, AlertCircle, Star,
+  Wrench, CheckCircle2, Truck, CalendarClock, Loader2, Send, Building2, BadgePoundSterling, AlertCircle, Star, Download,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { buildInvoicePdf, type InvoiceDoc } from "@/lib/invoicePdf"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent } from "@/components/ui/card"
@@ -16,7 +17,7 @@ interface Track {
   company: { company_name: string; logo_url: string | null; phone: string | null; email: string | null }
   bank: { account_name: string; sort_code: string; account_number: string } | null
   invoice: { number: string | null; total: string; status: string; payment_reference: string; due_date: string | null } | null
-  documents: { kind: string; number: string | null; total: string; status: string; payment_reference: string; issue_date: string | null; due_date: string | null }[]
+  documents: { id: number; kind: string; number: string | null; total: string; status: string; payment_reference: string; issue_date: string | null; due_date: string | null }[]
   messages: { direction: "inbound" | "outbound"; from_name: string | null; body: string; acknowledged: number; created_at: string }[]
   step: number
   cancelled: boolean
@@ -37,6 +38,7 @@ export default function TrackJob() {
   const [rating, setRating] = useState(0)
   const [reviewBody, setReviewBody] = useState("")
   const [savingReview, setSavingReview] = useState(false)
+  const [downloadingId, setDownloadingId] = useState<number | null>(null)
 
   function load() {
     return api<Track>(`/track?token=${encodeURIComponent(token)}`, { auth: false }).then(setT)
@@ -57,6 +59,20 @@ export default function TrackJob() {
       load().catch(() => {})   // pull the message back so it shows in the thread
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't send") }
     finally { setSending(false) }
+  }
+
+  // Download a quote/invoice as the same branded PDF staff generate — fetched
+  // through the token-scoped endpoint, built client-side with the shared builder.
+  async function downloadDoc(doc: Track["documents"][number]) {
+    setDownloadingId(doc.id)
+    try {
+      const { invoice } = await api<{ invoice: InvoiceDoc }>(
+        `/track/document?token=${encodeURIComponent(token)}&id=${doc.id}`, { auth: false },
+      )
+      const label = invoice.kind === "quote" ? "Quote" : "Invoice"
+      buildInvoicePdf(invoice).save(`${invoice.number ?? invoice.payment_reference}-${label}.pdf`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't download that document") }
+    finally { setDownloadingId(null) }
   }
 
   async function submitReview() {
@@ -107,7 +123,7 @@ export default function TrackJob() {
 
           {/* Timeline */}
           {t.cancelled ? (
-            <p className="mt-4 rounded-lg bg-red-500/10 p-3 text-sm font-medium text-red-600">This job was cancelled.</p>
+            <p className="mt-4 rounded-lg bg-destructive/10 p-3 text-sm font-medium text-destructive">This job was cancelled.</p>
           ) : (
             <ol className="mt-5 space-y-3">
               {STEPS.map((s, i) => {
@@ -115,7 +131,7 @@ export default function TrackJob() {
                 return (
                   <li key={s} className="flex items-center gap-3">
                     <span className={cn("flex size-6 items-center justify-center rounded-full text-xs",
-                      done ? "bg-emerald-500 text-white" : current ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
+                      done ? "bg-accent text-accent-foreground" : current ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>
                       {done ? <CheckCircle2 className="size-4" /> : i + 1}
                     </span>
                     <span className={cn("text-sm", current ? "font-semibold" : done ? "text-foreground" : "text-muted-foreground")}>{s}</span>
@@ -129,9 +145,9 @@ export default function TrackJob() {
 
       {/* On the way card */}
       {onTheWay && t.job.engineer_name && (
-        <Card className="mb-4 border-amber-500/30">
+        <Card className="mb-4 border-accent/30">
           <CardContent className="flex items-center gap-3 p-4">
-            <Truck className="size-5 text-amber-600" />
+            <Truck className="size-5 text-accent" />
             <p className="text-sm"><span className="font-medium">{t.job.engineer_name}</span> {t.job.status === "on_site" ? "is on site." : "is on the way."}</p>
           </CardContent>
         </Card>
@@ -146,7 +162,7 @@ export default function TrackJob() {
               <span className="font-mono text-lg font-semibold">{gbp(Number(t.invoice.total))}</span>
             </div>
             {t.invoice.status === "paid" ? (
-              <p className="mt-2 rounded-lg bg-emerald-500/10 p-2 text-center text-sm font-medium text-emerald-600">Paid — thank you!</p>
+              <p className="mt-2 rounded-lg bg-accent/10 p-2 text-center text-sm font-medium text-accent">Paid — thank you!</p>
             ) : (
               <div className="mt-3 rounded-lg bg-muted/50 p-3 text-sm">
                 <p className="font-medium">Pay by bank transfer</p>
@@ -165,12 +181,17 @@ export default function TrackJob() {
             <p className="mb-3 font-medium">Your quotes &amp; invoices</p>
             <div className="space-y-2">
               {t.documents.map((doc, i) => (
-                <div key={i} className="flex items-center justify-between rounded-lg border p-3 text-sm">
-                  <div>
+                <div key={i} className="flex items-center justify-between gap-3 rounded-lg border p-3 text-sm">
+                  <div className="min-w-0">
                     <p className="font-medium capitalize">{doc.kind} <span className="font-mono text-xs text-muted-foreground">{doc.number}</span></p>
                     <p className="text-xs capitalize text-muted-foreground">{doc.status}{doc.due_date ? ` · due ${doc.due_date}` : ""}</p>
                   </div>
-                  <span className="font-mono font-semibold">{gbp(Number(doc.total))}</span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="font-mono font-semibold">{gbp(Number(doc.total))}</span>
+                    <Button variant="outline" size="sm" onClick={() => downloadDoc(doc)} disabled={downloadingId === doc.id} aria-label={`Download ${doc.kind} ${doc.number ?? ""}`}>
+                      {downloadingId === doc.id ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />} PDF
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -180,16 +201,16 @@ export default function TrackJob() {
 
       {/* Leave a review — only once the job is complete */}
       {t.completed && (
-        <Card className="mb-4 border-amber-500/30">
+        <Card className="mb-4 border-accent/30">
           <CardContent className="p-5">
-            <p className="mb-1 flex items-center gap-2 font-medium"><Star className="size-4 text-amber-500" /> {t.review ? "Your review" : "How did we do?"}</p>
+            <p className="mb-1 flex items-center gap-2 font-medium"><Star className="size-4 text-accent" /> {t.review ? "Your review" : "How did we do?"}</p>
             <p className="mb-3 text-sm text-muted-foreground">{t.review ? "Thanks for your feedback — you can update it any time." : "Your feedback helps us improve."}</p>
             <div className="mb-3 flex gap-1">
               {[1, 2, 3, 4, 5].map((n) => {
                 const active = (rating || t.review?.rating || 0) >= n
                 return (
                   <button key={n} type="button" onClick={() => setRating(n)} className="transition-transform hover:scale-110" aria-label={`${n} star${n > 1 ? "s" : ""}`}>
-                    <Star className={cn("size-8", active ? "fill-amber-400 text-amber-400" : "text-muted-foreground/40")} />
+                    <Star className={cn("size-8", active ? "fill-accent text-accent" : "text-muted-foreground/40")} />
                   </button>
                 )
               })}

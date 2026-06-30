@@ -9,6 +9,7 @@ declare(strict_types=1);
 $cfg = require __DIR__ . "/config.php";
 require __DIR__ . "/lib/job_status.php";
 require __DIR__ . "/lib/invoicing.php";
+require __DIR__ . "/lib/brand.php";
 
 /* ---------- CORS ---------- */
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
@@ -70,7 +71,7 @@ function current_user(mysqli $db): ?array {
     $tok = bearer();
     if (!$tok) return null;
     return db_one($db,
-        "SELECT u.id,u.name,u.email,u.role,u.active,u.phone,u.available
+        "SELECT u.id,u.name,u.email,u.role,u.active,u.phone,u.available,u.must_change_password,u.totp_enabled
          FROM ego_sessions s JOIN ego_users u ON u.id = s.user_id
          WHERE s.token = ? AND s.expires_at > NOW() AND u.active = 1 AND u.deleted_at IS NULL",
         "s", $tok
@@ -116,10 +117,13 @@ function integration_fields(): array {
         "smtp_from" => false, "smtp_from_name" => false, "smtp_secure" => false,
         // Weather
         "openweather_key" => true, "weather_city" => false,
-        // AI via OpenRouter (model of choice)
-        "openrouter_key" => true, "openrouter_model" => false,
+        // AI via OpenRouter — primary model, comma/space-separated backup models, image model, editable brand voice
+        "openrouter_key" => true, "openrouter_model" => false, "openrouter_models" => false,
+        "openrouter_image_model" => false, "brand_voice" => false,
         // Inbound email (provider IMAP)
         "imap_host" => false, "imap_port" => false, "imap_user" => false, "imap_pass" => true, "imap_secure" => false,
+        // Google reviews import (Places API)
+        "google_places_key" => true, "google_place_id" => false,
     ];
 }
 /** Read one integration value (server-side only). */
@@ -128,19 +132,72 @@ function integ(mysqli $db, string $key): ?string {
     return ($r && $r["v"] !== null && $r["v"] !== "") ? $r["v"] : null;
 }
 
-/** Draft text via OpenRouter (model from Integrations). Human approves before anything sends. */
-function ai_draft(mysqli $db, string $prompt): string {
+/** Ordered model chain: primary (openrouter_model) + backups (openrouter_models,
+ *  comma/space/newline separated), de-duped, with a cheap last-resort fallback. */
+function ai_models(mysqli $db): array {
+    $primary = trim((string) (integ($db, "openrouter_model") ?? "")) ?: "openai/gpt-4o-mini";
+    $extra = preg_split('/[\s,]+/', (string) (integ($db, "openrouter_models") ?? ""), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $chain = array_values(array_unique(array_merge([$primary], $extra)));
+    if (!in_array("openai/gpt-4o-mini", $chain, true)) $chain[] = "openai/gpt-4o-mini"; // always-available backstop
+    return $chain;
+}
+
+/** Draft text via OpenRouter with an optional brand system prompt and automatic
+ *  model fallback — a busy or unavailable model rolls over to the next backup.
+ *  Human always approves before anything sends. */
+function ai_draft(mysqli $db, string $prompt, ?string $system = null, int $maxTokens = 900): string {
     $key = integ($db, "openrouter_key");
     if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
-    $model = integ($db, "openrouter_model") ?: "openai/gpt-4o-mini";
+    $messages = [];
+    if ($system !== null && trim($system) !== "") $messages[] = ["role" => "system", "content" => $system];
+    $messages[] = ["role" => "user", "content" => $prompt];
+
+    $lastErr = "no model available";
+    foreach (ai_models($db) as $model) {
+        $payload = json_encode(["model" => $model, "messages" => $messages, "max_tokens" => $maxTokens]);
+        $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 45,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => [
+                "Authorization: Bearer $key", "Content-Type: application/json",
+                "HTTP-Referer: https://egolimited.com", "X-Title: EGO LIMITED",
+            ],
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        // A rejected key won't be fixed by another model — stop immediately.
+        if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key in Settings → Integrations.");
+        if ($code === 200) {
+            $j = json_decode($resp, true);
+            $text = $j["choices"][0]["message"]["content"] ?? "";
+            if (trim($text) !== "") return trim($text);
+            $lastErr = "model returned no text";
+        } else {
+            $lastErr = "model $model unavailable ($code)";
+        }
+        // otherwise fall through to the next backup model
+    }
+    throw new RuntimeException("AI is unavailable right now ($lastErr) — try again shortly.");
+}
+
+/** Generate a marketing image via an OpenRouter image model, save it under
+ *  /uploads, and return an absolute URL the email can embed. Best-effort:
+ *  needs an image model set in Settings → Integrations. */
+function ai_generate_image(mysqli $db, string $prompt): string {
+    $key = integ($db, "openrouter_key");
+    if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
+    $model = integ($db, "openrouter_image_model");
+    if (!$model) throw new RuntimeException("Set an image model in Settings → Integrations (AI) first.");
     $payload = json_encode([
         "model" => $model,
         "messages" => [["role" => "user", "content" => $prompt]],
-        "max_tokens" => 900,
+        "modalities" => ["image", "text"],
     ]);
     $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
     curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 45,
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 90,
         CURLOPT_POSTFIELDS => $payload,
         CURLOPT_HTTPHEADER => [
             "Authorization: Bearer $key", "Content-Type: application/json",
@@ -150,11 +207,99 @@ function ai_draft(mysqli $db, string $prompt): string {
     $resp = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    if ($code !== 200) throw new RuntimeException("OpenRouter error ($code)");
+    if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key.");
+    if ($code !== 200) throw new RuntimeException("Image model error ($code) — check the model id in Settings.");
     $j = json_decode($resp, true);
-    $text = $j["choices"][0]["message"]["content"] ?? "";
-    if ($text === "") throw new RuntimeException("OpenRouter returned no text");
-    return trim($text);
+    $url = $j["choices"][0]["message"]["images"][0]["image_url"]["url"] ?? "";
+    if ($url === "") {
+        $content = $j["choices"][0]["message"]["content"] ?? "";
+        $hay = is_array($content) ? json_encode($content) : (string) $content;
+        if (preg_match('#(data:image/[a-z]+;base64,[A-Za-z0-9+/=]+)#', $hay, $m)) $url = $m[1];
+        elseif (preg_match('#(https?://\S+\.(?:png|jpg|jpeg|webp))#i', $hay, $m)) $url = $m[1];
+    }
+    if ($url === "") throw new RuntimeException("No image came back — try a different image model.");
+
+    $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
+    $host = $_SERVER["HTTP_HOST"] ?? "egolimited.com";
+    if (str_starts_with($url, "data:image")) {
+        [$meta, $b64] = array_pad(explode(",", $url, 2), 2, "");
+        $ext = str_contains($meta, "png") ? "png" : (str_contains($meta, "webp") ? "webp" : "jpg");
+        $bin = base64_decode($b64);
+        if ($bin === false || strlen($bin) < 64) throw new RuntimeException("Bad image data");
+        $dir = __DIR__ . "/uploads";
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        $name = "campaign_" . bin2hex(random_bytes(6)) . ".$ext";
+        file_put_contents("$dir/$name", $bin);
+        return "$scheme://$host" . dirname($_SERVER["SCRIPT_NAME"]) . "/uploads/$name";
+    }
+    return $url; // already a hosted URL
+}
+
+/** Marketing subscribers/contacts list — created lazily so no manual migration
+ *  is needed on deploy. Idempotent. */
+function ensure_subscribers_table(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_subscribers (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        email VARCHAR(190) NOT NULL,
+        name VARCHAR(160) NULL,
+        source VARCHAR(40) NOT NULL DEFAULT 'manual',
+        subscribed TINYINT NOT NULL DEFAULT 1,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_sub_email (email)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** Mailbox flags (archive/flag) — added lazily so no manual migration on deploy. Idempotent. */
+function ensure_message_cols(mysqli $db): void {
+    $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS archived TINYINT(1) NOT NULL DEFAULT 0");
+    $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS flagged TINYINT(1) NOT NULL DEFAULT 0");
+}
+
+/** Tombstone of deleted IMAP uids — so an inbox re-sync never resurrects mail the
+ *  office already deleted. Idempotent. */
+function ensure_deleted_uids(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_deleted_uids (
+        uid VARCHAR(255) PRIMARY KEY,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+/** Record the uids of the given message ids before they're deleted (so sync skips them). */
+function tombstone_uids(mysqli $db, string $idClause, string $types, array $ids): void {
+    ensure_deleted_uids($db);
+    db_exec($db, "INSERT IGNORE INTO ego_deleted_uids (uid)
+                  SELECT uid FROM ego_messages WHERE $idClause AND uid IS NOT NULL AND uid<>''", $types, ...$ids);
+}
+
+/** Saved email templates — created + seeded with the EGO brand sequences on first
+ *  use, so the office has on-brand starting points. Idempotent. */
+function ensure_email_templates(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_email_templates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(190) NOT NULL,
+        kind VARCHAR(24) NOT NULL DEFAULT 'campaign',
+        subject VARCHAR(255) NULL,
+        body MEDIUMTEXT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $has = (int) ($db->query("SELECT COUNT(*) c FROM ego_email_templates")->fetch_assoc()["c"] ?? 0);
+    if ($has > 0) return;
+    $sig = "\n\nCheers,\n{{sender_name}}\nEGO LTD — general maintenance, homes & commercial\n07539 705576 · hello@egolimited.com\nThe jobs that need doing, done properly.";
+    $seed = [
+        ["Quote follow-up (homeowner)", "marketing", "Quick one on your quote, {{first_name}}",
+         "Hi {{first_name}},\n\nJust checking the quote for {{job_summary}} landed alright.\n\nIf the price or the timing isn't quite right, tell me — I'd rather adjust it than leave you guessing. If you want to go ahead, reply here or call 07539 705576 and I'll book you in." . $sig],
+        ["B2B intro (agents)", "marketing", "A reliable maintenance contractor for {{agency_name}}",
+         "Hi {{first_name}},\n\nI run EGO LTD — general maintenance across South-East London, homes and commercial. Carpentry, decorating, minor plumbing, tiling: the day-to-day repairs that keep managed properties tidy and tenants quiet.\n\nOne number, fixed prices in writing, and a maintenance record kept per property so you're never starting from scratch. Worth a 10-minute call to take some pressure off {{agency_name}}? I'm on 07539 705576, or just reply." . $sig],
+        ["Review request", "marketing", "How did we do on {{job_summary}}?",
+         "Hi {{first_name}},\n\nHope you're happy with {{job_summary}} — it was good to get it sorted for you.\n\nIf you've got 30 seconds, a quick honest review helps other people round here find us: {{review_link}}. And if anything's not quite right, tell me first — I'd always rather put it right." . $sig],
+        ["Win-back (dormant)", "marketing", "Still here when you need us, {{first_name}}",
+         "Hi {{first_name}},\n\nIt's been a while since we last sorted something for you. No agenda here, just a hello.\n\nIf anything around {{property_or_premises}} has been on the 'I'll get to that' list, that's exactly what we're good at — the small jobs, the repairs, the bits that never reach the top of the pile. Reply or call 07539 705576 whenever something crops up." . $sig],
+        ["Winter prep (seasonal)", "marketing", "Get ahead of winter before it gets ahead of you",
+         "Hi {{first_name}},\n\nCold weather finds every weak spot — draughty doors, dodgy seals, gutters that should've been cleared.\n\nA pre-winter once-over sorts it cheaply now. We'll check the property, fix the small stuff on the spot, and flag anything bigger with a fixed price before we touch it. Reply or call 07539 705576 and I'll book you in for {{seasonal_slot}}." . $sig],
+        ["Referral ask", "marketing", "Know anyone who needs a job doing properly?",
+         "Hi {{first_name}},\n\nThanks again for having us out for {{job_summary}}.\n\nQuick favour: if a friend, neighbour or family member needs a reliable pair of hands, point them our way. A name from someone like you is worth more than any advert. Just forward this email or pass on 07539 705576." . $sig],
+    ];
+    $stmt = $db->prepare("INSERT INTO ego_email_templates (name,kind,subject,body) VALUES (?,?,?,?)");
+    foreach ($seed as $t) { $stmt->bind_param("ssss", $t[0], $t[1], $t[2], $t[3]); $stmt->execute(); }
 }
 
 /** Mint (or reuse) the customer-portal access token for a job. */
@@ -187,10 +332,10 @@ function notify_job_completed(mysqli $db, int $jobId): void {
     $job = db_one($db, "SELECT j.reference,j.title,u.name AS engineer_name,c.name AS customer_name FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id LEFT JOIN ego_users u ON u.id=j.engineer_id WHERE j.id=?", "i", $jobId);
     if (!$job) return;
     require_once __DIR__ . "/lib/mailer.php";
-    $html = "<div style='font-family:Arial,sans-serif'><h3>Job completed — ready to invoice</h3>"
-        . "<p><strong>{$job['reference']}</strong> — " . htmlspecialchars($job["title"]) . "</p>"
+    $inner = "<p><strong>{$job['reference']}</strong> — " . htmlspecialchars($job["title"]) . "</p>"
         . "<p>Customer: " . htmlspecialchars($job["customer_name"]) . "<br>Engineer: " . htmlspecialchars($job["engineer_name"] ?? "—") . "</p>"
-        . "<p>Raise the invoice from the job in the admin app.</p></div>";
+        . "<p>Raise the invoice from the job in the admin app.</p>";
+    $html = ego_email_shell($db, "Job completed — ready to invoice", $inner);
     try { ego_send_mail($db, $to, $cs["company_name"] ?? null, "Ready to invoice: {$job['reference']}", $html); } catch (Throwable $e) { /* best-effort */ }
 }
 
@@ -221,9 +366,20 @@ switch ("$method $route") {
         if (!$email || !$pass) fail("Email and password required");
         $u = db_one($db, "SELECT * FROM ego_users WHERE email = ? AND active = 1 AND deleted_at IS NULL", "s", $email);
         if (!$u || !$u["password_hash"] || !password_verify($pass, $u["password_hash"])) fail("Invalid email or password", 401);
+        // 2FA gate (only for users who opted in — additive, never locks others out).
+        if ((int)($u["totp_enabled"] ?? 0) === 1) {
+            $code = trim((string)($b["totp_code"] ?? $b["code"] ?? ""));
+            if ($code === "") send(["totp_required" => true]); // 200: client prompts for code, no token issued
+            require_once __DIR__ . "/lib/totp.php";
+            if (!totp_verify((string)($u["totp_secret"] ?? ""), $code)) fail("Invalid 2FA code", 401);
+        }
         $token = bin2hex(random_bytes(32));
         db_exec($db, "INSERT INTO ego_sessions (token,user_id,expires_at) VALUES (?,?, DATE_ADD(NOW(), INTERVAL 30 DAY))", "si", $token, $u["id"]);
-        send(["token" => $token, "user" => ["id" => (int)$u["id"], "name" => $u["name"], "email" => $u["email"], "role" => $u["role"]]]);
+        send(["token" => $token, "user" => [
+            "id" => (int)$u["id"], "name" => $u["name"], "email" => $u["email"], "role" => $u["role"],
+            "must_change_password" => (int)($u["must_change_password"] ?? 0),
+            "totp_enabled" => (int)($u["totp_enabled"] ?? 0),
+        ]]);
     }
 
     case "GET /auth/me": {
@@ -1208,7 +1364,7 @@ switch ("$method $route") {
         $page = max(1, (int)($_GET["page"] ?? 1));
         $offset = ($page - 1) * $per;
         $rows = db_all($db,
-            "SELECT m.id,m.rating,m.body,m.from_name,m.created_at,m.acknowledged,m.job_id,
+            "SELECT m.id,m.rating,m.body,m.from_name,m.created_at,m.acknowledged,m.job_id,m.source,
                     j.reference AS job_reference, c.name AS customer_name
              FROM ego_messages m
              LEFT JOIN ego_jobs j ON j.id=m.job_id
@@ -1243,7 +1399,7 @@ switch ("$method $route") {
         $b = body();
         $s = db_one($db, "SELECT id FROM ego_company_settings ORDER BY id LIMIT 1");
         if (!$s) fail("Settings missing", 500);
-        $fields = ["company_name","address","phone","email","vat_number","default_vat_rate","logo_url",
+        $fields = ["company_name","address","phone","email","vat_number","companies_house_no","default_vat_rate","logo_url",
                    "bank_account_name","bank_sort_code","bank_account_number","invoice_prefix","job_prefix","quote_prefix","payment_terms_days",
                    "notify_on_complete","notify_email"];
         $set = []; $types = ""; $args = [];
@@ -1388,12 +1544,8 @@ switch ("$method $route") {
         $bodyText = trim($b["body"] ?? "");
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) fail("Valid recipient email required");
         if ($subject === "" || $bodyText === "") fail("Subject and body required");
-        $company = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
-        $html = "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0f172a'>"
-            . nl2br(htmlspecialchars($bodyText))
-            . "<hr style='margin-top:20px;border:none;border-top:1px solid #e2e8f0'>"
-            . "<p style='color:#64748b;font-size:13px'>" . htmlspecialchars($company["company_name"] ?? "EGO LIMITED") . "</p></div>";
         require __DIR__ . "/lib/mailer.php";
+        $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyText)));
         try { ego_send_mail($db, $to, trim($b["to_name"] ?? "") ?: null, $subject, $html); }
         catch (Throwable $e) { fail("Email failed: " . $e->getMessage(), 400); }
         $jobId = isset($b["job_id"]) && $b["job_id"] !== "" ? (int)$b["job_id"] : null;
@@ -1436,10 +1588,124 @@ switch ("$method $route") {
         send(["text" => $text]);
     }
 
+    /* ===================== AI DRAFT HELPERS (brand-voice) ===================== */
+    case "POST /announcements/draft": {
+        require_role($db, "manager");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe the announcement");
+        $audience = trim($b["audience"] ?? "") ?: "the team";
+        $task = "Write a short internal announcement for $audience. Owner's brief: $brief\n\n"
+            . "Return EXACTLY as:\nTitle: <one clear line>\n\n<body, 1-3 short paragraphs>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db), 500); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $title = ""; $bodyTxt = trim($text);
+        if (preg_match('/^\s*title:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $title = trim($m[1]); $bodyTxt = trim($m[2]); }
+        send(["title" => $title, "body" => $bodyTxt]);
+    }
+    case "POST /tasks/draft": {
+        require_role($db, "admin");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe the task");
+        $task = "Turn this into a clear, short internal task for a maintenance team — easy to understand at a glance. "
+            . "Owner's note: $brief\n\nReturn EXACTLY as:\nTitle: <max 8 words>\n\n<one or two sentences: what to do and what 'done' looks like>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db), 300); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $title = ""; $desc = trim($text);
+        if (preg_match('/^\s*title:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $title = trim($m[1]); $desc = trim($m[2]); }
+        send(["title" => $title, "description" => $desc]);
+    }
+    case "POST /incidents/polish": {
+        require_role($db, "admin");
+        $b = body();
+        $text = trim($b["text"] ?? ""); if ($text === "") fail("Nothing to polish yet");
+        $field = trim($b["field"] ?? "") ?: "incident report";
+        $task = "Rewrite this $field clearly and factually for a health-and-safety record. Keep every fact; do not add or invent anything. "
+            . "Neutral, complete sentences, plain English.\n\nDRAFT:\n$text\n\nReturn only the rewritten text.";
+        try { $out = ai_draft($db, $task, ego_brand_voice($db), 600); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        send(["text" => $out]);
+    }
+    case "POST /procurement/draft": {
+        require_role($db, "admin");
+        $b = body();
+        $kind = trim($b["kind"] ?? "") ?: "item";
+        $name = trim($b["name"] ?? "");
+        $brief = trim($b["brief"] ?? "");
+        if ($name === "" && $brief === "") fail("Add a name or a short brief first");
+        $task = "Write clear, well-detailed procurement notes for a UK maintenance company's $kind"
+            . ($name !== "" ? " named \"$name\"" : "") . ". "
+            . ($brief !== "" ? "Details so far: $brief. " : "")
+            . "Cover what it is or what they do, typical use, and anything useful to record (specs, trades, lead time, terms) — only where reasonable to infer. "
+            . "Never invent specifics like exact prices, certificate numbers or phone numbers. A few short lines.\n\nReturn only the notes text.";
+        try { $out = ai_draft($db, $task, ego_brand_voice($db), 500); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        send(["text" => $out]);
+    }
+    case "POST /email/compose": {
+        // One-to-one brand-voice email draft for the inbox composer.
+        require_role($db, "admin");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe the email");
+        $to = trim($b["to_name"] ?? "");
+        $task = "Write a one-to-one email" . ($to !== "" ? " to $to" : "") . " for EGO LTD. Owner's brief: $brief\n\n"
+            . "Return EXACTLY as:\nSubject: <subject line>\n\n<email body>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db)); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $subject = ""; $bodyTxt = trim($text);
+        if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
+        send(["subject" => $subject, "body" => $bodyTxt]);
+    }
+    case "POST /ai/image": {
+        // Generate a marketing header image for an email (makes a campaign read like a post).
+        require_role($db, "admin");
+        $b = body();
+        $prompt = trim($b["prompt"] ?? ""); if ($prompt === "") fail("Describe the image");
+        $full = "A clean, professional marketing image for a UK property maintenance company (EGO LTD). "
+            . "Warm, grounded, premium, not stocky or cheesy. Landscape banner suitable for an email header. " . $prompt;
+        try { $url = ai_generate_image($db, $full); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        send(["url" => $url]);
+    }
+
+    /* ===================== EMAIL TEMPLATES (saved brand sequences) ===================== */
+    case "GET /email-templates": {
+        require_role($db, "admin");
+        ensure_email_templates($db);
+        $rows = db_all($db, "SELECT id,name,kind,subject,body,created_at FROM ego_email_templates ORDER BY name");
+        foreach ($rows as &$r) $r["id"] = (int)$r["id"];
+        send(["templates" => $rows]);
+    }
+    case "POST /email-templates": {
+        require_role($db, "admin");
+        ensure_email_templates($db);
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name required");
+        $subject = trim($b["subject"] ?? "");
+        $bodyTxt = trim($b["body"] ?? ""); if ($bodyTxt === "") fail("Body required");
+        $kind = trim($b["kind"] ?? "") ?: "campaign";
+        $id = (int)($b["id"] ?? 0);
+        if ($id) {
+            db_exec($db, "UPDATE ego_email_templates SET name=?,kind=?,subject=?,body=? WHERE id=?", "ssssi", $name, $kind, $subject, $bodyTxt, $id);
+        } else {
+            db_exec($db, "INSERT INTO ego_email_templates (name,kind,subject,body) VALUES (?,?,?,?)", "ssss", $name, $kind, $subject, $bodyTxt);
+            $id = (int)$db->insert_id;
+        }
+        send(["id" => $id], 201);
+    }
+    case "POST /email-templates/delete": {
+        require_role($db, "admin");
+        ensure_email_templates($db);
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "DELETE FROM ego_email_templates WHERE id=?", "i", $id);
+        send(["ok" => true]);
+    }
+
     /* ===================== M15: INBOUND EMAIL (IMAP) ===================== */
     case "POST /inbox/sync": {
         require_role($db, "admin");
         require __DIR__ . "/lib/inbox.php";
+        ensure_deleted_uids($db); // tombstone table must exist before sync reads it
+        ensure_message_cols($db); // archived/flagged columns — bounces arrive pre-archived
         try { $n = inbox_sync($db); }
         catch (Throwable $e) { fail($e->getMessage(), 400); }
         send(["synced" => $n]);
@@ -1447,15 +1713,16 @@ switch ("$method $route") {
 
     case "GET /inbox": {
         require_role($db, "admin");
+        ensure_message_cols($db);
         $rows = db_all($db,
-            "SELECT m.id,m.direction,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.created_at,
+            "SELECT m.id,m.direction,m.channel,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.acknowledged,m.archived,m.flagged,m.created_at,
                     m.customer_id,m.job_id, c.name AS customer_name, j.reference AS job_reference
              FROM ego_messages m
              LEFT JOIN ego_customers c ON c.id=m.customer_id
              LEFT JOIN ego_jobs j ON j.id=m.job_id
              WHERE (m.channel IS NULL OR m.channel <> 'portal')
-             ORDER BY m.id DESC LIMIT 100");
-        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
+             ORDER BY m.id DESC LIMIT 200");
+        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["acknowledged"] = (int)($r["acknowledged"] ?? 0); $r["archived"] = (int)($r["archived"] ?? 0); $r["flagged"] = (int)($r["flagged"] ?? 0); $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
         send(["messages" => $rows]);
     }
 
@@ -1499,11 +1766,9 @@ switch ("$method $route") {
         // best-effort email to the customer if we have an address
         $cust = $orig["customer_id"] ? db_one($db, "SELECT name,email FROM ego_customers WHERE id=?", "i", (int)$orig["customer_id"]) : null;
         if ($cust && filter_var($cust["email"] ?? "", FILTER_VALIDATE_EMAIL)) {
-            $co = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
             require_once __DIR__ . "/lib/mailer.php";
-            $html = "<div style='font-family:Arial,sans-serif;max-width:560px;margin:auto;color:#0f172a'>"
-                . "<p>Hi " . htmlspecialchars($cust["name"] ?? "there") . ",</p><p>" . nl2br(htmlspecialchars($bodyTxt)) . "</p>"
-                . "<p style='color:#64748b;font-size:13px'>" . htmlspecialchars($co["company_name"] ?? "EGO LIMITED") . "</p></div>";
+            $inner = "<p style='margin:0 0 10px'>Hi " . htmlspecialchars($cust["name"] ?? "there") . ",</p><p style='margin:0'>" . nl2br(htmlspecialchars($bodyTxt)) . "</p>";
+            $html = ego_email_shell($db, "", $inner);
             try { ego_send_mail($db, $cust["email"], $cust["name"] ?? null, "Re: your message", $html); } catch (Throwable $e) { /* best-effort */ }
         }
         send(["ok" => true]);
@@ -1523,27 +1788,102 @@ switch ("$method $route") {
     case "POST /enquiry": {
         $b = body();
         $name = trim($b["name"] ?? "");
-        $contact = trim($b["contact"] ?? "");
+        // Accept the full website contact form (name/email/phone/address/service/message).
+        $email = trim($b["email"] ?? "");
+        $email = filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : (filter_var(trim($b["contact"] ?? ""), FILTER_VALIDATE_EMAIL) ? trim($b["contact"]) : null);
+        $phone = trim($b["phone"] ?? "");
+        $address = trim($b["address"] ?? "");
+        $service = trim($b["service"] ?? "");
         $message = trim($b["message"] ?? "");
         if ($name === "" || $message === "") fail("Name and message required");
-        $email = filter_var($contact, FILTER_VALIDATE_EMAIL) ? $contact : null;
+
+        // Newsletter signups are explicit consent — add them to the marketing list.
+        if (($b["source"] ?? "") === "newsletter" && $email) {
+            ensure_subscribers_table($db);
+            $em = strtolower($email);
+            db_exec($db, "INSERT INTO ego_subscribers (email,name,source) VALUES (?,?, 'newsletter')
+                          ON DUPLICATE KEY UPDATE subscribed=1", "ss", $em, $name === "Newsletter signup" ? null : $name);
+        }
+
+        // Detail block the office sees in the inbox + notification email.
+        $lines = [];
+        if ($email)   $lines[] = "Email: $email";
+        if ($phone)   $lines[] = "Phone: $phone";
+        if ($address) $lines[] = "Address: $address";
+        if ($service) $lines[] = "Service: $service";
+        $bodyText = ($lines ? implode("\n", $lines) . "\n\n" : "") . $message;
+        $subject = $service !== "" ? "Website enquiry: $service" : "Website enquiry";
+
         db_exec($db,
             "INSERT INTO ego_messages (direction,channel,from_name,from_email,subject,body,status)
              VALUES ('inbound','enquiry',?,?,?,?, 'received')",
-            "ssss", $name, $email, "Website enquiry", ($contact ? "Contact: $contact\n\n" : "") . $message);
+            "ssss", $name, $email, $subject, $bodyText);
+
         $cs = db_one($db, "SELECT company_name,email,notify_email FROM ego_company_settings ORDER BY id LIMIT 1");
         $to = trim($cs["notify_email"] ?? "") ?: trim($cs["email"] ?? "");
         if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
             require_once __DIR__ . "/lib/mailer.php";
-            $html = "<div style='font-family:Arial,sans-serif'><h3>New website enquiry</h3>"
-                . "<p><strong>" . htmlspecialchars($name) . "</strong>" . ($contact ? " &middot; " . htmlspecialchars($contact) : "") . "</p>"
-                . "<p>" . nl2br(htmlspecialchars($message)) . "</p></div>";
-            try { ego_send_mail($db, $to, $cs["company_name"] ?? null, "New website enquiry", $html); } catch (Throwable $e) { /* best-effort */ }
+            $detail = "<p style='margin:0 0 4px'><strong>" . htmlspecialchars($name) . "</strong></p>"
+                . "<table style='border-collapse:collapse;font-size:14px;color:#1f2937'>"
+                . ($email ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Email</td><td>" . htmlspecialchars($email) . "</td></tr>" : "")
+                . ($phone ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Phone</td><td>" . htmlspecialchars($phone) . "</td></tr>" : "")
+                . ($address ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Address</td><td>" . htmlspecialchars($address) . "</td></tr>" : "")
+                . ($service ? "<tr><td style='padding:2px 12px 2px 0;color:#6b7280'>Service</td><td>" . htmlspecialchars($service) . "</td></tr>" : "")
+                . "</table><p style='margin:14px 0 0'>" . nl2br(htmlspecialchars($message)) . "</p>";
+            try { ego_send_mail($db, $to, $cs["company_name"] ?? null, $subject, ego_email_shell($db, "New website enquiry", $detail)); } catch (Throwable $e) { /* best-effort */ }
         }
         send(["ok" => true], 201);
     }
 
     /* ===================== M11: CUSTOMER PORTAL (public, token-scoped) ===================== */
+    // Public job tracker for the marketing site: reference + surname -> live
+    // status, plus a one-tap link into the customer's own portal (token URL).
+    // No auth: the surname is the shared secret that gates the reference.
+    case "POST /track/lookup": {
+        $b = body();
+        $ref = strtoupper(trim($b["reference"] ?? ""));
+        $surname = trim($b["surname"] ?? "");
+        if ($ref === "" || $surname === "") fail("Enter your job reference and the surname on the booking.");
+        // Generic message either way so the form can't be used to enumerate refs.
+        $notFound = "We couldn't find a job with that reference and surname. Check your booking confirmation, or give us a call.";
+        $job = db_one($db,
+            "SELECT j.id, j.reference, j.title, j.status, j.scheduled_start, j.updated_at,
+                    u.name AS engineer_name, c.name AS customer_name
+             FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id
+             LEFT JOIN ego_users u ON u.id=j.engineer_id
+             WHERE UPPER(j.reference)=? AND j.deleted_at IS NULL LIMIT 1", "s", $ref);
+        if (!$job) fail($notFound, 404);
+        // Verify the surname against any token of the customer's name (case-insensitive).
+        $name = strtolower($job["customer_name"] ?? "");
+        $sn = strtolower($surname);
+        $tokens = preg_split('/\s+/', $name, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $ok = in_array($sn, $tokens, true) || ($sn !== "" && str_contains($name, $sn));
+        if (!$ok) fail($notFound, 404);
+
+        // Canonical 7-stage customer-facing track. on_hold pauses at "On site".
+        $order  = ["new"=>0,"scheduled"=>1,"en_route"=>2,"on_site"=>3,"on_hold"=>3,"completed"=>4,"invoiced"=>5,"paid"=>6,"closed"=>6];
+        $labels = ["Booked in","Scheduled","En route","On site","Completed","Invoiced","Paid"];
+        $status = $job["status"];
+        $cancelled = $status === "cancelled";
+        $step = $order[$status] ?? 0;
+        $statusLabel = $cancelled ? "Cancelled" : ($status === "on_hold" ? "On hold" : ($labels[$step] ?? "In progress"));
+
+        send([
+            "reference"     => $job["reference"],
+            "title"         => $job["title"],
+            "status"        => $status,
+            "status_label"  => $statusLabel,
+            "step"          => $step,
+            "stages"        => $labels,
+            "scheduled_for" => $job["scheduled_start"],
+            "engineer"      => $job["engineer_name"],
+            "updated_at"    => $job["updated_at"],
+            "cancelled"     => $cancelled,
+            // One-tap deep link into the customer's own portal (mints/reuses token).
+            "portal_url"    => track_link($db, (int)$job["id"]),
+        ]);
+    }
+
     case "GET /track": {
         $jobId = verify_track_token($db, $_GET["token"] ?? "");
         if (!$jobId) fail("This link has expired or is invalid", 404);
@@ -1561,8 +1901,9 @@ switch ("$method $route") {
         if ($inv && $inv["status"] === "sent" && $inv["due_date"] && $inv["due_date"] < date("Y-m-d")) $inv["status"] = "overdue";
         // all quotes + invoices the customer should see for this job
         $docs = db_all($db,
-            "SELECT kind,number,total,status,payment_reference,issue_date,due_date FROM ego_invoices
+            "SELECT id,kind,number,total,status,payment_reference,issue_date,due_date FROM ego_invoices
              WHERE job_id=? AND deleted_at IS NULL AND status NOT IN ('draft','void') ORDER BY id DESC", "i", $jobId);
+        foreach ($docs as &$d0) { $d0["id"] = (int)$d0["id"]; } unset($d0);
         foreach ($docs as &$dd) { if ($dd["kind"] === "invoice" && $dd["status"] === "sent" && $dd["due_date"] && $dd["due_date"] < date("Y-m-d")) $dd["status"] = "overdue"; }
         // timeline progress from the job status
         $order = ["new" => 0, "scheduled" => 1, "en_route" => 2, "on_site" => 3, "completed" => 4, "invoiced" => 4, "paid" => 5, "closed" => 5];
@@ -1587,6 +1928,28 @@ switch ("$method $route") {
             "completed" => $completed,
             "review" => $review,
         ]);
+    }
+
+    case "GET /track/document": {
+        // Customer downloads one of their own quotes/invoices from the portal.
+        // Scoped to the job the access token unlocks; drafts/voids never exposed.
+        $jobId = verify_track_token($db, $_GET["token"] ?? "");
+        if (!$jobId) fail("Invalid link", 404);
+        $id = (int)($_GET["id"] ?? 0);
+        $inv = db_one($db,
+            "SELECT i.*, c.name AS customer_name, c.email AS customer_email, c.phone AS customer_phone,
+                    j.reference AS job_reference, j.title AS job_title
+             FROM ego_invoices i JOIN ego_customers c ON c.id=i.customer_id JOIN ego_jobs j ON j.id=i.job_id
+             WHERE i.id=? AND i.job_id=? AND i.deleted_at IS NULL AND i.status NOT IN ('draft','void')",
+            "ii", $id, $jobId);
+        if (!$inv) fail("Not found", 404);
+        $inv["id"] = (int)$inv["id"];
+        $inv["lines"] = db_all($db, "SELECT description,quantity,unit_price,line_total FROM ego_invoice_lines WHERE invoice_id=? ORDER BY sort,id", "i", $id);
+        $cust = db_one($db, "SELECT a.line1,a.line2,a.city,a.postcode FROM ego_addresses a WHERE a.customer_id=? AND a.is_primary=1", "i", (int)$inv["customer_id"]);
+        $inv["customer_address"] = $cust;
+        $inv["company"] = db_one($db, "SELECT company_name,address,phone,email,vat_number,logo_url,bank_account_name,bank_sort_code,bank_account_number,payment_terms_days FROM ego_company_settings ORDER BY id LIMIT 1");
+        if ($inv["kind"] === "invoice" && $inv["status"] === "sent" && $inv["due_date"] && $inv["due_date"] < date("Y-m-d")) $inv["status"] = "overdue";
+        send(["invoice" => $inv]);
     }
 
     case "POST /track/review": {
@@ -1646,11 +2009,11 @@ switch ("$method $route") {
         $b = body();
         $cid = (int)($b["customer_id"] ?? 0);
         $title = trim($b["title"] ?? "");
-        $unit = in_array($b["interval_unit"] ?? "month", ["day", "week", "month"], true) ? $b["interval_unit"] : "month";
+        $unit = in_array($b["interval_unit"] ?? "month", ["day", "week", "month"], true) ? ($b["interval_unit"] ?? "month") : "month";
         $count = max(1, (int)($b["interval_count"] ?? 1));
         $next = trim($b["next_due"] ?? "") ?: date("Y-m-d");
         if (!$cid || $title === "") fail("Customer and title required");
-        $prio = in_array($b["priority"] ?? "normal", ["low", "normal", "urgent"], true) ? $b["priority"] : "normal";
+        $prio = in_array($b["priority"] ?? "normal", ["low", "normal", "urgent"], true) ? ($b["priority"] ?? "normal") : "normal";
         $quote = isset($b["quoted_amount"]) && $b["quoted_amount"] !== "" ? (float)$b["quoted_amount"] : null;
         db_exec($db,
             "INSERT INTO ego_recurring_plans (customer_id,title,description,priority,quoted_amount,interval_unit,interval_count,next_due)
@@ -1756,6 +2119,1036 @@ switch ("$method $route") {
         $id = (int)(body()["id"] ?? 0);
         if ($id) db_exec($db, "DELETE FROM ego_tasks WHERE id=?", "i", $id);
         send(["ok" => true]);
+    }
+
+    /* ============================ PROCUREMENT — Suppliers ============================ */
+    case "GET /suppliers": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db,
+            "SELECT id,name,contact,phone,email,account_ref,category,active
+             FROM ego_suppliers WHERE deleted_at IS NULL
+               AND (name LIKE ? OR contact LIKE ? OR email LIKE ? OR category LIKE ?)
+             ORDER BY name", "ssss", $q, $q, $q, $q);
+        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["active"] = (int)$r["active"]; }
+        send(["suppliers" => $rows]);
+    }
+    case "GET /suppliers/get": {
+        require_role($db, "admin");
+        $s = db_one($db, "SELECT * FROM ego_suppliers WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$s) fail("Supplier not found", 404);
+        $s["id"] = (int)$s["id"]; $s["active"] = (int)$s["active"];
+        send(["supplier" => $s]);
+    }
+    case "POST /suppliers": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        db_exec($db, "INSERT INTO ego_suppliers (name,contact,phone,email,account_ref,category,address,notes,active) VALUES (?,?,?,?,?,?,?,?,?)",
+            "ssssssssi", $name, trim($b["contact"] ?? "") ?: null, trim($b["phone"] ?? "") ?: null, $email,
+            trim($b["account_ref"] ?? "") ?: null, trim($b["category"] ?? "") ?: null, trim($b["address"] ?? "") ?: null,
+            trim($b["notes"] ?? "") ?: null, (int)($b["active"] ?? 1));
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "supplier_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /suppliers/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_suppliers WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Supplier not found", 404);
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        db_exec($db, "UPDATE ego_suppliers SET name=?,contact=?,phone=?,email=?,account_ref=?,category=?,address=?,notes=?,active=? WHERE id=?",
+            "ssssssssii", $name, trim($b["contact"] ?? "") ?: null, trim($b["phone"] ?? "") ?: null, $email,
+            trim($b["account_ref"] ?? "") ?: null, trim($b["category"] ?? "") ?: null, trim($b["address"] ?? "") ?: null,
+            trim($b["notes"] ?? "") ?: null, (int)($b["active"] ?? 1), $id);
+        log_activity($db, null, (int)$actor["id"], "supplier_updated", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /suppliers/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_suppliers SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "supplier_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
+    /* ========================== PROCUREMENT — Subcontractors ========================== */
+    case "GET /subcontractors": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db,
+            "SELECT id,name,company,trades,coverage_areas,phone,email,insurance_expiry,day_rate,rating,status
+             FROM ego_subcontractors WHERE deleted_at IS NULL
+               AND (name LIKE ? OR company LIKE ? OR trades LIKE ? OR coverage_areas LIKE ?)
+             ORDER BY name", "ssss", $q, $q, $q, $q);
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"];
+            $r["rating"] = $r["rating"] !== null ? (int)$r["rating"] : null;
+            $r["day_rate"] = $r["day_rate"] !== null ? (float)$r["day_rate"] : null;
+        }
+        send(["subcontractors" => $rows]);
+    }
+    case "GET /subcontractors/get": {
+        require_role($db, "admin");
+        $s = db_one($db, "SELECT * FROM ego_subcontractors WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$s) fail("Subcontractor not found", 404);
+        $s["id"] = (int)$s["id"];
+        send(["subcontractor" => $s]);
+    }
+    case "POST /subcontractors": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        $ins = trim($b["insurance_expiry"] ?? "") ?: null;
+        $dr = ($b["day_rate"] ?? "") !== "" ? (float)$b["day_rate"] : null;
+        $rating = ($b["rating"] ?? "") !== "" ? (int)$b["rating"] : null;
+        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? ($b["status"] ?? "active") : "active";
+        db_exec($db, "INSERT INTO ego_subcontractors (name,company,trades,coverage_areas,phone,email,insurance_expiry,qualifications,day_rate,rating,status,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "ssssssssdiss", $name, trim($b["company"] ?? "") ?: null, trim($b["trades"] ?? "") ?: null, trim($b["coverage_areas"] ?? "") ?: null,
+            trim($b["phone"] ?? "") ?: null, $email, $ins, trim($b["qualifications"] ?? "") ?: null, $dr, $rating, $status, trim($b["notes"] ?? "") ?: null);
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "subcontractor_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /subcontractors/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_subcontractors WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Subcontractor not found", 404);
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $email = trim($b["email"] ?? "") ?: null;
+        if ($email && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Invalid email");
+        $ins = trim($b["insurance_expiry"] ?? "") ?: null;
+        $dr = ($b["day_rate"] ?? "") !== "" ? (float)$b["day_rate"] : null;
+        $rating = ($b["rating"] ?? "") !== "" ? (int)$b["rating"] : null;
+        $status = in_array($b["status"] ?? "active", ["active","pending","suspended"], true) ? ($b["status"] ?? "active") : "active";
+        db_exec($db, "UPDATE ego_subcontractors SET name=?,company=?,trades=?,coverage_areas=?,phone=?,email=?,insurance_expiry=?,qualifications=?,day_rate=?,rating=?,status=?,notes=? WHERE id=?",
+            "ssssssssdissi", $name, trim($b["company"] ?? "") ?: null, trim($b["trades"] ?? "") ?: null, trim($b["coverage_areas"] ?? "") ?: null,
+            trim($b["phone"] ?? "") ?: null, $email, $ins, trim($b["qualifications"] ?? "") ?: null, $dr, $rating, $status, trim($b["notes"] ?? "") ?: null, $id);
+        log_activity($db, null, (int)$actor["id"], "subcontractor_updated", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /subcontractors/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_subcontractors SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "subcontractor_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
+    /* ============================ PROCUREMENT — Parts / pricebook ============================ */
+    case "GET /parts": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $low = ($_GET["low"] ?? "") === "1";
+        $lowSql = $low ? "AND p.stock_qty <= p.reorder_level AND p.reorder_level > 0" : "";
+        $rows = db_all($db,
+            "SELECT p.id,p.sku,p.name,p.category,p.unit,p.cost_price,p.sale_price,p.stock_qty,p.reorder_level,p.active,
+                    p.supplier_id, s.name AS supplier_name
+             FROM ego_parts p LEFT JOIN ego_suppliers s ON s.id = p.supplier_id
+             WHERE p.deleted_at IS NULL $lowSql
+               AND (p.name LIKE ? OR p.sku LIKE ? OR p.category LIKE ?)
+             ORDER BY p.name", "sss", $q, $q, $q);
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"]; $r["active"] = (int)$r["active"];
+            $r["supplier_id"] = $r["supplier_id"] !== null ? (int)$r["supplier_id"] : null;
+            foreach (["cost_price","sale_price","stock_qty","reorder_level"] as $k) $r[$k] = (float)$r[$k];
+        }
+        send(["parts" => $rows]);
+    }
+    case "GET /parts/get": {
+        require_role($db, "admin");
+        $p = db_one($db, "SELECT * FROM ego_parts WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$p) fail("Part not found", 404);
+        $p["id"] = (int)$p["id"]; $p["active"] = (int)$p["active"];
+        $p["supplier_id"] = $p["supplier_id"] !== null ? (int)$p["supplier_id"] : null;
+        send(["part" => $p]);
+    }
+    case "POST /parts": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $supplierId = ($b["supplier_id"] ?? "") !== "" ? (int)$b["supplier_id"] : null;
+        db_exec($db, "INSERT INTO ego_parts (sku,name,description,category,supplier_id,unit,cost_price,sale_price,stock_qty,reorder_level,active) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            "ssssisddddi",
+            trim($b["sku"] ?? "") ?: null, $name, trim($b["description"] ?? "") ?: null, trim($b["category"] ?? "") ?: null,
+            $supplierId, trim($b["unit"] ?? "") ?: "each",
+            (float)($b["cost_price"] ?? 0), (float)($b["sale_price"] ?? 0), (float)($b["stock_qty"] ?? 0),
+            (float)($b["reorder_level"] ?? 0), (int)($b["active"] ?? 1));
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "part_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /parts/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_parts WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Part not found", 404);
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $supplierId = ($b["supplier_id"] ?? "") !== "" ? (int)$b["supplier_id"] : null;
+        db_exec($db, "UPDATE ego_parts SET sku=?,name=?,description=?,category=?,supplier_id=?,unit=?,cost_price=?,sale_price=?,stock_qty=?,reorder_level=?,active=? WHERE id=?",
+            "ssssisddddii",
+            trim($b["sku"] ?? "") ?: null, $name, trim($b["description"] ?? "") ?: null, trim($b["category"] ?? "") ?: null,
+            $supplierId, trim($b["unit"] ?? "") ?: "each",
+            (float)($b["cost_price"] ?? 0), (float)($b["sale_price"] ?? 0), (float)($b["stock_qty"] ?? 0),
+            (float)($b["reorder_level"] ?? 0), (int)($b["active"] ?? 1), $id);
+        log_activity($db, null, (int)$actor["id"], "part_updated", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /parts/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_parts SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "part_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
+    /* ===================== PROCUREMENT — Purchase orders + stock ===================== */
+    case "GET /purchase-orders": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db,
+            "SELECT po.id,po.reference,po.status,po.order_date,po.expected_date,po.received_date,po.total,
+                    po.supplier_id, s.name AS supplier_name
+             FROM ego_purchase_orders po JOIN ego_suppliers s ON s.id = po.supplier_id
+             WHERE po.deleted_at IS NULL AND (po.reference LIKE ? OR s.name LIKE ?)
+             ORDER BY po.id DESC", "ss", $q, $q);
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["supplier_id"]=(int)$r["supplier_id"]; $r["total"]=(float)$r["total"]; }
+        send(["purchase_orders" => $rows]);
+    }
+    case "GET /purchase-orders/get": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $po = db_one($db, "SELECT * FROM ego_purchase_orders WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$po) fail("Purchase order not found", 404);
+        $po["id"]=(int)$po["id"]; $po["supplier_id"]=(int)$po["supplier_id"];
+        $po["subtotal"]=(float)$po["subtotal"]; $po["total"]=(float)$po["total"];
+        $items = db_all($db, "SELECT id,part_id,description,qty,unit_cost,line_total FROM ego_po_items WHERE po_id=? ORDER BY sort,id", "i", $id);
+        foreach ($items as &$it) {
+            $it["id"]=(int)$it["id"]; $it["part_id"]=$it["part_id"]!==null?(int)$it["part_id"]:null;
+            foreach (["qty","unit_cost","line_total"] as $k) $it[$k]=(float)$it[$k];
+        }
+        $po["items"] = $items;
+        send(["purchase_order" => $po]);
+    }
+    case "POST /purchase-orders":
+    case "POST /purchase-orders/update": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $supplierId = (int)($b["supplier_id"] ?? 0);
+        if (!$supplierId) fail("Supplier is required");
+        $status = in_array($b["status"] ?? "draft", ["draft","ordered"], true) ? ($b["status"] ?? "draft") : "draft";
+        $items = is_array($b["items"] ?? null) ? $b["items"] : [];
+        $subtotal = 0.0;
+        foreach ($items as $it) { $subtotal += round((float)($it["qty"] ?? 0) * (float)($it["unit_cost"] ?? 0), 2); }
+        $orderDate = trim($b["order_date"] ?? "") ?: null;
+        $expDate = trim($b["expected_date"] ?? "") ?: null;
+        $notes = trim($b["notes"] ?? "") ?: null;
+
+        $db->begin_transaction();
+        try {
+            $editing = $route === "/purchase-orders/update";
+            if ($editing) {
+                $id = (int)($b["id"] ?? 0);
+                $cur = db_one($db, "SELECT status FROM ego_purchase_orders WHERE id=? AND deleted_at IS NULL", "i", $id);
+                if (!$cur) throw new RuntimeException("Purchase order not found");
+                if (!in_array($cur["status"], ["draft","ordered"], true)) throw new RuntimeException("Only draft/ordered POs can be edited");
+                db_exec($db, "UPDATE ego_purchase_orders SET supplier_id=?,status=?,order_date=?,expected_date=?,notes=?,subtotal=?,total=? WHERE id=?",
+                    "issssddi", $supplierId, $status, $orderDate, $expDate, $notes, $subtotal, $subtotal, $id);
+                db_exec($db, "DELETE FROM ego_po_items WHERE po_id=?", "i", $id);
+            } else {
+                db_exec($db, "INSERT INTO ego_purchase_orders (supplier_id,status,order_date,expected_date,notes,subtotal,total) VALUES (?,?,?,?,?,?,?)",
+                    "issssdd", $supplierId, $status, $orderDate, $expDate, $notes, $subtotal, $subtotal);
+                $id = (int)$db->insert_id;
+                $ref = "PO-" . str_pad((string)$id, 4, "0", STR_PAD_LEFT);
+                db_exec($db, "UPDATE ego_purchase_orders SET reference=? WHERE id=?", "si", $ref, $id);
+            }
+            $sort = 0;
+            foreach ($items as $it) {
+                $desc = trim($it["description"] ?? ""); if ($desc === "") continue;
+                $qty = (float)($it["qty"] ?? 0); $uc = (float)($it["unit_cost"] ?? 0);
+                $partId = ($it["part_id"] ?? "") !== "" ? (int)$it["part_id"] : null;
+                db_exec($db, "INSERT INTO ego_po_items (po_id,part_id,description,qty,unit_cost,line_total,sort) VALUES (?,?,?,?,?,?,?)",
+                    "iisdddi", $id, $partId, $desc, $qty, $uc, round($qty * $uc, 2), $sort++);
+            }
+            log_activity($db, null, (int)$actor["id"], $editing ? "po_updated" : "po_created", ["id" => $id]);
+            $db->commit();
+            send(["id" => $id], $editing ? 200 : 201);
+        } catch (Throwable $e) {
+            $db->rollback();
+            fail($e->getMessage(), 400);
+        }
+    }
+    case "POST /purchase-orders/receive": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        $db->begin_transaction();
+        try {
+            $po = db_one($db, "SELECT id,reference,status FROM ego_purchase_orders WHERE id=? AND deleted_at IS NULL", "i", $id);
+            if (!$po) throw new RuntimeException("Purchase order not found");
+            if (!in_array($po["status"], ["draft","ordered"], true)) throw new RuntimeException("PO already {$po['status']}");
+            foreach (db_all($db, "SELECT part_id,qty FROM ego_po_items WHERE po_id=? AND part_id IS NOT NULL", "i", $id) as $it) {
+                $pid = (int)$it["part_id"]; $qty = (float)$it["qty"];
+                db_exec($db, "INSERT INTO ego_stock_movements (part_id,qty_delta,reason,reference,actor_id) VALUES (?,?,?,?,?)",
+                    "idssi", $pid, $qty, "purchase", $po["reference"], (int)$actor["id"]);
+                db_exec($db, "UPDATE ego_parts SET stock_qty = stock_qty + ? WHERE id=?", "di", $qty, $pid);
+            }
+            db_exec($db, "UPDATE ego_purchase_orders SET status='received', received_date=CURDATE() WHERE id=?", "i", $id);
+            log_activity($db, null, (int)$actor["id"], "po_received", ["id" => $id, "reference" => $po["reference"]]);
+            $db->commit();
+            send(["ok" => true]);
+        } catch (Throwable $e) {
+            $db->rollback();
+            fail($e->getMessage(), 400);
+        }
+    }
+    case "POST /purchase-orders/cancel": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_purchase_orders SET status='cancelled' WHERE id=? AND status IN ('draft','ordered')", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "po_cancelled", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "GET /stock-movements": {
+        require_role($db, "admin");
+        $partId = (int)($_GET["part_id"] ?? 0);
+        if ($partId) {
+            $rows = db_all($db, "SELECT id,part_id,qty_delta,reason,reference,note,created_at FROM ego_stock_movements WHERE part_id=? ORDER BY id DESC LIMIT 100", "i", $partId);
+        } else {
+            $rows = db_all($db, "SELECT m.id,m.part_id,m.qty_delta,m.reason,m.reference,m.note,m.created_at,p.name AS part_name
+                                 FROM ego_stock_movements m JOIN ego_parts p ON p.id=m.part_id ORDER BY m.id DESC LIMIT 100");
+        }
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["part_id"]=(int)$r["part_id"]; $r["qty_delta"]=(float)$r["qty_delta"]; }
+        send(["movements" => $rows]);
+    }
+
+    /* ============================ ASSET MANAGEMENT (M-C) ============================ */
+    case "GET /assets": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $due = ($_GET["due"] ?? "") === "1";
+        $dueSql = $due ? "AND a.next_service_date IS NOT NULL AND a.next_service_date <= CURDATE()" : "";
+        $rows = db_all($db,
+            "SELECT a.id,a.name,a.asset_tag,a.type,a.location,a.status,a.next_service_date,
+                    a.customer_id, c.name AS customer_name
+             FROM ego_assets a LEFT JOIN ego_customers c ON c.id = a.customer_id
+             WHERE a.deleted_at IS NULL $dueSql
+               AND (a.name LIKE ? OR a.asset_tag LIKE ? OR a.serial LIKE ? OR a.location LIKE ?)
+             ORDER BY a.name", "ssss", $q, $q, $q, $q);
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["customer_id"]=$r["customer_id"]!==null?(int)$r["customer_id"]:null; }
+        send(["assets" => $rows]);
+    }
+    case "GET /assets/get": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $a = db_one($db, "SELECT * FROM ego_assets WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$a) fail("Asset not found", 404);
+        $a["id"]=(int)$a["id"]; $a["customer_id"]=$a["customer_id"]!==null?(int)$a["customer_id"]:null;
+        $svcs = db_all($db,
+            "SELECT s.id,s.service_date,s.outcome,s.notes,s.next_due,s.job_id,u.name AS engineer
+             FROM ego_asset_services s LEFT JOIN ego_users u ON u.id = s.engineer_id
+             WHERE s.asset_id=? ORDER BY s.service_date DESC, s.id DESC", "i", $id);
+        foreach ($svcs as &$s) { $s["id"]=(int)$s["id"]; }
+        $a["services"] = $svcs;
+        send(["asset" => $a]);
+    }
+    case "POST /assets":
+    case "POST /assets/update": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name is required");
+        $customerId = ($b["customer_id"] ?? "") !== "" ? (int)$b["customer_id"] : null;
+        $status = in_array($b["status"] ?? "ok", ["ok","due","fault","retired"], true) ? ($b["status"] ?? "ok") : "ok";
+        $install = trim($b["install_date"] ?? "") ?: null;
+        $next = trim($b["next_service_date"] ?? "") ?: null;
+        $cols = "name=?,asset_tag=?,customer_id=?,location=?,type=?,make=?,model=?,serial=?,status=?,install_date=?,next_service_date=?,notes=?";
+        $types = "ssisssssssss";
+        $args = [$name, trim($b["asset_tag"] ?? "") ?: null, $customerId, trim($b["location"] ?? "") ?: null,
+                 trim($b["type"] ?? "") ?: null, trim($b["make"] ?? "") ?: null, trim($b["model"] ?? "") ?: null,
+                 trim($b["serial"] ?? "") ?: null, $status, $install, $next, trim($b["notes"] ?? "") ?: null];
+        if ($route === "/assets/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            if (!db_one($db, "SELECT id FROM ego_assets WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Asset not found", 404);
+            db_exec($db, "UPDATE ego_assets SET $cols WHERE id=?", $types . "i", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "asset_updated", ["id" => $id]);
+            send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_assets (name,asset_tag,customer_id,location,type,make,model,serial,status,install_date,next_service_date,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            $types, ...$args);
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "asset_created", ["id" => $id, "name" => $name]);
+        send(["id" => $id], 201);
+    }
+    case "POST /assets/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_assets SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "asset_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /assets/service": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $assetId = (int)($b["asset_id"] ?? 0); if (!$assetId) fail("asset_id required");
+        if (!db_one($db, "SELECT id FROM ego_assets WHERE id=? AND deleted_at IS NULL", "i", $assetId)) fail("Asset not found", 404);
+        $date = trim($b["service_date"] ?? "") ?: date("Y-m-d");
+        $outcome = in_array($b["outcome"] ?? "ok", ["ok","repaired","fault"], true) ? ($b["outcome"] ?? "ok") : "ok";
+        $next = trim($b["next_due"] ?? "") ?: null;
+        $jobId = ($b["job_id"] ?? "") !== "" ? (int)$b["job_id"] : null;
+        db_exec($db, "INSERT INTO ego_asset_services (asset_id,job_id,service_date,engineer_id,outcome,notes,next_due) VALUES (?,?,?,?,?,?,?)",
+            "iisisss", $assetId, $jobId, $date, (int)$actor["id"], $outcome, trim($b["notes"] ?? "") ?: null, $next);
+        // Roll the asset's status + next service forward from the latest service.
+        $newStatus = $outcome === "fault" ? "fault" : "ok";
+        db_exec($db, "UPDATE ego_assets SET status=?, next_service_date=COALESCE(?, next_service_date) WHERE id=?",
+            "ssi", $newStatus, $next, $assetId);
+        log_activity($db, null, (int)$actor["id"], "asset_serviced", ["asset_id" => $assetId, "outcome" => $outcome]);
+        send(["ok" => true], 201);
+    }
+
+    /* ============================ PLATFORM — Announcements (M-A) ============================ */
+    case "GET /announcements": {
+        $me = require_user($db);
+        // Engineers see 'engineers'+'all'; office-class see 'office'+'all'.
+        $mine = $me["role"] === "engineer" ? "engineers" : "office";
+        $rows = db_all($db,
+            "SELECT id,title,body,audience,pinned,created_at
+             FROM ego_announcements
+             WHERE deleted_at IS NULL AND active=1 AND audience IN ('all', ?)
+             ORDER BY pinned DESC, id DESC LIMIT 50", "s", $mine);
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["pinned"]=(int)$r["pinned"]; }
+        send(["announcements" => $rows]);
+    }
+    case "GET /announcements/manage": {
+        require_min($db, "manager");
+        $rows = db_all($db,
+            "SELECT a.id,a.title,a.body,a.audience,a.pinned,a.active,a.created_at,u.name AS author
+             FROM ego_announcements a LEFT JOIN ego_users u ON u.id=a.author_id
+             WHERE a.deleted_at IS NULL ORDER BY a.pinned DESC, a.id DESC", "");
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["pinned"]=(int)$r["pinned"]; $r["active"]=(int)$r["active"]; }
+        send(["announcements" => $rows]);
+    }
+    case "GET /announcements/get": {
+        require_min($db, "manager");
+        $a = db_one($db, "SELECT * FROM ego_announcements WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$a) fail("Announcement not found", 404);
+        $a["id"]=(int)$a["id"]; $a["pinned"]=(int)$a["pinned"]; $a["active"]=(int)$a["active"];
+        send(["announcement" => $a]);
+    }
+    case "POST /announcements":
+    case "POST /announcements/update": {
+        $actor = require_min($db, "manager");
+        $b = body();
+        $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $audience = in_array($b["audience"] ?? "all", ["all","engineers","office"], true) ? ($b["audience"] ?? "all") : "all";
+        $body = trim($b["body"] ?? "") ?: null;
+        $pinned = (int)!!($b["pinned"] ?? 0);
+        $active = isset($b["active"]) ? (int)!!$b["active"] : 1;
+        if ($route === "/announcements/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            if (!db_one($db, "SELECT id FROM ego_announcements WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Announcement not found", 404);
+            db_exec($db, "UPDATE ego_announcements SET title=?,body=?,audience=?,pinned=?,active=? WHERE id=?",
+                "sssiii", $title, $body, $audience, $pinned, $active, $id);
+            log_activity($db, null, (int)$actor["id"], "announcement_updated", ["id" => $id]);
+            send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_announcements (title,body,audience,pinned,active,author_id) VALUES (?,?,?,?,?,?)",
+            "sssiii", $title, $body, $audience, $pinned, $active, (int)$actor["id"]);
+        $id = (int)$db->insert_id;
+        log_activity($db, null, (int)$actor["id"], "announcement_created", ["id" => $id, "title" => $title]);
+        send(["id" => $id], 201);
+    }
+    case "POST /announcements/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_announcements SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "announcement_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
+    /* ============================ CONTRACTS / PPM (M-D) ============================ */
+    case "GET /contracts": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db,
+            "SELECT ct.id,ct.reference,ct.title,ct.status,ct.value,ct.renewal_date,ct.next_service,ct.next_bill_date,
+                    ct.customer_id, c.name AS customer_name
+             FROM ego_contracts ct LEFT JOIN ego_customers c ON c.id = ct.customer_id
+             WHERE ct.deleted_at IS NULL AND (ct.title LIKE ? OR ct.reference LIKE ? OR c.name LIKE ?)
+             ORDER BY ct.id DESC", "sss", $q, $q, $q);
+        foreach ($rows as &$r) { $r["id"]=(int)$r["id"]; $r["customer_id"]=$r["customer_id"]!==null?(int)$r["customer_id"]:null; $r["value"]=(float)$r["value"]; }
+        send(["contracts" => $rows]);
+    }
+    case "GET /contracts/get": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $ct = db_one($db, "SELECT * FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$ct) fail("Contract not found", 404);
+        $ct["id"]=(int)$ct["id"]; $ct["customer_id"]=$ct["customer_id"]!==null?(int)$ct["customer_id"]:null;
+        foreach (["value","bill_amount"] as $k) $ct[$k]=$ct[$k]!==null?(float)$ct[$k]:null;
+        $allocs = db_all($db, "SELECT id,kind,person_name,role,hours_per_week,rate,notes FROM ego_contract_allocations WHERE contract_id=? ORDER BY sort,id", "i", $id);
+        foreach ($allocs as &$a) { $a["id"]=(int)$a["id"]; $a["hours_per_week"]=$a["hours_per_week"]!==null?(float)$a["hours_per_week"]:null; $a["rate"]=$a["rate"]!==null?(float)$a["rate"]:null; }
+        $ct["allocations"] = $allocs;
+        send(["contract" => $ct]);
+    }
+    case "POST /contracts":
+    case "POST /contracts/update": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $customerId = ($b["customer_id"] ?? "") !== "" ? (int)$b["customer_id"] : null;
+        $status = in_array($b["status"] ?? "active", ["active","pending","expired","cancelled"], true) ? ($b["status"] ?? "active") : "active";
+        $ni = fn($k) => ($b[$k] ?? "") !== "" ? (int)$b[$k] : null;
+        $nd = fn($k) => trim($b[$k] ?? "") ?: null;
+        $nf = fn($k) => ($b[$k] ?? "") !== "" ? (float)$b[$k] : null;
+        $cols = "customer_id=?,title=?,value=?,status=?,start_date=?,renewal_date=?,sla_response_hours=?,sla_fix_hours=?,ppm_every_days=?,next_service=?,bill_every_days=?,next_bill_date=?,bill_amount=?,notes=?";
+        $types = "isdsssiiisisds";
+        $args = [$customerId, $title, (float)($b["value"] ?? 0), $status, $nd("start_date"), $nd("renewal_date"),
+                 $ni("sla_response_hours"), $ni("sla_fix_hours"), $ni("ppm_every_days"), $nd("next_service"),
+                 $ni("bill_every_days"), $nd("next_bill_date"), $nf("bill_amount"), $nd("notes")];
+        $allocs = is_array($b["allocations"] ?? null) ? $b["allocations"] : [];
+
+        $db->begin_transaction();
+        try {
+            if ($route === "/contracts/update") {
+                $id = (int)($b["id"] ?? 0); if (!$id) throw new RuntimeException("id required");
+                if (!db_one($db, "SELECT id FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id)) throw new RuntimeException("Contract not found");
+                db_exec($db, "UPDATE ego_contracts SET $cols WHERE id=?", $types . "i", ...array_merge($args, [$id]));
+                db_exec($db, "DELETE FROM ego_contract_allocations WHERE contract_id=?", "i", $id);
+            } else {
+                db_exec($db, "INSERT INTO ego_contracts (customer_id,title,value,status,start_date,renewal_date,sla_response_hours,sla_fix_hours,ppm_every_days,next_service,bill_every_days,next_bill_date,bill_amount,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    $types, ...$args);
+                $id = (int)$db->insert_id;
+                db_exec($db, "UPDATE ego_contracts SET reference=? WHERE id=?", "si", "CT-" . str_pad((string)$id, 4, "0", STR_PAD_LEFT), $id);
+            }
+            $sort = 0;
+            foreach ($allocs as $a) {
+                $person = trim($a["person_name"] ?? ""); if ($person === "") continue;
+                $kind = in_array($a["kind"] ?? "employee", ["employee","subcontractor"], true) ? $a["kind"] : "employee";
+                db_exec($db, "INSERT INTO ego_contract_allocations (contract_id,kind,person_name,role,hours_per_week,rate,notes,sort) VALUES (?,?,?,?,?,?,?,?)",
+                    "isssddsi", $id, $kind, $person, trim($a["role"] ?? "") ?: null,
+                    ($a["hours_per_week"] ?? "") !== "" ? (float)$a["hours_per_week"] : null,
+                    ($a["rate"] ?? "") !== "" ? (float)$a["rate"] : null, trim($a["notes"] ?? "") ?: null, $sort++);
+            }
+            log_activity($db, null, (int)$actor["id"], $route === "/contracts/update" ? "contract_updated" : "contract_created", ["id" => $id]);
+            $db->commit();
+            send(["id" => $id], $route === "/contracts/update" ? 200 : 201);
+        } catch (Throwable $e) {
+            $db->rollback();
+            fail($e->getMessage(), 400);
+        }
+    }
+    case "POST /contracts/delete": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_contracts SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "contract_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /contracts/bill": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        $ct = db_one($db, "SELECT id,bill_every_days,bill_amount FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$ct) fail("Contract not found", 404);
+        $days = (int)($ct["bill_every_days"] ?? 0);
+        db_exec($db, "UPDATE ego_contracts SET last_billed=CURDATE(), next_bill_date = IF(?>0, DATE_ADD(CURDATE(), INTERVAL ? DAY), next_bill_date) WHERE id=?",
+            "iii", $days, $days, $id);
+        log_activity($db, null, (int)$actor["id"], "contract_billed", ["id" => $id, "amount" => (float)($ct["bill_amount"] ?? 0)]);
+        send(["ok" => true]);
+    }
+    case "POST /contracts/service-done": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        $ct = db_one($db, "SELECT id,ppm_every_days FROM ego_contracts WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$ct) fail("Contract not found", 404);
+        $days = (int)($ct["ppm_every_days"] ?? 0);
+        db_exec($db, "UPDATE ego_contracts SET last_service=CURDATE(), next_service = IF(?>0, DATE_ADD(CURDATE(), INTERVAL ? DAY), next_service) WHERE id=?",
+            "iii", $days, $days, $id);
+        log_activity($db, null, (int)$actor["id"], "contract_service_done", ["id" => $id]);
+        send(["ok" => true]);
+    }
+
+    /* ============================ COMPLIANCE — RAMS (M-E) ============================ */
+    case "GET /rams": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db, "SELECT id,title,trade,reference,review_date FROM ego_rams_documents WHERE deleted_at IS NULL AND (title LIKE ? OR trade LIKE ? OR reference LIKE ?) ORDER BY title", "sss", $q, $q, $q);
+        foreach ($rows as &$r) $r["id"] = (int)$r["id"];
+        send(["rams" => $rows]);
+    }
+    case "GET /rams/get": {
+        require_role($db, "admin");
+        $r = db_one($db, "SELECT * FROM ego_rams_documents WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$r) fail("RAMS not found", 404);
+        $r["id"] = (int)$r["id"];
+        send(["rams" => $r]);
+    }
+    case "POST /rams":
+    case "POST /rams/update": {
+        $actor = require_role($db, "admin");
+        $b = body(); $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $args = [$title, trim($b["trade"] ?? "") ?: null, trim($b["reference"] ?? "") ?: null, trim($b["review_date"] ?? "") ?: null, trim($b["content"] ?? "") ?: null];
+        if ($route === "/rams/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            db_exec($db, "UPDATE ego_rams_documents SET title=?,trade=?,reference=?,review_date=?,content=? WHERE id=?", "sssssi", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "rams_updated", ["id" => $id]); send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_rams_documents (title,trade,reference,review_date,content) VALUES (?,?,?,?,?)", "sssss", ...$args);
+        $id = (int)$db->insert_id; log_activity($db, null, (int)$actor["id"], "rams_created", ["id" => $id]); send(["id" => $id], 201);
+    }
+    case "POST /rams/delete": {
+        $actor = require_role($db, "admin"); $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_rams_documents SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "rams_deleted", ["id" => $id]); send(["ok" => true]);
+    }
+
+    /* ============================ COMPLIANCE — Incidents (M-E) ============================ */
+    case "GET /incidents": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db, "SELECT id,incident_date,type,severity,location,person,status FROM ego_incidents WHERE deleted_at IS NULL AND (location LIKE ? OR person LIKE ? OR description LIKE ?) ORDER BY incident_date DESC, id DESC", "sss", $q, $q, $q);
+        foreach ($rows as &$r) $r["id"] = (int)$r["id"];
+        send(["incidents" => $rows]);
+    }
+    case "GET /incidents/get": {
+        require_role($db, "admin");
+        $r = db_one($db, "SELECT * FROM ego_incidents WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$r) fail("Incident not found", 404); $r["id"] = (int)$r["id"];
+        send(["incident" => $r]);
+    }
+    case "POST /incidents":
+    case "POST /incidents/update": {
+        $actor = require_role($db, "admin"); $b = body();
+        $type = in_array($b["type"] ?? "near_miss", ["accident","near_miss","injury","property","environmental","other"], true) ? ($b["type"] ?? "near_miss") : "near_miss";
+        $sev = in_array($b["severity"] ?? "low", ["low","medium","high","riddor"], true) ? ($b["severity"] ?? "low") : "low";
+        $status = in_array($b["status"] ?? "open", ["open","investigating","closed"], true) ? ($b["status"] ?? "open") : "open";
+        $args = [trim($b["incident_date"] ?? "") ?: null, $type, $sev, trim($b["location"] ?? "") ?: null, trim($b["person"] ?? "") ?: null,
+                 trim($b["description"] ?? "") ?: null, trim($b["action_taken"] ?? "") ?: null, trim($b["reported_by"] ?? "") ?: null, $status];
+        if ($route === "/incidents/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            db_exec($db, "UPDATE ego_incidents SET incident_date=?,type=?,severity=?,location=?,person=?,description=?,action_taken=?,reported_by=?,status=? WHERE id=?", "sssssssssi", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "incident_updated", ["id" => $id]); send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_incidents (incident_date,type,severity,location,person,description,action_taken,reported_by,status) VALUES (?,?,?,?,?,?,?,?,?)", "sssssssss", ...$args);
+        $id = (int)$db->insert_id; log_activity($db, null, (int)$actor["id"], "incident_created", ["id" => $id, "severity" => $sev]); send(["id" => $id], 201);
+    }
+    case "POST /incidents/delete": {
+        $actor = require_role($db, "admin"); $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_incidents SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "incident_deleted", ["id" => $id]); send(["ok" => true]);
+    }
+
+    /* ============================ COMPLIANCE — Certificates (M-E) ============================ */
+    case "GET /certificates": {
+        require_role($db, "admin");
+        $q = "%" . trim($_GET["q"] ?? "") . "%";
+        $rows = db_all($db, "SELECT c.id,c.title,c.holder,c.type,c.reference,c.issued_date,c.expiry_date,c.engineer_id,u.name AS engineer
+                             FROM ego_certificates c LEFT JOIN ego_users u ON u.id=c.engineer_id
+                             WHERE c.deleted_at IS NULL AND (c.title LIKE ? OR c.holder LIKE ? OR c.type LIKE ?) ORDER BY c.expiry_date IS NULL, c.expiry_date", "sss", $q, $q, $q);
+        $today = new DateTime("today");
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"]; $r["engineer_id"] = $r["engineer_id"] !== null ? (int)$r["engineer_id"] : null;
+            $r["status"] = "valid";
+            if ($r["expiry_date"]) {
+                $exp = new DateTime($r["expiry_date"]); $days = (int)$today->diff($exp)->format("%r%a");
+                $r["status"] = $days < 0 ? "expired" : ($days <= 30 ? "expiring" : "valid");
+            }
+        }
+        send(["certificates" => $rows]);
+    }
+    case "GET /certificates/get": {
+        require_role($db, "admin");
+        $r = db_one($db, "SELECT * FROM ego_certificates WHERE id=? AND deleted_at IS NULL", "i", (int)($_GET["id"] ?? 0));
+        if (!$r) fail("Certificate not found", 404);
+        $r["id"] = (int)$r["id"]; $r["engineer_id"] = $r["engineer_id"] !== null ? (int)$r["engineer_id"] : null;
+        send(["certificate" => $r]);
+    }
+    case "POST /certificates":
+    case "POST /certificates/update": {
+        $actor = require_role($db, "admin"); $b = body();
+        $title = trim($b["title"] ?? ""); if ($title === "") fail("Title is required");
+        $engId = ($b["engineer_id"] ?? "") !== "" ? (int)$b["engineer_id"] : null;
+        $args = [$title, trim($b["holder"] ?? "") ?: null, $engId, trim($b["type"] ?? "") ?: null, trim($b["reference"] ?? "") ?: null,
+                 trim($b["issued_date"] ?? "") ?: null, trim($b["expiry_date"] ?? "") ?: null];
+        if ($route === "/certificates/update") {
+            $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+            db_exec($db, "UPDATE ego_certificates SET title=?,holder=?,engineer_id=?,type=?,reference=?,issued_date=?,expiry_date=? WHERE id=?", "ssissssi", ...array_merge($args, [$id]));
+            log_activity($db, null, (int)$actor["id"], "certificate_updated", ["id" => $id]); send(["ok" => true]);
+        }
+        db_exec($db, "INSERT INTO ego_certificates (title,holder,engineer_id,type,reference,issued_date,expiry_date) VALUES (?,?,?,?,?,?,?)", "ssissss", ...$args);
+        $id = (int)$db->insert_id; log_activity($db, null, (int)$actor["id"], "certificate_created", ["id" => $id]); send(["id" => $id], 201);
+    }
+    case "POST /certificates/delete": {
+        $actor = require_role($db, "admin"); $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "UPDATE ego_certificates SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "certificate_deleted", ["id" => $id]); send(["ok" => true]);
+    }
+
+    /* ============================ ACCOUNT SECURITY + TOTP 2FA (M-A) ============================ */
+    case "POST /me/change-password": {
+        $me = require_user($db); $b = body();
+        $cur = (string)($b["current_password"] ?? ""); $new = (string)($b["new_password"] ?? "");
+        if (strlen($new) < 8) fail("New password must be at least 8 characters");
+        $row = db_one($db, "SELECT password_hash FROM ego_users WHERE id=?", "i", (int)$me["id"]);
+        if (!$row || !$row["password_hash"] || !password_verify($cur, $row["password_hash"])) fail("Current password is incorrect", 403);
+        db_exec($db, "UPDATE ego_users SET password_hash=?, must_change_password=0, password_changed_at=NOW() WHERE id=?",
+            "si", password_hash($new, PASSWORD_DEFAULT), (int)$me["id"]);
+        log_activity($db, null, (int)$me["id"], "password_changed", []);
+        send(["ok" => true]);
+    }
+    case "POST /me/totp/setup": {
+        $me = require_user($db);
+        require_once __DIR__ . "/lib/totp.php";
+        $secret = totp_secret();
+        db_exec($db, "UPDATE ego_users SET totp_secret=?, totp_enabled=0 WHERE id=?", "si", $secret, (int)$me["id"]);
+        send(["secret" => $secret, "otpauth" => totp_uri($secret, (string)$me["email"])]);
+    }
+    case "POST /me/totp/enable": {
+        $me = require_user($db);
+        require_once __DIR__ . "/lib/totp.php";
+        $row = db_one($db, "SELECT totp_secret FROM ego_users WHERE id=?", "i", (int)$me["id"]);
+        if (!$row || !$row["totp_secret"]) fail("Run 2FA setup first");
+        if (!totp_verify((string)$row["totp_secret"], trim((string)(body()["code"] ?? "")))) fail("Invalid code — check your authenticator", 400);
+        db_exec($db, "UPDATE ego_users SET totp_enabled=1 WHERE id=?", "i", (int)$me["id"]);
+        log_activity($db, null, (int)$me["id"], "totp_enabled", []);
+        send(["ok" => true]);
+    }
+    case "POST /me/totp/disable": {
+        $me = require_user($db);
+        $row = db_one($db, "SELECT password_hash FROM ego_users WHERE id=?", "i", (int)$me["id"]);
+        if (!$row || !password_verify((string)(body()["password"] ?? ""), $row["password_hash"])) fail("Password incorrect", 403);
+        db_exec($db, "UPDATE ego_users SET totp_enabled=0, totp_secret=NULL WHERE id=?", "i", (int)$me["id"]);
+        log_activity($db, null, (int)$me["id"], "totp_disabled", []);
+        send(["ok" => true]);
+    }
+    // Manager+ can force a staff member to set a new password at next login.
+    case "POST /team/force-password-change": {
+        $actor = require_min($db, "manager");
+        $uid = (int)(body()["id"] ?? 0); if (!$uid) fail("id required");
+        db_exec($db, "UPDATE ego_users SET must_change_password=1 WHERE id=? AND deleted_at IS NULL", "i", $uid);
+        log_activity($db, null, (int)$actor["id"], "force_password_change", ["user_id" => $uid]);
+        send(["ok" => true]);
+    }
+
+    /* ============================ ADMIN DELETE (manager+) ============================ */
+    case "POST /jobs/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Job not found", 404);
+        db_exec($db, "UPDATE ego_jobs SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, $id, (int)$actor["id"], "job_deleted", []);
+        send(["ok" => true]);
+    }
+    case "POST /invoices/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Not found", 404);
+        db_exec($db, "UPDATE ego_invoices SET deleted_at=NOW() WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "invoice_deleted", ["id" => $id]);
+        send(["ok" => true]);
+    }
+    case "POST /payments/delete": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        $p = db_one($db, "SELECT id, invoice_id FROM ego_payments WHERE id=?", "i", $id);
+        if (!$p) fail("Payment not found", 404);
+        db_exec($db, "DELETE FROM ego_payments WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "payment_deleted", ["id" => $id, "invoice_id" => (int)$p["invoice_id"]]);
+        send(["ok" => true]);
+    }
+
+    /* ============================ MAIL — drafts + notes ============================ */
+    case "POST /email/draft": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $to = trim($b["to"] ?? "") ?: null;
+        $subject = trim($b["subject"] ?? "");
+        $bodyTxt = trim($b["body"] ?? "");
+        if ($subject === "" && $bodyTxt === "") fail("Nothing to save");
+        $id = (int)($b["id"] ?? 0);
+        if ($id) {
+            db_exec($db, "UPDATE ego_messages SET to_email=?,subject=?,body=? WHERE id=? AND status='draft'", "sssi", $to, $subject, $bodyTxt, $id);
+            send(["id" => $id]);
+        }
+        db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','email',?,?,?, 'draft')",
+            "sss", $to, $subject, $bodyTxt);
+        log_activity($db, null, (int)$actor["id"], "draft_saved", []);
+        send(["id" => (int)$db->insert_id], 201);
+    }
+
+    /* ===================== MARKETING: SUBSCRIBERS + CAMPAIGNS ===================== */
+    // Newsletter signups (landing) and admin-added contacts live in ego_subscribers;
+    // customers come from ego_customers. Admins compose + send bulk email to any
+    // audience, with an AI draft helper. Human always approves before send.
+    case "GET /subscribers": {
+        require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $subs = db_all($db, "SELECT id,email,name,source,subscribed,created_at FROM ego_subscribers ORDER BY id DESC");
+        $cust = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL")["c"] ?? 0);
+        send(["subscribers" => $subs, "subscriber_count" => count(array_filter($subs, fn($s) => (int)$s["subscribed"] === 1)), "customer_email_count" => $cust]);
+    }
+    case "POST /subscribers": {
+        $actor = require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $b = body();
+        $email = strtolower(trim($b["email"] ?? ""));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail("A valid email is required");
+        $name = trim($b["name"] ?? "") ?: null;
+        $src = trim($b["source"] ?? "") ?: "manual";
+        db_exec($db, "INSERT INTO ego_subscribers (email,name,source) VALUES (?,?,?)
+                      ON DUPLICATE KEY UPDATE name=COALESCE(VALUES(name),name), subscribed=1", "sss", $email, $name, $src);
+        log_activity($db, null, (int)$actor["id"], "subscriber_added", ["email" => $email]);
+        send(["ok" => true], 201);
+    }
+    case "POST /subscribers/delete": {
+        require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "DELETE FROM ego_subscribers WHERE id=?", "i", $id);
+        send(["ok" => true]);
+    }
+    case "POST /campaigns/draft": {
+        require_role($db, "admin");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe what the message should say");
+        $kind = trim($b["kind"] ?? "marketing") ?: "marketing";
+        $co = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
+        $name = $co["company_name"] ?? "EGO LIMITED";
+        $task = "Write a $kind email for $name. A short, punchy subject line, then the body in a few short paragraphs, signed off as the $name team. "
+            . "Owner's brief: $brief\n\nReturn EXACTLY as:\nSubject: <subject line>\n\n<email body>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db)); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $subject = ""; $bodyTxt = trim($text);
+        if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
+        send(["subject" => $subject, "body" => $bodyTxt]);
+    }
+    case "POST /campaigns/send": {
+        $actor = require_role($db, "admin");
+        ensure_subscribers_table($db);
+        $b = body();
+        $subject = trim($b["subject"] ?? ""); $bodyTxt = trim($b["body"] ?? "");
+        $audience = (string)($b["audience"] ?? "subscribers");
+        if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
+        // De-duped recipient map: email => name.
+        $rows = [];
+        if ($audience === "list") {
+            foreach ((array)($b["emails"] ?? []) as $e) {
+                $e = strtolower(trim((string)$e));
+                if (filter_var($e, FILTER_VALIDATE_EMAIL)) $rows[$e] = $rows[$e] ?? null;
+            }
+        } else {
+            if ($audience === "subscribers" || $audience === "all")
+                foreach (db_all($db, "SELECT email,name FROM ego_subscribers WHERE subscribed=1") as $r) $rows[strtolower($r["email"])] = $r["name"];
+            if ($audience === "customers" || $audience === "all")
+                foreach (db_all($db, "SELECT email,name FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL") as $r)
+                    $rows[strtolower($r["email"])] = $rows[strtolower($r["email"])] ?? $r["name"];
+        }
+        // Honour opt-outs across EVERY audience (suppression list) — UK PECR.
+        foreach (db_all($db, "SELECT email FROM ego_subscribers WHERE subscribed=0") as $r) unset($rows[strtolower($r["email"])]);
+        if (!$rows) fail("No recipients for that audience yet");
+        require_once __DIR__ . "/lib/mailer.php";
+        // Optional header image makes the campaign read like a post, not a plain email.
+        $img = trim($b["image_url"] ?? "");
+        $imgHtml = ($img !== "" && filter_var($img, FILTER_VALIDATE_URL))
+            ? "<img src='" . htmlspecialchars($img) . "' alt='' style='display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:0 0 18px'>"
+            : "";
+        $bodyHtml = $imgHtml . nl2br(htmlspecialchars($bodyTxt));
+        $coName = htmlspecialchars((db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED");
+        $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
+        $unsubBase = "$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe";
+        $sent = 0; $failed = 0;
+        foreach ($rows as $email => $name) {
+            // Throttle so a big send doesn't saturate the SMTP relay (~8/sec).
+            if ($sent + $failed > 0) usleep(120000);
+            // Per-recipient unsubscribe link so every marketing email carries a real opt-out.
+            $link = htmlspecialchars($unsubBase . "?e=" . rawurlencode($email) . "&t=" . ego_unsub_token($email));
+            $foot = "<p style='margin:18px 0 0;color:#9ca3af;font-size:12px'>You're receiving this from $coName. "
+                . "<a href='$link' style='color:#9ca3af'>Unsubscribe</a>.</p>";
+            $html = ego_email_shell($db, "", $bodyHtml . $foot);
+            try {
+                ego_send_mail($db, $email, $name ?: null, $subject, $html);
+                $sent++;
+                db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subject, $bodyTxt);
+            } catch (Throwable $e) { $failed++; }
+        }
+        log_activity($db, null, (int)$actor["id"], "campaign_sent", ["audience" => $audience, "sent" => $sent, "failed" => $failed]);
+        send(["ok" => true, "sent" => $sent, "failed" => $failed, "recipients" => count($rows)]);
+    }
+    case "POST /notes": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $bodyTxt = trim($b["body"] ?? ""); if ($bodyTxt === "") fail("Note is empty");
+        $title = trim($b["title"] ?? "") ?: "Note";
+        db_exec($db, "INSERT INTO ego_messages (direction,channel,from_name,subject,body,status) VALUES ('outbound','note',?,?,?, 'note')",
+            "sss", $actor["name"], $title, $bodyTxt);
+        log_activity($db, null, (int)$actor["id"], "note_added", ["title" => $title]);
+        send(["id" => (int)$db->insert_id], 201);
+    }
+    case "POST /messages/delete": {
+        require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        // Office can clear anything from their own mailbox (inbox/sent/drafts/notes).
+        // Portal threads stay (they belong to the customer's job record).
+        tombstone_uids($db, "id=?", "i", [$id]); // keep it deleted across re-syncs
+        require_once __DIR__ . "/lib/inbox.php";
+        try { inbox_delete_remote($db, [$id]); } catch (Throwable $e) { /* best-effort: also delete on the IMAP server */ }
+        db_exec($db, "DELETE FROM ego_messages WHERE id=? AND (channel IS NULL OR channel <> 'portal')", "i", $id);
+        send(["ok" => true]);
+    }
+    case "POST /messages/archive": {
+        require_role($db, "admin");
+        ensure_message_cols($db);
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        $on = (int)!!($b["archived"] ?? 1);
+        db_exec($db, "UPDATE ego_messages SET archived=? WHERE id=?", "ii", $on, $id);
+        send(["ok" => true]);
+    }
+    case "POST /messages/flag": {
+        require_role($db, "admin");
+        ensure_message_cols($db);
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        $on = (int)!!($b["flagged"] ?? 1);
+        db_exec($db, "UPDATE ego_messages SET flagged=? WHERE id=?", "ii", $on, $id);
+        send(["ok" => true]);
+    }
+    case "POST /messages/bulk": {
+        // Multiselect actions: delete | archive | unarchive | flag | unflag.
+        require_role($db, "admin");
+        ensure_message_cols($db);
+        $b = body();
+        $action = (string)($b["action"] ?? "");
+        $ids = array_values(array_filter(array_map("intval", (array)($b["ids"] ?? [])), fn($n) => $n > 0));
+        if (!$ids) fail("Select at least one message");
+        if (count($ids) > 500) fail("Too many at once");
+        $place = implode(",", array_fill(0, count($ids), "?"));
+        $types = str_repeat("i", count($ids));
+        switch ($action) {
+            case "delete":
+                tombstone_uids($db, "id IN ($place)", $types, $ids);
+                require_once __DIR__ . "/lib/inbox.php";
+                try { inbox_delete_remote($db, $ids); } catch (Throwable $e) { /* best-effort server-side delete */ }
+                $sql = "DELETE FROM ego_messages WHERE id IN ($place) AND (channel IS NULL OR channel <> 'portal')"; break;
+            case "archive":   $sql = "UPDATE ego_messages SET archived=1 WHERE id IN ($place)"; break;
+            case "unarchive": $sql = "UPDATE ego_messages SET archived=0 WHERE id IN ($place)"; break;
+            case "flag":      $sql = "UPDATE ego_messages SET flagged=1 WHERE id IN ($place)"; break;
+            case "unflag":    $sql = "UPDATE ego_messages SET flagged=0 WHERE id IN ($place)"; break;
+            default: fail("Unknown action");
+        }
+        db_exec($db, $sql, $types, ...$ids);
+        send(["ok" => true, "count" => count($ids)]);
+    }
+
+    /* ============================ PUBLIC (landing — no auth) ============================ */
+    case "GET /unsubscribe": {
+        // One-click marketing opt-out (UK PECR). Token is HMAC-derived from the email,
+        // so the link is stable and not trivially guessable. Idempotent.
+        require_once __DIR__ . "/lib/mailer.php";
+        ensure_subscribers_table($db);
+        $e = strtolower(trim((string)($_GET["e"] ?? "")));
+        $t = (string)($_GET["t"] ?? "");
+        $ok = filter_var($e, FILTER_VALIDATE_EMAIL) && hash_equals(ego_unsub_token($e), $t);
+        if ($ok) db_exec($db, "INSERT INTO ego_subscribers (email,source,subscribed) VALUES (?,'unsubscribe',0)
+                               ON DUPLICATE KEY UPDATE subscribed=0", "s", $e);
+        $co = htmlspecialchars((db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED");
+        $msg = $ok
+            ? "<h2 style='color:#171816;margin:0 0 8px'>You're unsubscribed</h2><p style='color:#4b5563'>You won't receive any more marketing emails from $co. You'll still get essential messages about jobs you book with us.</p>"
+            : "<h2 style='color:#171816;margin:0 0 8px'>Link not valid</h2><p style='color:#4b5563'>This unsubscribe link has expired or is incorrect. Reply to any email from us and we'll remove you.</p>";
+        header("Content-Type: text/html; charset=UTF-8");
+        echo "<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Unsubscribe</title></head>"
+            . "<body style='margin:0;background:#f4f4f5;font-family:Arial,Helvetica,sans-serif'>"
+            . "<div style='max-width:480px;margin:48px auto;background:#fff;border:1px solid #e5e7eb;border-radius:12px;overflow:hidden'>"
+            . "<div style='background:#171816;padding:16px 24px'><span style='color:#fff;font-weight:700;letter-spacing:.05em'>$co</span>"
+            . "<span style='display:inline-block;width:24px;height:3px;background:#EF9F27;border-radius:2px;margin-left:10px;vertical-align:middle'></span></div>"
+            . "<div style='padding:28px 24px'>$msg</div></div></body></html>";
+        exit;
+    }
+    case "GET /public/company": {
+        $cs = db_one($db, "SELECT company_name,phone,email,address,vat_number,companies_house_no FROM ego_company_settings ORDER BY id LIMIT 1") ?? [];
+        send(["company" => [
+            "company_name"       => $cs["company_name"] ?? "",
+            "company_phone"      => $cs["phone"] ?? "",
+            "company_email"      => $cs["email"] ?? "",
+            "company_address"    => $cs["address"] ?? "",
+            "vat_number"         => $cs["vat_number"] ?? "",
+            "companies_house_no" => $cs["companies_house_no"] ?? "",
+        ]]);
+    }
+    case "GET /public/reviews": {
+        // Published customer reviews (4-star+ with text) that feed the landing
+        // testimonials. App reviews + any imported Google reviews (source column).
+        $rows = db_all($db,
+            "SELECT m.rating, m.body, m.from_name, m.created_at, m.source, c.name AS customer_name
+             FROM ego_messages m
+             LEFT JOIN ego_customers c ON c.id = m.customer_id
+             WHERE m.channel='review' AND m.rating >= 4 AND m.body IS NOT NULL AND TRIM(m.body) <> ''
+             ORDER BY m.id DESC LIMIT 12", "");
+        $reviews = []; $sum = 0;
+        foreach ($rows as $r) {
+            $sum += (int)$r["rating"];
+            $reviews[] = [
+                "name"   => trim($r["from_name"] ?? "") ?: ($r["customer_name"] ?? "Customer"),
+                "quote"  => $r["body"],
+                "score"  => (int)$r["rating"],
+                "date"   => $r["created_at"],
+                "source" => $r["source"] ?: "app",
+            ];
+        }
+        $count = count($reviews);
+        send([
+            "source"  => "app",
+            "rating"  => $count ? round($sum / $count, 1) : null,
+            "count"   => $count,
+            "reviews" => $reviews,
+        ]);
+    }
+
+    /* ============================ REVIEWS HUB — add / import Google ============================ */
+    case "POST /reviews/add": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $rating = max(0, min(5, (int)($b["rating"] ?? 0)));
+        $bodyTxt = trim($b["body"] ?? "");
+        $name = trim($b["name"] ?? "") ?: "Customer";
+        $source = in_array($b["source"] ?? "google", ["app","google"], true) ? $b["source"] : "google";
+        if ($rating < 1 || $bodyTxt === "") fail("Rating and review text required");
+        db_exec($db,
+            "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,acknowledged)
+             VALUES ('inbound','review',?,?,?, 'received',?,1)",
+            "ssis", $name, $bodyTxt, $rating, $source);
+        log_activity($db, null, (int)$actor["id"], "review_added", ["source" => $source]);
+        send(["id" => (int)$db->insert_id], 201);
+    }
+    case "POST /reviews/import-google": {
+        $actor = require_min($db, "manager");
+        $key = integ($db, "google_places_key");
+        $place = integ($db, "google_place_id");
+        if (!$key || !$place) fail("Add a Google Places API key and Place ID in Settings → Integrations first", 400);
+        $url = "https://maps.googleapis.com/maps/api/place/details/json?place_id=" . urlencode($place)
+             . "&fields=reviews&reviews_no_translations=true&key=" . urlencode($key);
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 15]);
+        $resp = curl_exec($ch); $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+        if ($code !== 200) fail("Google API error ($code) — check the key/Place ID", 400);
+        $data = json_decode($resp ?: "[]", true);
+        $revs = $data["result"]["reviews"] ?? [];
+        $n = 0;
+        foreach ($revs as $r) {
+            $rating = (int)($r["rating"] ?? 0); if ($rating < 1) continue;
+            $text = trim($r["text"] ?? ""); if ($text === "") continue;
+            $name = trim($r["author_name"] ?? "") ?: "Google user";
+            $uid = "google:" . md5($name . ($r["time"] ?? "") . $text);
+            if (db_one($db, "SELECT id FROM ego_messages WHERE uid=?", "s", $uid)) continue; // dedupe
+            db_exec($db,
+                "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,uid,acknowledged)
+                 VALUES ('inbound','review',?,?,?, 'received','google',?,1)",
+                "ssis", $name, $text, $rating, $uid);
+            $n++;
+        }
+        log_activity($db, null, (int)$actor["id"], "google_reviews_imported", ["count" => $n]);
+        send(["imported" => $n]);
     }
 
     default:

@@ -186,8 +186,9 @@ export default function ScheduleBoard() {
                 selectable
                 selectMirror
                 select={onSelect}
-                height="auto"
+                height="72vh"
                 expandRows
+                stickyHeaderDates
                 nowIndicator
                 slotMinTime="07:00:00"
                 slotMaxTime="19:00:00"

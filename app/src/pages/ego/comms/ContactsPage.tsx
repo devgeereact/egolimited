@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { Contact, Loader2, Mail, Phone, Search } from "lucide-react"
+import { Contact, Loader2, Mail, Phone, Search, Plus, UsersRound } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { useAuth } from "@/store/auth.store"
+import { atLeast } from "@/lib/roles"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -40,6 +42,7 @@ function Actions({ phone, email }: { phone: string | null; email: string | null 
 }
 
 export default function ContactsPage() {
+  const { user } = useAuth()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [team, setTeam] = useState<Eng[]>([])
   const [loading, setLoading] = useState(true)
@@ -71,6 +74,13 @@ export default function ContactsPage() {
         <div>
           <h1 className="text-2xl font-semibold leading-none tracking-tight">Contacts</h1>
           <p className="mt-1 text-sm text-muted-foreground">Everyone you call or email — customers and your team.</p>
+        </div>
+        <div className="ml-auto flex gap-2">
+          {tab === "customers" ? (
+            <Button asChild><Link to="/ego/customers/new"><Plus /> New customer</Link></Button>
+          ) : atLeast(user?.role, "manager") ? (
+            <Button asChild variant="outline"><Link to="/ego/team"><UsersRound /> Manage team</Link></Button>
+          ) : null}
         </div>
       </div>
 

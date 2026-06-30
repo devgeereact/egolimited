@@ -1,0 +1,19 @@
+{
+  "name": "EGO LIMITED — General Maintenance, London",
+  "short_name": "EGO LTD",
+  "description": "EGO LTD — general maintenance for homes and commercial property across London.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#171816",
+  "theme_color": "#171816",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

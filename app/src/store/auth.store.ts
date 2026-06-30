@@ -11,12 +11,14 @@ export interface AuthUser {
   email: string
   role: Role
   available?: number
+  must_change_password?: number
+  totp_enabled?: number
 }
 
 interface AuthState {
   user: AuthUser | null
   status: "loading" | "authed" | "anon"
-  login: (email: string, password: string) => Promise<AuthUser>
+  login: (email: string, password: string, code?: string) => Promise<AuthUser>
   logout: () => Promise<void>
   loadMe: () => Promise<void>
   setAvailable: (v: number) => void
@@ -26,12 +28,16 @@ export const useAuth = create<AuthState>((set) => ({
   user: null,
   status: getToken() ? "loading" : "anon",
 
-  login: async (email, password) => {
-    const res = await api<{ token: string; user: AuthUser }>("/auth/login", {
+  login: async (email, password, code) => {
+    const res = await api<{ token?: string; user?: AuthUser; totp_required?: boolean }>("/auth/login", {
       method: "POST",
-      body: { email, password },
+      body: { email, password, code },
       auth: false,
     })
+    // Server accepted the password but needs a 2FA code (opt-in users only).
+    if (res.totp_required || !res.token || !res.user) {
+      throw new Error(res.totp_required ? "2FA code required" : "Login failed")
+    }
     setToken(res.token)
     set({ user: res.user, status: "authed" })
     return res.user

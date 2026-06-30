@@ -4,8 +4,6 @@ import {
   Gauge,
   Settings2,
   Briefcase,
-  Users,
-  UsersRound,
   CalendarDays,
   FileText,
   CreditCard,
@@ -17,6 +15,18 @@ import {
   Contact,
   GanttChartSquare,
   Quote,
+  ScrollText,
+  Truck,
+  HardHat,
+  Package,
+  ClipboardList,
+  Boxes,
+  Megaphone,
+  Send,
+  FileSignature,
+  ShieldAlert,
+  FileCheck2,
+  BadgeCheck,
   type LucideIcon,
 } from "lucide-react"
 
@@ -49,29 +59,57 @@ const NAV: EgoSection[] = [
     items: [
       { title: "Jobs", url: "ego/jobs", icon: Briefcase },
       { title: "Schedule", url: "ego/schedule", icon: CalendarDays },
-      { title: "Customers", url: "ego/customers", icon: Users },
-      { title: "Task Board", url: "apps/task-board", icon: KanbanSquare },
+      { title: "Contacts", url: "ego/contacts", icon: Contact },
+      { title: "Task Board", url: "ego/tasks", icon: KanbanSquare },
     ],
   },
   {
     label: "Finance",
     items: [
       { title: "Invoices", url: "ego/invoices", icon: FileText },
+      { title: "Quotes", url: "ego/quotes", icon: ScrollText },
       { title: "Payments", url: "ego/payments", icon: CreditCard },
-    ],
-  },
-  {
-    label: "Communication",
-    items: [
-      { title: "Email", url: "apps/email", icon: Inbox },
-      { title: "Contacts", url: "ego/contacts", icon: Contact },
     ],
   },
   {
     label: "Workspace",
     items: [
-      { title: "Activity", url: "ego/activity", icon: GanttChartSquare },
+      { title: "Email", url: "ego/inbox", icon: Inbox },
+      { title: "Campaigns", url: "ego/campaigns", icon: Send, min: "manager" },
       { title: "Reviews", url: "ego/reviews", icon: Quote },
+      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
+    ],
+  },
+  {
+    label: "Procurement",
+    items: [
+      { title: "Parts", url: "ego/parts", icon: Package },
+      { title: "Purchase Orders", url: "ego/purchase-orders", icon: ClipboardList },
+      { title: "Suppliers", url: "ego/suppliers", icon: Truck },
+      { title: "Subcontractors", url: "ego/subcontractors", icon: HardHat },
+    ],
+  },
+  {
+    label: "Assets & Contracts",
+    items: [
+      { title: "Assets", url: "ego/assets", icon: Boxes },
+      { title: "Contracts & PPM", url: "ego/contracts", icon: FileSignature },
+    ],
+  },
+  {
+    label: "Compliance",
+    items: [
+      { title: "Incidents", url: "ego/incidents", icon: ShieldAlert },
+      { title: "RAMS", url: "ego/rams", icon: FileCheck2 },
+      { title: "Certificates", url: "ego/certificates", icon: BadgeCheck },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { title: "Activity", url: "ego/activity", icon: GanttChartSquare },
+      { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
+      { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
     ],
   },
   {
@@ -97,14 +135,6 @@ const NAV: EgoSection[] = [
           { title: "Contact", url: "ego/portal/contact" },
         ],
       },
-    ],
-  },
-  {
-    label: "Administration",
-    items: [
-      { title: "Team", url: "ego/team", icon: UsersRound, min: "manager" },
-      { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
-      { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
     ],
   },
 ]
@@ -153,7 +183,7 @@ export function AppSidebar({ onHoverChange, ...props }: AppSidebarProps) {
           </ScrollArea>
         </SidebarContent>
 
-        <SidebarFooter className="border-t h-16 justify-center">
+        <SidebarFooter className="sticky bottom-0 z-10 h-16 justify-center border-t bg-sidebar">
           <NavUser user={{ name: user?.name ?? "Admin", email: user?.email ?? "" }} />
         </SidebarFooter>
 

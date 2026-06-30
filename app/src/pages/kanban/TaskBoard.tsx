@@ -17,17 +17,19 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
+import { AiButton } from "@/components/ego/AiButton"
 
 interface Task { id: number; title: string; description: string | null; status: string; accent: string | null; sort: number; assignee_id: number | null; assignee_name: string | null }
 interface Staff { id: number; name: string; role: string }
 
 const COLUMNS = [
-  { id: "backlog", label: "Backlog", dot: "bg-slate-400" },
-  { id: "todo", label: "Todo", dot: "bg-red-500" },
-  { id: "doing", label: "In Process", dot: "bg-amber-500" },
-  { id: "progress", label: "In Progress", dot: "bg-blue-500" },
-  { id: "done", label: "Complete", dot: "bg-emerald-500" },
+  { id: "backlog", label: "Backlog", dot: "bg-muted-foreground/50" },
+  { id: "todo", label: "To do", dot: "bg-blue-500" },
+  { id: "progress", label: "In progress", dot: "bg-amber-500" },
+  { id: "done", label: "Done", dot: "bg-emerald-500" },
 ]
+// Fold legacy statuses into the clean 4-column set so no card is orphaned.
+const ALIAS: Record<string, string> = { doing: "progress", in_progress: "progress", "in process": "progress", complete: "done" }
 
 // Per-assignee colour for at-a-glance identification (fixed, theme-independent).
 const COLORS = ["#2563eb", "#16a34a", "#9333ea", "#ea580c", "#0891b2", "#db2777", "#ca8a04", "#dc2626"]
@@ -116,7 +118,7 @@ export default function TaskBoard() {
     for (const c of COLUMNS) m[c.id] = []
     // Any task whose status isn't one of the columns falls back to Backlog, so a
     // card can never silently vanish from the board (and stays draggable/deletable).
-    for (const t of tasks) (m[t.status] ?? m.backlog).push(t)
+    for (const t of tasks) { const s = ALIAS[t.status] ?? t.status; (m[s] ?? m.backlog).push(t) }
     return m
   }, [tasks])
 
@@ -183,7 +185,7 @@ export default function TaskBoard() {
         <DndContext sensors={sensors} onDragEnd={onDragEnd}>
           {/* Fills the width across breakpoints — no horizontal scroll. Columns wrap
               to fewer per row on smaller screens; all five sit side by side on xl. */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {COLUMNS.map((c) => <Column key={c.id} col={c} tasks={byCol[c.id] ?? []} onAdd={add} onEdit={openEdit} onDelete={del} />)}
           </div>
         </DndContext>
@@ -191,7 +193,14 @@ export default function TaskBoard() {
 
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Edit card</DialogTitle></DialogHeader>
+          <DialogHeader className="flex-row items-center justify-between space-y-0 pr-6">
+            <DialogTitle>Edit card</DialogTitle>
+            <AiButton
+              endpoint="/tasks/draft" title="Draft a clear task"
+              placeholder="e.g. chase the parts order for 14 Aldworth Rd before Friday"
+              onResult={(d: { title?: string; description?: string }) => { if (d.title) setETitle(d.title); if (d.description) setEDesc(d.description) }}
+            />
+          </DialogHeader>
           <div className="space-y-3">
             <Input value={eTitle} onChange={(e) => setETitle(e.target.value)} placeholder="Title" />
             <Textarea rows={4} value={eDesc} onChange={(e) => setEDesc(e.target.value)} placeholder="Description (optional)…" />

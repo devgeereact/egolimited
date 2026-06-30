@@ -299,3 +299,279 @@ ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS assignee_id INT NULL;
 
 -- Customer reviews: stored as a message with a star rating + channel='review'
 ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS rating TINYINT NULL;
+
+-- ============================================================================
+-- PROCUREMENT (M-B): suppliers + subcontractors. ego_-prefixed, soft-delete.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_suppliers (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(190) NOT NULL,
+  contact     VARCHAR(190) NULL,
+  phone       VARCHAR(60)  NULL,
+  email       VARCHAR(190) NULL,
+  account_ref VARCHAR(120) NULL,
+  category    VARCHAR(80)  NULL,
+  address     VARCHAR(255) NULL,
+  notes       TEXT NULL,
+  active      TINYINT(1) NOT NULL DEFAULT 1,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at  DATETIME NULL,
+  INDEX idx_ego_supp_name (name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_subcontractors (
+  id              INT AUTO_INCREMENT PRIMARY KEY,
+  name            VARCHAR(190) NOT NULL,
+  company         VARCHAR(190) NULL,
+  trades          VARCHAR(255) NULL,
+  coverage_areas  VARCHAR(255) NULL,
+  phone           VARCHAR(40)  NULL,
+  email           VARCHAR(190) NULL,
+  insurance_expiry DATE NULL,
+  qualifications  VARCHAR(255) NULL,
+  day_rate        DECIMAL(10,2) NULL,
+  rating          TINYINT NULL,
+  status          ENUM('active','pending','suspended') NOT NULL DEFAULT 'active',
+  notes           TEXT NULL,
+  created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at      DATETIME NULL,
+  INDEX idx_ego_subc_status (status),
+  INDEX idx_ego_subc_ins (insurance_expiry)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- PROCUREMENT (M-B slice 2): parts catalogue + pricebook (cost/sale) + stock level.
+CREATE TABLE IF NOT EXISTS ego_parts (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  sku           VARCHAR(60)  NULL,
+  name          VARCHAR(190) NOT NULL,
+  description   TEXT NULL,
+  category      VARCHAR(80)  NULL,
+  supplier_id   INT NULL,
+  unit          VARCHAR(24) NOT NULL DEFAULT 'each',
+  cost_price    DECIMAL(10,2) NOT NULL DEFAULT 0,
+  sale_price    DECIMAL(10,2) NOT NULL DEFAULT 0,
+  stock_qty     DECIMAL(10,2) NOT NULL DEFAULT 0,
+  reorder_level DECIMAL(10,2) NOT NULL DEFAULT 0,
+  active        TINYINT(1) NOT NULL DEFAULT 1,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at    DATETIME NULL,
+  INDEX idx_ego_parts_name (name),
+  INDEX idx_ego_parts_supplier (supplier_id),
+  CONSTRAINT fk_ego_parts_supplier FOREIGN KEY (supplier_id) REFERENCES ego_suppliers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- PROCUREMENT (M-B slice 3): stock movements ledger + purchase orders (header + items).
+CREATE TABLE IF NOT EXISTS ego_stock_movements (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  part_id    INT NOT NULL,
+  qty_delta  DECIMAL(10,2) NOT NULL,
+  reason     VARCHAR(40) NOT NULL DEFAULT 'adjustment',
+  reference  VARCHAR(60) NULL,
+  note       VARCHAR(255) NULL,
+  actor_id   INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ego_stock_part (part_id),
+  CONSTRAINT fk_ego_stock_part FOREIGN KEY (part_id) REFERENCES ego_parts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_purchase_orders (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  reference     VARCHAR(24) NULL UNIQUE,
+  supplier_id   INT NOT NULL,
+  status        ENUM('draft','ordered','received','cancelled') NOT NULL DEFAULT 'draft',
+  order_date    DATE NULL,
+  expected_date DATE NULL,
+  received_date DATE NULL,
+  notes         TEXT NULL,
+  subtotal      DECIMAL(10,2) NOT NULL DEFAULT 0,
+  total         DECIMAL(10,2) NOT NULL DEFAULT 0,
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at    DATETIME NULL,
+  INDEX idx_ego_po_supplier (supplier_id),
+  INDEX idx_ego_po_status (status),
+  CONSTRAINT fk_ego_po_supplier FOREIGN KEY (supplier_id) REFERENCES ego_suppliers(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_po_items (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  po_id       INT NOT NULL,
+  part_id     INT NULL,
+  description VARCHAR(255) NOT NULL,
+  qty         DECIMAL(10,2) NOT NULL DEFAULT 1,
+  unit_cost   DECIMAL(10,2) NOT NULL DEFAULT 0,
+  line_total  DECIMAL(10,2) NOT NULL DEFAULT 0,
+  sort        INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_ego_poitem_po FOREIGN KEY (po_id) REFERENCES ego_purchase_orders(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ego_poitem_part FOREIGN KEY (part_id) REFERENCES ego_parts(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- ASSET MANAGEMENT (M-C): asset register + service history per asset.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_assets (
+  id                INT AUTO_INCREMENT PRIMARY KEY,
+  name              VARCHAR(190) NOT NULL,
+  asset_tag         VARCHAR(60) NULL,
+  customer_id       INT NULL,
+  location          VARCHAR(190) NULL,
+  type              VARCHAR(120) NULL,
+  make              VARCHAR(120) NULL,
+  model             VARCHAR(120) NULL,
+  serial            VARCHAR(120) NULL,
+  status            ENUM('ok','due','fault','retired') NOT NULL DEFAULT 'ok',
+  install_date      DATE NULL,
+  next_service_date DATE NULL,
+  notes             TEXT NULL,
+  created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at        DATETIME NULL,
+  INDEX idx_ego_asset_status (status),
+  INDEX idx_ego_asset_next (next_service_date),
+  INDEX idx_ego_asset_customer (customer_id),
+  CONSTRAINT fk_ego_asset_customer FOREIGN KEY (customer_id) REFERENCES ego_customers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_asset_services (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  asset_id     INT NOT NULL,
+  job_id       INT NULL,
+  service_date DATE NOT NULL,
+  engineer_id  INT NULL,
+  outcome      ENUM('ok','repaired','fault') NOT NULL DEFAULT 'ok',
+  notes        VARCHAR(255) NULL,
+  next_due     DATE NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ego_asvc_asset (asset_id),
+  CONSTRAINT fk_ego_asvc_asset FOREIGN KEY (asset_id) REFERENCES ego_assets(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ego_asvc_job FOREIGN KEY (job_id) REFERENCES ego_jobs(id) ON DELETE SET NULL,
+  CONSTRAINT fk_ego_asvc_eng FOREIGN KEY (engineer_id) REFERENCES ego_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- PLATFORM (M-A): announcements (role-audience broadcast).
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_announcements (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  title      VARCHAR(190) NOT NULL,
+  body       TEXT NULL,
+  audience   ENUM('all','engineers','office') NOT NULL DEFAULT 'all',
+  pinned     TINYINT(1) NOT NULL DEFAULT 0,
+  active     TINYINT(1) NOT NULL DEFAULT 1,
+  author_id  INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at DATETIME NULL,
+  INDEX idx_ego_ann_active (active)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- CONTRACTS / PPM (M-D): maintenance contracts + resource allocations + billing/SLA cadence.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_contracts (
+  id                 INT AUTO_INCREMENT PRIMARY KEY,
+  reference          VARCHAR(24) NULL UNIQUE,
+  customer_id        INT NULL,
+  title              VARCHAR(190) NOT NULL,
+  value              DECIMAL(10,2) NOT NULL DEFAULT 0,
+  status             ENUM('active','pending','expired','cancelled') NOT NULL DEFAULT 'active',
+  start_date         DATE NULL,
+  renewal_date       DATE NULL,
+  sla_response_hours INT NULL,
+  sla_fix_hours      INT NULL,
+  ppm_every_days     INT NULL,
+  next_service       DATE NULL,
+  last_service       DATE NULL,
+  bill_every_days    INT NULL,
+  next_bill_date     DATE NULL,
+  last_billed        DATE NULL,
+  bill_amount        DECIMAL(10,2) NULL,
+  notes              TEXT NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at         DATETIME NULL,
+  INDEX idx_ego_ct_status (status),
+  INDEX idx_ego_ct_renewal (renewal_date),
+  INDEX idx_ego_ct_nextbill (next_bill_date),
+  INDEX idx_ego_ct_customer (customer_id),
+  CONSTRAINT fk_ego_ct_customer FOREIGN KEY (customer_id) REFERENCES ego_customers(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_contract_allocations (
+  id             INT AUTO_INCREMENT PRIMARY KEY,
+  contract_id    INT NOT NULL,
+  kind           ENUM('employee','subcontractor') NOT NULL DEFAULT 'employee',
+  person_name    VARCHAR(190) NOT NULL,
+  role           VARCHAR(120) NULL,
+  hours_per_week DECIMAL(6,2) NULL,
+  rate           DECIMAL(10,2) NULL,
+  notes          VARCHAR(255) NULL,
+  sort           INT NOT NULL DEFAULT 0,
+  CONSTRAINT fk_ego_ctalloc_ct FOREIGN KEY (contract_id) REFERENCES ego_contracts(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ============================================================================
+-- COMPLIANCE SUITE (M-E): RAMS documents, incidents, certificates.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS ego_rams_documents (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  title       VARCHAR(190) NOT NULL,
+  trade       VARCHAR(80) NULL,
+  reference   VARCHAR(80) NULL,
+  review_date DATE NULL,
+  content     TEXT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at  DATETIME NULL,
+  INDEX idx_ego_rams_review (review_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_incidents (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  incident_date DATE NULL,
+  type          ENUM('accident','near_miss','injury','property','environmental','other') NOT NULL DEFAULT 'near_miss',
+  severity      ENUM('low','medium','high','riddor') NOT NULL DEFAULT 'low',
+  location      VARCHAR(190) NULL,
+  person        VARCHAR(190) NULL,
+  description   TEXT NULL,
+  action_taken  TEXT NULL,
+  reported_by   VARCHAR(120) NULL,
+  status        ENUM('open','investigating','closed') NOT NULL DEFAULT 'open',
+  created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at    DATETIME NULL,
+  INDEX idx_ego_inc_status (status),
+  INDEX idx_ego_inc_severity (severity)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS ego_certificates (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  title        VARCHAR(190) NOT NULL,
+  holder       VARCHAR(190) NULL,
+  engineer_id  INT NULL,
+  type         VARCHAR(120) NULL,
+  reference    VARCHAR(120) NULL,
+  status       ENUM('valid','expiring','expired') NOT NULL DEFAULT 'valid',
+  issued_date  DATE NULL,
+  expiry_date  DATE NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  deleted_at   DATETIME NULL,
+  INDEX idx_ego_cert_expiry (expiry_date),
+  CONSTRAINT fk_ego_cert_eng FOREIGN KEY (engineer_id) REFERENCES ego_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- PLATFORM (M-A): account security + TOTP 2FA columns on users.
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS must_change_password TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS password_changed_at DATETIME NULL;
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS totp_secret VARCHAR(64) NULL;
+ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS totp_enabled TINYINT(1) NOT NULL DEFAULT 0;
+
+-- Landing: Companies House number (VAT already exists). Shown on the public site.
+ALTER TABLE ego_company_settings ADD COLUMN IF NOT EXISTS companies_house_no VARCHAR(20) NULL;
+
+-- Reviews: source so app reviews + imported Google reviews live together (M: reviews hub).
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS source VARCHAR(16) NULL;

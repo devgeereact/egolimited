@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 
-import { User, Settings, LogOut, LogIn, Globe } from "lucide-react"
+import { User, ShieldCheck, Lock, Settings, LogOut, LogIn, Globe } from "lucide-react"
 
 import { useAuth } from "@/store/auth.store"
 import { atLeast } from "@/lib/roles"
@@ -71,8 +71,13 @@ export function UserDropdown() {
         {user ? (
           <>
             <DropdownMenuItem asChild className="gap-2 h-9">
-              <Link to="/account/profile">
+              <Link to="/ego/account/profile">
                 <User className="!size-5" /> Profile
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild className="gap-2 h-9">
+              <Link to="/ego/account/security">
+                <ShieldCheck className="!size-5" /> Security & 2FA
               </Link>
             </DropdownMenuItem>
             {atLeast(user.role, "manager") && (
@@ -82,6 +87,11 @@ export function UserDropdown() {
                 </Link>
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem asChild className="gap-2 h-9">
+              <Link to="/ego/lock">
+                <Lock className="!size-5" /> Lock screen
+              </Link>
+            </DropdownMenuItem>
 
             <DropdownMenuSeparator className="my-2" />
 

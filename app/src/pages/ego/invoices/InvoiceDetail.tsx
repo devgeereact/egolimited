@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
-import { jsPDF } from "jspdf"
-import autoTable from "jspdf-autotable"
 import {
-  ArrowLeft, Plus, Trash2, Send, Download, BadgePoundSterling, Ban, Loader2, Wrench, Mail,
+  ArrowLeft, Plus, Trash2, Send, Download, Eye, BadgePoundSterling, Ban, Loader2, Wrench, Mail,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useAuth } from "@/store/auth.store"
+import { atLeast } from "@/lib/roles"
 import { computeTotals, gbp } from "@/lib/invoicing"
+import { buildInvoicePdf, addressLines } from "@/lib/invoicePdf"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -30,9 +31,12 @@ interface Invoice {
   }
 }
 
+const EMBER_HEX = "#EF9F27" // on-screen brand accent — keep the document on-brand across every app theme
+
 export default function InvoiceDetail() {
   const [params] = useSearchParams()
   const id = params.get("id")
+  const { user } = useAuth()
   const [inv, setInv] = useState<Invoice | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [vatRate, setVatRate] = useState(20)
@@ -106,51 +110,24 @@ export default function InvoiceDetail() {
     toast.success("Voided"); load()
   }
 
+  function buildPdf() {
+    if (!inv) return null
+    // Reuse the shared builder so the admin PDF and the customer-portal download
+    // are byte-for-byte the same document. Drafts preview live edits (lines/vat).
+    return buildInvoicePdf({ ...inv, lines, vat_rate: vatRate })
+  }
   function downloadPdf() {
-    if (!inv) return
-    const doc = new jsPDF()
-    const co = inv.company
-    doc.setFontSize(20); doc.setTextColor(37, 99, 235); doc.text(co.company_name || "EGO LIMITED", 14, 20)
-    doc.setFontSize(9); doc.setTextColor(110)
-    doc.text([co.address || "", co.phone || "", co.email || "", co.vat_number ? `VAT ${co.vat_number}` : ""].filter(Boolean), 14, 27)
-    doc.setFontSize(22); doc.setTextColor(20)
-    doc.text(label.toUpperCase(), 196, 20, { align: "right" })
-    doc.setFontSize(10); doc.setTextColor(80)
-    doc.text([
-      `${inv.number ?? "(draft)"}`,
-      `Ref: ${inv.payment_reference}`,
-      inv.issue_date ? `Issued: ${inv.issue_date}` : "",
-      inv.due_date ? `Due: ${inv.due_date}` : "",
-    ].filter(Boolean), 196, 28, { align: "right" })
-    doc.setFontSize(10); doc.setTextColor(20)
-    doc.text("Bill to:", 14, 52)
-    doc.setTextColor(80)
-    doc.text([inv.customer_name, inv.customer_address?.line1, [inv.customer_address?.city, inv.customer_address?.postcode].filter(Boolean).join(" "), inv.customer_email].filter(Boolean) as string[], 14, 58)
-
-    autoTable(doc, {
-      startY: 80,
-      head: [["Description", "Qty", "Unit", "Total"]],
-      body: totals.lines.map((l) => [l.description, String(l.quantity), gbp(l.unit_price), gbp(l.line_total)]),
-      theme: "striped",
-      headStyles: { fillColor: [37, 99, 235] },
-      columnStyles: { 1: { halign: "right" }, 2: { halign: "right" }, 3: { halign: "right" } },
-    })
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let y = (doc as any).lastAutoTable.finalY + 8
-    doc.setFontSize(10); doc.setTextColor(80)
-    doc.text(`Subtotal: ${gbp(totals.subtotal)}`, 196, y, { align: "right" }); y += 6
-    doc.text(`VAT (${vatRate}%): ${gbp(totals.vat_amount)}`, 196, y, { align: "right" }); y += 6
-    doc.setFontSize(12); doc.setTextColor(20)
-    doc.text(`Total: ${gbp(totals.total)}`, 196, y, { align: "right" }); y += 12
-    doc.setFontSize(9); doc.setTextColor(110)
-    doc.text("Pay by bank transfer:", 14, y); y += 5
-    doc.text([
-      co.bank_account_name ? `Account: ${co.bank_account_name}` : "",
-      co.bank_sort_code ? `Sort code: ${co.bank_sort_code}` : "",
-      co.bank_account_number ? `Account no: ${co.bank_account_number}` : "",
-      `Payment reference: ${inv.payment_reference}`,
-    ].filter(Boolean), 14, y)
+    const doc = buildPdf(); if (!doc || !inv) return
     doc.save(`${inv.number ?? inv.payment_reference}-${label}.pdf`)
+  }
+  function previewPdf() {
+    const doc = buildPdf(); if (!doc) return
+    window.open(doc.output("bloburl"), "_blank") // open in a new tab — preview, no download
+  }
+  async function deleteDoc() {
+    if (!inv || !confirm(`Delete this ${label.toLowerCase()}? This can be recovered.`)) return
+    try { await api("/invoices/delete", { method: "POST", body: { id: inv.id } }); toast.success(`${label} deleted`); window.history.back() }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }
 
   if (loading) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
@@ -162,11 +139,12 @@ export default function InvoiceDetail() {
       {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
-          <Link to="/ego/invoices"><ArrowLeft /> {label}s</Link>
+          <Link to={inv.kind === "quote" ? "/ego/quotes" : "/ego/invoices"}><ArrowLeft /> {label}s</Link>
         </Button>
         <div className="flex flex-wrap gap-2">
           {isDraft && <Button variant="outline" onClick={save} disabled={busy}>Save draft</Button>}
           {(isDraft || inv.status === "draft") && <Button onClick={send} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <Send />} Send</Button>}
+          <Button variant="outline" onClick={previewPdf}><Eye /> Preview</Button>
           <Button variant="outline" onClick={downloadPdf}><Download /> PDF</Button>
           <Button variant="outline" onClick={emailDoc} disabled={busy}><Mail /> Email</Button>
           {inv.kind === "invoice" && (inv.status === "sent" || inv.status === "overdue") && (
@@ -178,6 +156,9 @@ export default function InvoiceDetail() {
           {inv.status !== "paid" && inv.status !== "void" && (
             <Button variant="outline" className="text-destructive" onClick={voidDoc}><Ban /> Void</Button>
           )}
+          {atLeast(user?.role, "manager") && (
+            <Button variant="outline" className="text-destructive hover:text-destructive" onClick={deleteDoc}><Trash2 /> Delete</Button>
+          )}
         </div>
       </div>
 
@@ -186,14 +167,16 @@ export default function InvoiceDetail() {
         <CardContent className="p-8">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex size-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <div className="flex size-11 items-center justify-center rounded-xl text-white" style={{ backgroundColor: EMBER_HEX }}>
                 <Wrench className="size-6" />
               </div>
               <div>
-                <p className="text-lg font-semibold text-primary">{co.company_name}</p>
-                <p className="whitespace-pre-line text-xs text-muted-foreground">
-                  {[co.address, co.phone, co.email, co.vat_number ? `VAT ${co.vat_number}` : ""].filter(Boolean).join("\n")}
-                </p>
+                <p className="text-lg font-semibold" style={{ color: EMBER_HEX }}>{co.company_name}</p>
+                <div className="text-xs leading-relaxed text-muted-foreground">
+                  {[...addressLines(co.address), co.phone ? `Tel: ${co.phone}` : "", co.email ? `Email: ${co.email}` : "", co.vat_number ? `VAT ${co.vat_number}` : ""]
+                    .filter(Boolean)
+                    .map((line, i) => <p key={i}>{line}</p>)}
+                </div>
               </div>
             </div>
             <div className="text-right">
@@ -207,14 +190,17 @@ export default function InvoiceDetail() {
             <div>
               <p className="text-xs font-medium uppercase text-muted-foreground">Bill to</p>
               <p className="font-medium">{inv.customer_name}</p>
-              <p className="text-muted-foreground">
-                {[inv.customer_address?.line1, inv.customer_address?.city, inv.customer_address?.postcode].filter(Boolean).join(", ")}
-              </p>
-              <p className="text-muted-foreground">{inv.customer_email}</p>
+              <div className="leading-relaxed text-muted-foreground">
+                {[inv.customer_address?.line1, inv.customer_address?.city, inv.customer_address?.postcode, inv.customer_email]
+                  .filter(Boolean)
+                  .map((line, i) => <p key={i}>{line}</p>)}
+              </div>
             </div>
             <div className="text-right text-sm">
               <p><span className="text-muted-foreground">Reference: </span><span className="font-mono font-semibold">{inv.payment_reference}</span></p>
-              <p className="text-muted-foreground">Job: {inv.job_reference} · {inv.job_title}</p>
+              {inv.job_reference && (
+                <p className="text-muted-foreground">Job {inv.job_reference}{inv.job_title ? ` · ${inv.job_title}` : ""}</p>
+              )}
               {inv.issue_date && <p className="text-muted-foreground">Issued {inv.issue_date}</p>}
               {inv.due_date && <p className="text-muted-foreground">Due {inv.due_date}</p>}
             </div>
@@ -277,14 +263,23 @@ export default function InvoiceDetail() {
             </div>
           </div>
 
-          {/* Bank details */}
-          <div className="mt-6 rounded-lg bg-muted/40 p-4 text-sm">
-            <p className="font-medium">Pay by bank transfer</p>
-            <p className="mt-1 text-muted-foreground">
-              {co.bank_account_name} · Sort {co.bank_sort_code} · Acc {co.bank_account_number}
-            </p>
-            <p className="mt-1">Payment reference: <span className="font-mono font-semibold">{inv.payment_reference}</span></p>
-          </div>
+          {/* Pay by bank — ember panel @ 0.6 with an EGO LIMITED watermark so it
+              stands out and reads as genuinely ours. Invoices only (quotes don't collect payment). */}
+          {inv.kind === "invoice" && (co.bank_account_name || co.bank_sort_code || co.bank_account_number) && (
+            <div
+              className="relative mt-6 overflow-hidden rounded-lg border p-4 text-sm text-[#171816]"
+              style={{ backgroundColor: "rgba(239,159,39,0.6)", borderColor: EMBER_HEX }}
+            >
+              <span className="pointer-events-none absolute -right-2 bottom-0 select-none text-3xl font-bold uppercase tracking-tight text-[#171816]/10">
+                EGO LIMITED
+              </span>
+              <p className="font-semibold">Pay by bank transfer</p>
+              <p className="mt-1">
+                {[co.bank_account_name, co.bank_sort_code ? `Sort ${co.bank_sort_code}` : "", co.bank_account_number ? `Acc ${co.bank_account_number}` : ""].filter(Boolean).join(" · ")}
+              </p>
+              <p className="mt-1">Payment reference: <span className="font-mono font-semibold">{inv.payment_reference}</span></p>
+            </div>
+          )}
         </CardContent>
       </Card>
 

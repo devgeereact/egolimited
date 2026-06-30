@@ -2,51 +2,84 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=2" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-
-    <!-- Primary SEO -->
-    <title>EGO LTD — Property Maintenance & Repairs in London</title>
+    <meta name="theme-color" content="#F1EFE8" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#2C2C2A" />
+    <!-- Installable web app (add to home screen, launches standalone). -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/favicon.svg?v=2" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="EGO Dash" />
     <meta
       name="description"
-      content="EGO LTD — dependable property maintenance across London. Carpentry, painting, minor plumbing, tiling, exterior works and planned upkeep for homeowners, landlords and agents. Properly insured. One clear price, a date we keep."
+      content="EGO LTD is a general maintenance company in London. Repairs, planned upkeep, and the small jobs other firms turn down, for homes and commercial property."
     />
-    <meta name="author" content="EGO LTD" />
-    <meta name="robots" content="index, follow" />
-    <meta name="theme-color" content="#1f1d1b" />
-
-    <link rel="icon" href="/favicon.ico" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-
-    <!-- Open Graph -->
+    <meta property="og:title" content="EGO LTD — General Maintenance, London" />
+    <meta
+      property="og:description"
+      content="Maintenance done properly, paperwork done for you. Repairs, planned upkeep, and small works across London."
+    />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="EGO LTD" />
-    <meta property="og:title" content="EGO LTD — Property Maintenance & Repairs in London" />
-    <meta property="og:description" content="Dependable maintenance across London — done properly, priced clearly, and tidied up after. Get a free quote." />
     <meta property="og:url" content="https://egolimited.com/" />
-
-    <!-- Twitter Card -->
+    <meta property="og:locale" content="en_GB" />
+    <!-- Social preview: a 1200x630 card so shared links render with an image. -->
+    <meta property="og:image" content="https://egolimited.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="EGO LTD — general maintenance in London" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="EGO LTD — Property Maintenance in London" />
-    <meta name="twitter:description" content="Carpentry, painting, plumbing, tiling and planned upkeep. Properly insured. One clear price, a date we keep." />
-
+    <meta name="twitter:title" content="EGO LTD — General Maintenance, London" />
+    <meta
+      name="twitter:description"
+      content="Maintenance done properly, paperwork done for you. Repairs, planned upkeep, and small works across London."
+    />
+    <meta name="twitter:image" content="https://egolimited.com/og-image.png" />
     <link rel="canonical" href="https://egolimited.com/" />
-
+    <!-- Local SEO: identifies this as a local maintenance business to Google. -->
     <script type="application/ld+json">
       {
         "@context": "https://schema.org",
         "@type": "HomeAndConstructionBusiness",
         "@id": "https://egolimited.com/#business",
         "name": "EGO LTD",
-        "description": "Property maintenance and repairs across London.",
-        "url": "https://egolimited.com/",
+        "url": "https://egolimited.com",
+        "image": "https://egolimited.com/og-image.png",
         "telephone": "+447539705576",
-        "areaServed": "London",
-        "priceRange": "££"
+        "email": "hello@egolimited.com",
+        "description": "General maintenance company for homes and commercial property across London — repairs, planned upkeep, and the small jobs other firms turn down.",
+        "priceRange": "££",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "11 Halesworth Road",
+          "addressLocality": "London",
+          "postalCode": "SE13 7TJ",
+          "addressCountry": "GB"
+        },
+        "areaServed": [
+          { "@type": "City", "name": "London" },
+          { "@type": "AdministrativeArea", "name": "Greater London" }
+        ],
+        "openingHoursSpecification": [
+          {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+            "opens": "08:00",
+            "closes": "18:00"
+          }
+        ]
       }
     </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Source+Code+Pro:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <title>EGO LTD — General Maintenance, London</title>
   </head>
-
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>

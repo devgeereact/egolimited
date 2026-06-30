@@ -50,5 +50,10 @@ export default function RequireRole({ role }: { role: Role }) {
     )
   }
 
+  // Forced password change: block the app until a new password is set.
+  if (user.must_change_password && location.pathname !== "/ego/account/security") {
+    return <Navigate to="/ego/account/security?force=1" replace />
+  }
+
   return <Outlet />
 }

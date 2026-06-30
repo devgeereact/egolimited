@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
+import { usePager, Pager } from "@/components/ego/Pager"
 import {
   Table,
   TableBody,
@@ -42,6 +43,7 @@ export default function CustomersList() {
     return () => clearTimeout(t)
   }, [q])
 
+  const pager = usePager(rows)
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -94,7 +96,7 @@ export default function CustomersList() {
                   </TableCell>
                 </TableRow>
               ) : (
-                rows.map((c) => (
+                pager.slice.map((c) => (
                   <TableRow key={c.id}>
                     <TableCell className="font-medium">
                       <Link to={`/ego/customers/detail?id=${c.id}`} className="hover:underline">{c.name}</Link>
@@ -123,6 +125,7 @@ export default function CustomersList() {
               )}
             </TableBody>
           </Table>
+          <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="customers" />
         </CardContent>
       </Card>
     </div>

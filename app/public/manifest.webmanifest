@@ -2,13 +2,13 @@
   "name": "EGO LIMITED — Engineer",
   "short_name": "EGO Engineer",
   "description": "Field service jobs for EGO LIMITED engineers.",
-  "start_url": "/egolimited/app/ego/engineer/today",
-  "scope": "/egolimited/app/",
+  "start_url": "/app/",
+  "scope": "/app/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0b1020",
-  "theme_color": "#0b1020",
+  "background_color": "#171816",
+  "theme_color": "#171816",
   "icons": [
-    { "src": "/egolimited/app/ego-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+    { "src": "/app/ego-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
   ]
 }

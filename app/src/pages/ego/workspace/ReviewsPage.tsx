@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { ChevronLeft, ChevronRight, Loader2, MessageSquareQuote, Star } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, MessageSquareQuote, Star, Plus, DownloadCloud } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface Review {
   id: number; rating: number | null; body: string | null; from_name: string | null
   created_at: string; acknowledged: number; job_id: number | null
-  job_reference: string | null; customer_name: string | null
+  job_reference: string | null; customer_name: string | null; source?: string | null
 }
 
 function Stars({ n, className }: { n: number; className?: string }) {
@@ -33,6 +38,10 @@ export default function ReviewsPage() {
   const [pages, setPages] = useState(1)
   const [page, setPage] = useState(1)
   const [loading, setLoading] = useState(true)
+  const [importing, setImporting] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [g, setG] = useState({ name: "", rating: "5", body: "" })
+  const [savingG, setSavingG] = useState(false)
 
   function load() {
     setLoading(true)
@@ -46,6 +55,24 @@ export default function ReviewsPage() {
     try { await api("/messages/ack", { method: "POST", body: { id } }); toast.success("Marked read"); load() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
+  async function importGoogle() {
+    setImporting(true)
+    try {
+      const r = await api<{ imported: number }>("/reviews/import-google", { method: "POST" })
+      toast.success(r.imported ? `Imported ${r.imported} Google review(s)` : "No new Google reviews")
+      load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Import failed") }
+    finally { setImporting(false) }
+  }
+  async function addGoogle() {
+    if (!g.body.trim()) return toast.error("Enter the review text")
+    setSavingG(true)
+    try {
+      await api("/reviews/add", { method: "POST", body: { ...g, rating: Number(g.rating), source: "google" } })
+      toast.success("Google review added"); setAddOpen(false); setG({ name: "", rating: "5", body: "" }); load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
+    finally { setSavingG(false) }
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
@@ -55,7 +82,13 @@ export default function ReviewsPage() {
         </div>
         <div>
           <h1 className="text-2xl font-semibold leading-none tracking-tight">Reviews</h1>
-          <p className="mt-1 text-sm text-muted-foreground">What customers say after a job — left via their tracking link.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Customer + Google reviews in one place. 4★ reviews auto-publish to the website.</p>
+        </div>
+        <div className="ml-auto flex gap-2">
+          <Button variant="outline" onClick={importGoogle} disabled={importing}>
+            {importing ? <Loader2 className="animate-spin" /> : <DownloadCloud />} Import Google
+          </Button>
+          <Button onClick={() => setAddOpen(true)}><Plus /> Add Google review</Button>
         </div>
       </div>
 
@@ -81,7 +114,10 @@ export default function ReviewsPage() {
             <Card key={r.id} className={cn(!r.acknowledged && "ring-1 ring-amber-500/40")}>
               <CardContent className="space-y-3 p-4">
                 <div className="flex items-center justify-between gap-2">
-                  <Stars n={r.rating ?? 0} className="gap-0.5" />
+                  <div className="flex items-center gap-2">
+                    <Stars n={r.rating ?? 0} className="gap-0.5" />
+                    {r.source === "google" && <Badge variant="secondary" className="text-[10px]">Google</Badge>}
+                  </div>
                   <span className="font-mono text-xs text-muted-foreground">{r.created_at?.slice(0, 16)}</span>
                 </div>
                 {r.body ? <p className="text-sm">{r.body}</p> : <p className="text-sm italic text-muted-foreground">No comment left.</p>}
@@ -117,6 +153,27 @@ export default function ReviewsPage() {
           </div>
         </div>
       )}
+
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Add a Google review</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">Paste a Google review to show it on the website alongside app reviews. Or set a Google Places key in Integrations and use <strong>Import Google</strong>.</p>
+          <div className="space-y-3">
+            <div className="grid grid-cols-[1fr_auto] gap-3">
+              <Input placeholder="Reviewer name" value={g.name} onChange={(e) => setG({ ...g, name: e.target.value })} />
+              <Select value={g.rating} onValueChange={(v) => setG({ ...g, rating: v })}>
+                <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                <SelectContent>{[5, 4, 3, 2, 1].map((n) => <SelectItem key={n} value={String(n)}>{n} ★</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <Textarea rows={4} placeholder="Review text…" value={g.body} onChange={(e) => setG({ ...g, body: e.target.value })} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button onClick={addGoogle} disabled={savingG}>{savingG ? <Loader2 className="animate-spin" /> : null} Add review</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

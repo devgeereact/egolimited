@@ -50,7 +50,7 @@ if (!$has) {
          bank_account_name,bank_sort_code,bank_account_number,
          invoice_prefix,invoice_next_number,job_prefix,job_next_number,payment_terms_days)
         VALUES
-        ('EGO LIMITED','Unit 4, Trade Park, Birmingham B6 7EU','+44 121 000 0000','office@egolimited.co.uk',
+        ('EGO LIMITED','11 Halesworth Road, London SE13 7TJ','07539 705576','hello@egolimited.com',
          'GB123456789',20.00,'EGO LIMITED','04-00-04','12345678','INV-',1,'JOB-',1,14)");
     echo "company_settings created\n";
 } else { echo "company_settings exists\n"; }
