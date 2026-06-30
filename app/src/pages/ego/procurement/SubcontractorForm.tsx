@@ -16,6 +16,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { AiButton } from "@/components/ego/AiButton"
 
 const schema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -224,7 +225,15 @@ export default function SubcontractorForm() {
 
               <FormField control={form.control} name="notes" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notes</FormLabel>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Notes</FormLabel>
+                    <AiButton
+                      endpoint="/procurement/draft" title="Draft subcontractor notes"
+                      extra={{ kind: "subcontractor", name: form.watch("name") }}
+                      placeholder="e.g. electrician, 18th edition, reliable, covers SE London"
+                      onResult={(d: { text: string }) => form.setValue("notes", d.text)}
+                    />
+                  </div>
                   <FormControl><Textarea rows={3} placeholder="Reliability, preferred jobs, terms…" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>

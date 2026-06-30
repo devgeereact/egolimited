@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Loader2, Send, Sparkles, Plus, Trash2, Users, UserRound, Mail } from "lucide-react"
+import { Loader2, Send, Sparkles, Plus, Trash2, Users, UserRound, Mail, ImageIcon, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 
 interface Subscriber {
   id: number
@@ -25,10 +26,12 @@ interface SubsResponse {
 }
 
 type Audience = "subscribers" | "customers" | "all"
+interface Template { id: number; name: string; subject: string | null; body: string | null }
 
 export default function CampaignsPage() {
   const [data, setData] = useState<SubsResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [templates, setTemplates] = useState<Template[]>([])
 
   // compose
   const [audience, setAudience] = useState<Audience>("subscribers")
@@ -37,6 +40,10 @@ export default function CampaignsPage() {
   const [brief, setBrief] = useState("")
   const [drafting, setDrafting] = useState(false)
   const [sending, setSending] = useState(false)
+  // AI header image (makes the email read like a post)
+  const [imagePrompt, setImagePrompt] = useState("")
+  const [imageUrl, setImageUrl] = useState("")
+  const [imaging, setImaging] = useState(false)
 
   // add subscriber
   const [newEmail, setNewEmail] = useState("")
@@ -51,8 +58,28 @@ export default function CampaignsPage() {
   }
   useEffect(() => {
     load()
+    api<{ templates: Template[] }>("/email-templates").then((r) => setTemplates(r.templates)).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  function useTemplate(id: string) {
+    const t = templates.find((x) => String(x.id) === id)
+    if (!t) return
+    setSubject(t.subject ?? "")
+    setBodyText(t.body ?? "")
+    toast.success(`Loaded "${t.name}" — personalise the {{tokens}} before sending`)
+  }
+
+  async function genImage() {
+    if (!imagePrompt.trim()) { toast.error("Describe the image you want"); return }
+    setImaging(true)
+    try {
+      const r = await api<{ url: string }>("/ai/image", { method: "POST", body: { prompt: imagePrompt } })
+      setImageUrl(r.url)
+      toast.success("Image ready — it sits at the top of the email")
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Image generation failed") }
+    finally { setImaging(false) }
+  }
 
   const audienceCount = useMemo(() => {
     if (!data) return 0
@@ -81,10 +108,10 @@ export default function CampaignsPage() {
     setSending(true)
     try {
       const r = await api<{ sent: number; failed: number; recipients: number }>("/campaigns/send", {
-        method: "POST", body: { audience, subject, body: bodyText },
+        method: "POST", body: { audience, subject, body: bodyText, image_url: imageUrl || undefined },
       })
       toast.success(`Sent to ${r.sent} of ${r.recipients}${r.failed ? ` · ${r.failed} failed` : ""}`)
-      setSubject(""); setBodyText(""); setBrief("")
+      setSubject(""); setBodyText(""); setBrief(""); setImageUrl(""); setImagePrompt("")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Send failed") }
     finally { setSending(false) }
   }
@@ -146,6 +173,19 @@ export default function CampaignsPage() {
               </div>
             </div>
 
+            {/* Start from a saved brand template */}
+            {templates.length > 0 && (
+              <div className="space-y-2">
+                <Label>Start from a template</Label>
+                <Select onValueChange={useTemplate}>
+                  <SelectTrigger><SelectValue placeholder="Pick a saved brand template…" /></SelectTrigger>
+                  <SelectContent>
+                    {templates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {/* AI draft */}
             <div className="space-y-2 rounded-lg border border-dashed border-accent/40 bg-accent/5 p-3">
               <Label className="flex items-center gap-1.5 text-sm"><Sparkles className="size-4 text-accent" /> Draft with AI</Label>
@@ -163,6 +203,25 @@ export default function CampaignsPage() {
               <Label htmlFor="body">Message</Label>
               <Textarea id="body" rows={10} value={bodyText} onChange={(e) => setBodyText(e.target.value)} placeholder="Write your message, or generate a draft above…" />
               <p className="text-xs text-muted-foreground">Sends on the EGO branded email template. Plain line breaks become paragraphs.</p>
+            </div>
+
+            {/* AI header image — makes the campaign read like a post */}
+            <div className="space-y-2 rounded-lg border border-dashed border-accent/40 bg-accent/5 p-3">
+              <Label className="flex items-center gap-1.5 text-sm"><ImageIcon className="size-4 text-accent" /> Header image (optional)</Label>
+              {imageUrl ? (
+                <div className="relative overflow-hidden rounded-lg border">
+                  <img src={imageUrl} alt="" className="block max-h-48 w-full object-cover" />
+                  <Button type="button" variant="secondary" size="icon" className="absolute right-2 top-2 size-7" onClick={() => setImageUrl("")} aria-label="Remove image"><X className="size-4" /></Button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input value={imagePrompt} onChange={(e) => setImagePrompt(e.target.value)} placeholder="e.g. a freshly painted bright hallway, warm daylight" />
+                  <Button type="button" variant="outline" size="sm" onClick={genImage} disabled={imaging} className="shrink-0">
+                    {imaging ? <Loader2 className="animate-spin" /> : <ImageIcon className="size-4" />} Generate
+                  </Button>
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Sits at the top of the email. Needs an image model set in Settings → Integrations.</p>
             </div>
 
             <Button onClick={send} disabled={sending} className="w-full sm:w-auto">

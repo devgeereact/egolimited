@@ -17,6 +17,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { AiButton } from "@/components/ego/AiButton"
 
 const NONE = "none"
 
@@ -313,7 +314,15 @@ export default function PurchaseOrderForm() {
             <CardContent className="pt-6">
               <FormField control={form.control} name="notes" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notes</FormLabel>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Notes</FormLabel>
+                    <AiButton
+                      endpoint="/procurement/draft" title="Draft PO notes"
+                      extra={{ kind: "purchase order" }}
+                      placeholder="e.g. delivery to 14 Aldworth Rd, mark for Tom, needed Friday"
+                      onResult={(d: { text: string }) => form.setValue("notes", d.text)}
+                    />
+                  </div>
                   <FormControl><Textarea rows={3} placeholder="Delivery instructions, terms…" disabled={locked} {...field} /></FormControl>
                 </FormItem>
               )} />

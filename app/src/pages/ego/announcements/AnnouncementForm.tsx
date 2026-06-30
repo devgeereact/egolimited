@@ -17,6 +17,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { AiButton } from "@/components/ego/AiButton"
 
 const schema = z.object({
   title: z.string().min(2, "Title is required"),
@@ -103,7 +104,19 @@ export default function AnnouncementForm() {
       </div>
 
       <Card className="max-w-2xl">
-        <CardHeader><CardTitle>Message</CardTitle></CardHeader>
+        <CardHeader className="flex-row items-center justify-between space-y-0">
+          <CardTitle>Message</CardTitle>
+          <AiButton
+            endpoint="/announcements/draft"
+            extra={{ audience: form.watch("audience") }}
+            title="Draft an announcement"
+            placeholder="e.g. depot closed Friday for stocktake, vans back Monday"
+            onResult={(d: { title?: string; body?: string }) => {
+              if (d.title) form.setValue("title", d.title, { shouldValidate: true })
+              form.setValue("body", d.body ?? "")
+            }}
+          />
+        </CardHeader>
         <CardContent>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">

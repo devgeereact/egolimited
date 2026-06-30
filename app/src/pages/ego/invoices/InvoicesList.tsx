@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { FileText, Loader2, Download } from "lucide-react"
+import { FileText, Loader2, Download, Eye } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
@@ -29,6 +29,7 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
+  const [previewingId, setPreviewingId] = useState<number | null>(null)
 
   // Download the branded PDF straight from the list — handy for emailing a
   // quote/invoice during correspondence without opening the record first.
@@ -40,6 +41,16 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
       buildInvoicePdf(invoice).save(`${invoice.number ?? invoice.payment_reference}-${label}.pdf`)
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't build the PDF") }
     finally { setDownloadingId(null) }
+  }
+
+  // Open the branded PDF in a new tab to preview before sending/downloading.
+  async function previewRow(id: number) {
+    setPreviewingId(id)
+    try {
+      const { invoice } = await api<{ invoice: InvoiceDoc }>(`/invoices/get?id=${id}`)
+      window.open(buildInvoicePdf(invoice).output("bloburl"), "_blank")
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't build the preview") }
+    finally { setPreviewingId(null) }
   }
 
   useEffect(() => {
@@ -106,10 +117,16 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
                   <TableCell className="text-muted-foreground">{r.due_date ?? "—"}</TableCell>
                   <TableCell className="text-right font-mono">{gbp(Number(r.total))}</TableCell>
                   <TableCell className="text-right">
-                    <Button variant="ghost" size="icon" className="size-8" disabled={downloadingId === r.id}
-                      onClick={() => downloadRow(r.id)} aria-label={`Download ${r.kind} ${r.number ?? ""}`}>
-                      {downloadingId === r.id ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
-                    </Button>
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" className="size-8" disabled={previewingId === r.id}
+                        onClick={() => previewRow(r.id)} aria-label={`Preview ${r.kind} ${r.number ?? ""}`} title="Preview">
+                        {previewingId === r.id ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
+                      </Button>
+                      <Button variant="ghost" size="icon" className="size-8" disabled={downloadingId === r.id}
+                        onClick={() => downloadRow(r.id)} aria-label={`Download ${r.kind} ${r.number ?? ""}`} title="Download">
+                        {downloadingId === r.id ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4" />}
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}

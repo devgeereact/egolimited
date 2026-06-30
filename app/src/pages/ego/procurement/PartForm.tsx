@@ -17,6 +17,7 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select"
+import { AiButton } from "@/components/ego/AiButton"
 
 const NONE = "none"
 
@@ -219,7 +220,15 @@ export default function PartForm() {
 
               <FormField control={form.control} name="description" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Description</FormLabel>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Description</FormLabel>
+                    <AiButton
+                      endpoint="/procurement/draft" title="Draft part details"
+                      extra={{ kind: "part", name: form.watch("name") }}
+                      placeholder="e.g. 22mm copper compression elbow for boiler flow/return"
+                      onResult={(d: { text: string }) => form.setValue("description", d.text)}
+                    />
+                  </div>
                   <FormControl><Textarea rows={3} {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>

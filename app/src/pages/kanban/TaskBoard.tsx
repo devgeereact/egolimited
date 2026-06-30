@@ -17,6 +17,7 @@ import {
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog"
+import { AiButton } from "@/components/ego/AiButton"
 
 interface Task { id: number; title: string; description: string | null; status: string; accent: string | null; sort: number; assignee_id: number | null; assignee_name: string | null }
 interface Staff { id: number; name: string; role: string }
@@ -192,7 +193,14 @@ export default function TaskBoard() {
 
       <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Edit card</DialogTitle></DialogHeader>
+          <DialogHeader className="flex-row items-center justify-between space-y-0 pr-6">
+            <DialogTitle>Edit card</DialogTitle>
+            <AiButton
+              endpoint="/tasks/draft" title="Draft a clear task"
+              placeholder="e.g. chase the parts order for 14 Aldworth Rd before Friday"
+              onResult={(d: { title?: string; description?: string }) => { if (d.title) setETitle(d.title); if (d.description) setEDesc(d.description) }}
+            />
+          </DialogHeader>
           <div className="space-y-3">
             <Input value={eTitle} onChange={(e) => setETitle(e.target.value)} placeholder="Title" />
             <Textarea rows={4} value={eDesc} onChange={(e) => setEDesc(e.target.value)} placeholder="Description (optional)…" />

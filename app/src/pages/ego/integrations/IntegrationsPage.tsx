@@ -5,10 +5,11 @@ import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
-type Field = { key: string; label: string; secret?: boolean; type?: string; placeholder?: string }
+type Field = { key: string; label: string; secret?: boolean; type?: string; placeholder?: string; multiline?: boolean; hint?: string }
 type Section = { id: string; title: string; icon: typeof Mail; fields: Field[] }
 
 const SECTIONS: Section[] = [
@@ -32,7 +33,13 @@ const SECTIONS: Section[] = [
   {
     id: "ai", title: "AI (OpenRouter)", icon: Sparkles, fields: [
       { key: "openrouter_key", label: "API key", secret: true, placeholder: "sk-or-…" },
-      { key: "openrouter_model", label: "Model", placeholder: "anthropic/claude-3.5-sonnet" },
+      { key: "openrouter_model", label: "Primary model", placeholder: "anthropic/claude-3.5-sonnet",
+        hint: "The model used first for every AI draft. Switch any time — e.g. openai/gpt-4o-mini, google/gemini-2.0-flash-001." },
+      { key: "openrouter_models", label: "Backup models", multiline: true,
+        placeholder: "openai/gpt-4o-mini\ngoogle/gemini-2.0-flash-001",
+        hint: "Optional. One per line (or comma-separated). Tried in order if the primary is busy or unavailable." },
+      { key: "openrouter_image_model", label: "Image model (email marketing)", placeholder: "google/gemini-2.5-flash-image-preview",
+        hint: "Optional. Used to generate header images for marketing emails." },
     ],
   },
   {
@@ -112,14 +119,24 @@ export default function IntegrationsPage() {
                 {s.fields.map((f) => (
                   <div key={f.key} className="space-y-1.5">
                     <Label htmlFor={f.key}>{f.label}</Label>
-                    <Input
-                      id={f.key}
-                      type={f.secret ? "password" : (f.type ?? "text")}
-                      autoComplete="off"
-                      value={vals[f.key] ?? ""}
-                      placeholder={f.secret && configured[f.key] ? "•••••• (saved — leave blank to keep)" : f.placeholder}
-                      onChange={(e) => setVals((p) => ({ ...p, [f.key]: e.target.value }))}
-                    />
+                    {f.multiline ? (
+                      <Textarea
+                        id={f.key} rows={3} autoComplete="off"
+                        value={vals[f.key] ?? ""}
+                        placeholder={f.placeholder}
+                        onChange={(e) => setVals((p) => ({ ...p, [f.key]: e.target.value }))}
+                      />
+                    ) : (
+                      <Input
+                        id={f.key}
+                        type={f.secret ? "password" : (f.type ?? "text")}
+                        autoComplete="off"
+                        value={vals[f.key] ?? ""}
+                        placeholder={f.secret && configured[f.key] ? "•••••• (saved — leave blank to keep)" : f.placeholder}
+                        onChange={(e) => setVals((p) => ({ ...p, [f.key]: e.target.value }))}
+                      />
+                    )}
+                    {f.hint && <p className="text-xs text-muted-foreground">{f.hint}</p>}
                   </div>
                 ))}
                 <div className="flex justify-end pt-1">

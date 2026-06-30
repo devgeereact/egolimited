@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { AiButton } from "@/components/ego/AiButton"
 
 const schema = z.object({
   incident_date: z.string().optional(),
@@ -97,7 +98,19 @@ export default function IncidentForm() {
             <FormField control={form.control} name="location" render={({ field }) => (<FormItem><FormLabel>Location</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>)} />
             <FormField control={form.control} name="person" render={({ field }) => (<FormItem><FormLabel>Person involved</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>)} />
           </div>
-          <FormField control={form.control} name="description" render={({ field }) => (<FormItem><FormLabel>What happened</FormLabel><FormControl><Textarea rows={3} {...field} /></FormControl></FormItem>)} />
+          <FormField control={form.control} name="description" render={({ field }) => (
+            <FormItem>
+              <div className="flex items-center justify-between">
+                <FormLabel>What happened</FormLabel>
+                <AiButton
+                  endpoint="/incidents/polish" label="Polish with AI"
+                  buildBody={() => { const t = (form.getValues("description") ?? "").trim(); return t ? { text: t, field: "incident description" } : null }}
+                  onResult={(d: { text: string }) => form.setValue("description", d.text)}
+                />
+              </div>
+              <FormControl><Textarea rows={3} {...field} /></FormControl>
+            </FormItem>
+          )} />
           <FormField control={form.control} name="action_taken" render={({ field }) => (<FormItem><FormLabel>Action taken</FormLabel><FormControl><Textarea rows={2} {...field} /></FormControl></FormItem>)} />
           <div className="grid gap-5 sm:grid-cols-2">
             <FormField control={form.control} name="reported_by" render={({ field }) => (<FormItem><FormLabel>Reported by</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>)} />

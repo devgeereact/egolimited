@@ -14,6 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form"
+import { AiButton } from "@/components/ego/AiButton"
 
 const schema = z.object({
   name: z.string().min(2, "Name is required"),
@@ -174,7 +175,15 @@ export default function SupplierForm() {
 
               <FormField control={form.control} name="notes" render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Notes</FormLabel>
+                  <div className="flex items-center justify-between">
+                    <FormLabel>Notes</FormLabel>
+                    <AiButton
+                      endpoint="/procurement/draft" title="Draft supplier notes"
+                      extra={{ kind: "supplier", name: form.watch("name") }}
+                      placeholder="e.g. trade plumbing merchant, next-day delivery, 30-day account"
+                      onResult={(d: { text: string }) => form.setValue("notes", d.text)}
+                    />
+                  </div>
                   <FormControl><Textarea rows={3} placeholder="Lead times, delivery days, terms…" {...field} /></FormControl>
                   <FormMessage />
                 </FormItem>

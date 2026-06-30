@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   Inbox, Send as SendIcon, FileEdit, StickyNote, RefreshCw, Loader2, Reply, Check,
-  PenSquare, Search, ChevronLeft, ChevronRight, Save, Trash2, Plus,
+  PenSquare, Search, ChevronLeft, ChevronRight, Save, Trash2, Plus, Archive, ArchiveRestore, Flag,
 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
@@ -10,6 +10,8 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
+import { Checkbox } from "@/components/ui/checkbox"
+import { AiButton } from "@/components/ego/AiButton"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -35,11 +37,13 @@ interface MsgRow {
   customer_name: string | null
   job_reference: string | null
   acknowledged?: number
+  archived?: number
+  flagged?: number
 }
 interface MsgFull extends MsgRow { body: string | null; body_html: string | null; acknowledged: number }
 interface Draft { id?: number; to: string; subject: string; body: string }
 
-type Folder = "inbox" | "sent" | "drafts" | "notes"
+type Folder = "inbox" | "sent" | "drafts" | "notes" | "archived"
 const initials = (s: string) => s.split(/[\s@.]+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "?"
 const fmtDate = (d: string) => {
   if (!d) return ""
@@ -47,6 +51,8 @@ const fmtDate = (d: string) => {
 }
 
 function inFolder(m: MsgRow, f: Folder): boolean {
+  if (f === "archived") return !!m.archived
+  if (m.archived) return false // archived items live only in the Archive folder
   if (m.channel === "note") return f === "notes"
   if (m.status === "draft") return f === "drafts"
   if (f === "inbox") return m.direction === "inbound"
@@ -70,6 +76,8 @@ export default function InboxPage() {
   const [composeOpen, setComposeOpen] = useState(false)
   const [draft, setDraft] = useState<Draft>({ to: "", subject: "", body: "" })
   const [noteOpen, setNoteOpen] = useState(false)
+  const [sel, setSel] = useState<Set<number>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
 
   function load(silent = false) {
     if (!silent) setLoading(true)
@@ -82,15 +90,37 @@ export default function InboxPage() {
     window.addEventListener("focus", onFocus)
     return () => { clearInterval(t); window.removeEventListener("focus", onFocus) }
   }, [])
-  useEffect(() => { setPage(1) }, [folder, q])
+  useEffect(() => { setPage(1); setSel(new Set()) }, [folder, q])
 
   const counts = useMemo(() => ({
     inbox: rows.filter((m) => inFolder(m, "inbox")).length,
     sent: rows.filter((m) => inFolder(m, "sent")).length,
     drafts: rows.filter((m) => inFolder(m, "drafts")).length,
     notes: rows.filter((m) => inFolder(m, "notes")).length,
-    unread: rows.filter((m) => m.direction === "inbound" && m.channel !== "note" && !m.acknowledged).length,
+    archived: rows.filter((m) => inFolder(m, "archived")).length,
+    unread: rows.filter((m) => m.direction === "inbound" && m.channel !== "note" && !m.acknowledged && !m.archived).length,
   }), [rows])
+
+  // Bulk multiselect actions (delete / archive / unarchive / flag / unflag).
+  async function bulk(action: "delete" | "archive" | "unarchive" | "flag" | "unflag") {
+    const ids = [...sel]
+    if (!ids.length) return
+    if (action === "delete" && !confirm(`Delete ${ids.length} item${ids.length > 1 ? "s" : ""}? This can't be undone.`)) return
+    setBulkBusy(true)
+    try {
+      await api("/messages/bulk", { method: "POST", body: { action, ids } })
+      setSel(new Set()); load(true)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Action failed") }
+    finally { setBulkBusy(false) }
+  }
+  async function setFlag(id: number, flagged: boolean) {
+    setRows((p) => p.map((m) => (m.id === id ? { ...m, flagged: flagged ? 1 : 0 } : m)))
+    try { await api("/messages/flag", { method: "POST", body: { id, flagged: flagged ? 1 : 0 } }) } catch { load(true) }
+  }
+  async function setArchive(id: number, archived: boolean) {
+    try { await api("/messages/archive", { method: "POST", body: { id, archived: archived ? 1 : 0 } }); setReadOpen(false); load(true) }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
+  }
 
   const filtered = useMemo(() => {
     const base = rows.filter((m) => inFolder(m, folder))
@@ -146,6 +176,7 @@ export default function InboxPage() {
     { key: "sent", label: "Sent", icon: SendIcon },
     { key: "drafts", label: "Drafts", icon: FileEdit, badge: counts.drafts || undefined },
     { key: "notes", label: "Notes", icon: StickyNote, badge: counts.notes || undefined },
+    { key: "archived", label: "Archive", icon: Archive, badge: counts.archived || undefined },
   ]
 
   return (
@@ -176,12 +207,36 @@ export default function InboxPage() {
         </div>
       </div>
 
+      {sel.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/40 px-3 py-2 text-sm">
+          <span className="font-medium">{sel.size} selected</span>
+          <Button variant="outline" size="sm" className="text-destructive" disabled={bulkBusy} onClick={() => bulk("delete")}><Trash2 className="size-4" /> Delete</Button>
+          {folder === "archived"
+            ? <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => bulk("unarchive")}><ArchiveRestore className="size-4" /> Unarchive</Button>
+            : <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => bulk("archive")}><Archive className="size-4" /> Archive</Button>}
+          <Button variant="outline" size="sm" disabled={bulkBusy} onClick={() => bulk("flag")}><Flag className="size-4" /> Flag</Button>
+          <Button variant="ghost" size="sm" onClick={() => setSel(new Set())}>Clear</Button>
+          {bulkBusy && <Loader2 className="size-4 animate-spin text-muted-foreground" />}
+        </div>
+      )}
+
       <Card className="flex flex-1 flex-col">
         <CardContent className="flex flex-1 flex-col p-0">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[34%]">{folder === "notes" ? "By" : folder === "inbox" ? "From" : "To"}</TableHead>
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={pageRows.length > 0 && pageRows.every((m) => sel.has(m.id))}
+                    onCheckedChange={(c) => setSel((prev) => {
+                      const n = new Set(prev)
+                      if (c) pageRows.forEach((m) => n.add(m.id)); else pageRows.forEach((m) => n.delete(m.id))
+                      return n
+                    })}
+                    aria-label="Select all"
+                  />
+                </TableHead>
+                <TableHead className="w-[32%]">{folder === "notes" ? "By" : folder === "inbox" ? "From" : "To"}</TableHead>
                 <TableHead>{folder === "notes" ? "Note" : "Subject"}</TableHead>
                 <TableHead className="hidden md:table-cell">Linked</TableHead>
                 <TableHead className="text-right">Date</TableHead>
@@ -189,17 +244,21 @@ export default function InboxPage() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={4} className="py-12 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
+                <TableRow><TableCell colSpan={5} className="py-12 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
               ) : pageRows.length === 0 ? (
-                <TableRow><TableCell colSpan={4} className="py-12 text-center text-sm text-muted-foreground">
-                  {folder === "drafts" ? "No drafts — hit Compose then Save draft." : folder === "notes" ? "No notes yet — add one with New note." : "Nothing here. Hit Sync to pull email."}
+                <TableRow><TableCell colSpan={5} className="py-12 text-center text-sm text-muted-foreground">
+                  {folder === "drafts" ? "No drafts — hit Compose then Save draft." : folder === "notes" ? "No notes yet — add one with New note." : folder === "archived" ? "Nothing archived." : "Nothing here. Hit Sync to pull email."}
                 </TableCell></TableRow>
               ) : (
                 pageRows.map((m) => {
                   const unread = m.direction === "inbound" && m.channel !== "note" && !m.acknowledged
                   const who = m.channel === "note" ? (m.from_name || "—") : m.direction === "inbound" ? (m.from_name || m.from_email || "Unknown") : (m.to_email || "—")
                   return (
-                    <TableRow key={m.id} className="cursor-pointer" onClick={() => openRow(m)}>
+                    <TableRow key={m.id} className={cn("cursor-pointer", sel.has(m.id) && "bg-muted/50")} onClick={() => openRow(m)}>
+                      <TableCell className="w-10" onClick={(e) => e.stopPropagation()}>
+                        <Checkbox checked={sel.has(m.id)} aria-label="Select message"
+                          onCheckedChange={(c) => setSel((prev) => { const n = new Set(prev); if (c) n.add(m.id); else n.delete(m.id); return n })} />
+                      </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2.5">
                           {unread ? <span className="size-2 shrink-0 rounded-full bg-primary" /> : <span className="size-2 shrink-0" />}
@@ -207,7 +266,10 @@ export default function InboxPage() {
                           <span className={cn("truncate", unread ? "font-bold text-foreground" : "text-muted-foreground")}>{who}</span>
                         </div>
                       </TableCell>
-                      <TableCell className={cn("max-w-0 truncate", unread ? "font-bold text-foreground" : "text-muted-foreground")}>{m.subject || "(no subject)"}</TableCell>
+                      <TableCell className={cn("max-w-0 truncate", unread ? "font-bold text-foreground" : "text-muted-foreground")}>
+                        {!!m.flagged && <Flag className="mr-1 inline size-3.5 fill-amber-500 text-amber-500 align-[-2px]" />}
+                        {m.subject || "(no subject)"}
+                      </TableCell>
                       <TableCell className="hidden text-muted-foreground md:table-cell">{m.customer_name || m.job_reference || "—"}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">{fmtDate(m.created_at)}</TableCell>
                     </TableRow>
@@ -246,11 +308,16 @@ export default function InboxPage() {
                     <p className="font-medium">{msg.channel === "note" ? `Note · ${msg.from_name ?? ""}` : msg.direction === "inbound" ? (msg.from_name || msg.from_email) : `To: ${msg.to_email}`}</p>
                     <p className="text-xs text-muted-foreground">{msg.created_at}{msg.customer_name ? ` · ${msg.customer_name}` : ""}{msg.job_reference ? ` · ${msg.job_reference}` : ""}</p>
                   </div>
-                  <div className="ml-auto flex items-center gap-2">
+                  <div className="ml-auto flex items-center gap-1">
                     {!!msg.acknowledged && msg.channel !== "note" && <Badge variant="outline"><Check className="size-3" /> Read</Badge>}
-                    {msg.channel === "note" && (
-                      <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" onClick={() => deleteMsg(msg.id)}><Trash2 className="size-4" /></Button>
-                    )}
+                    <Button variant="ghost" size="icon" className="size-8" title={msg.flagged ? "Unflag" : "Flag"}
+                      onClick={() => { setFlag(msg.id, !msg.flagged); setMsg({ ...msg, flagged: msg.flagged ? 0 : 1 }) }}>
+                      <Flag className={cn("size-4", msg.flagged && "fill-amber-500 text-amber-500")} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-8" title={msg.archived ? "Unarchive" : "Archive"} onClick={() => setArchive(msg.id, !msg.archived)}>
+                      {msg.archived ? <ArchiveRestore className="size-4" /> : <Archive className="size-4" />}
+                    </Button>
+                    <Button variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-destructive" title="Delete" onClick={() => deleteMsg(msg.id)}><Trash2 className="size-4" /></Button>
                   </div>
                 </div>
               </DialogHeader>
@@ -308,7 +375,15 @@ function ComposeDialog({ open, onOpenChange, draft, onSaved }:
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
-        <DialogHeader><DialogTitle>{id ? "Edit draft" : "New message"}</DialogTitle></DialogHeader>
+        <DialogHeader className="flex-row items-center justify-between space-y-0 pr-6">
+          <DialogTitle>{id ? "Edit draft" : "New message"}</DialogTitle>
+          <AiButton
+            endpoint="/email/compose" title="Draft this email"
+            extra={{ to_name: to }}
+            placeholder="e.g. chase invoice 1043 politely, due last week"
+            onResult={(d: { subject?: string; body?: string }) => { if (d.subject) setSubject(d.subject); if (d.body) setBody(d.body) }}
+          />
+        </DialogHeader>
         <div className="space-y-3">
           <Input type="email" placeholder="To" value={to} onChange={(e) => setTo(e.target.value)} />
           <Input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
