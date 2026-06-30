@@ -9,6 +9,7 @@ declare(strict_types=1);
 $cfg = require __DIR__ . "/config.php";
 require __DIR__ . "/lib/job_status.php";
 require __DIR__ . "/lib/invoicing.php";
+require __DIR__ . "/lib/brand.php";
 
 /* ---------- CORS ---------- */
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
@@ -116,8 +117,9 @@ function integration_fields(): array {
         "smtp_from" => false, "smtp_from_name" => false, "smtp_secure" => false,
         // Weather
         "openweather_key" => true, "weather_city" => false,
-        // AI via OpenRouter (model of choice)
-        "openrouter_key" => true, "openrouter_model" => false,
+        // AI via OpenRouter — primary model, comma/space-separated backup models, image model, editable brand voice
+        "openrouter_key" => true, "openrouter_model" => false, "openrouter_models" => false,
+        "openrouter_image_model" => false, "brand_voice" => false,
         // Inbound email (provider IMAP)
         "imap_host" => false, "imap_port" => false, "imap_user" => false, "imap_pass" => true, "imap_secure" => false,
         // Google reviews import (Places API)
@@ -130,19 +132,72 @@ function integ(mysqli $db, string $key): ?string {
     return ($r && $r["v"] !== null && $r["v"] !== "") ? $r["v"] : null;
 }
 
-/** Draft text via OpenRouter (model from Integrations). Human approves before anything sends. */
-function ai_draft(mysqli $db, string $prompt): string {
+/** Ordered model chain: primary (openrouter_model) + backups (openrouter_models,
+ *  comma/space/newline separated), de-duped, with a cheap last-resort fallback. */
+function ai_models(mysqli $db): array {
+    $primary = trim((string) (integ($db, "openrouter_model") ?? "")) ?: "openai/gpt-4o-mini";
+    $extra = preg_split('/[\s,]+/', (string) (integ($db, "openrouter_models") ?? ""), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    $chain = array_values(array_unique(array_merge([$primary], $extra)));
+    if (!in_array("openai/gpt-4o-mini", $chain, true)) $chain[] = "openai/gpt-4o-mini"; // always-available backstop
+    return $chain;
+}
+
+/** Draft text via OpenRouter with an optional brand system prompt and automatic
+ *  model fallback — a busy or unavailable model rolls over to the next backup.
+ *  Human always approves before anything sends. */
+function ai_draft(mysqli $db, string $prompt, ?string $system = null, int $maxTokens = 900): string {
     $key = integ($db, "openrouter_key");
     if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
-    $model = integ($db, "openrouter_model") ?: "openai/gpt-4o-mini";
+    $messages = [];
+    if ($system !== null && trim($system) !== "") $messages[] = ["role" => "system", "content" => $system];
+    $messages[] = ["role" => "user", "content" => $prompt];
+
+    $lastErr = "no model available";
+    foreach (ai_models($db) as $model) {
+        $payload = json_encode(["model" => $model, "messages" => $messages, "max_tokens" => $maxTokens]);
+        $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 45,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => [
+                "Authorization: Bearer $key", "Content-Type: application/json",
+                "HTTP-Referer: https://egolimited.com", "X-Title: EGO LIMITED",
+            ],
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        // A rejected key won't be fixed by another model — stop immediately.
+        if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key in Settings → Integrations.");
+        if ($code === 200) {
+            $j = json_decode($resp, true);
+            $text = $j["choices"][0]["message"]["content"] ?? "";
+            if (trim($text) !== "") return trim($text);
+            $lastErr = "model returned no text";
+        } else {
+            $lastErr = "model $model unavailable ($code)";
+        }
+        // otherwise fall through to the next backup model
+    }
+    throw new RuntimeException("AI is unavailable right now ($lastErr) — try again shortly.");
+}
+
+/** Generate a marketing image via an OpenRouter image model, save it under
+ *  /uploads, and return an absolute URL the email can embed. Best-effort:
+ *  needs an image model set in Settings → Integrations. */
+function ai_generate_image(mysqli $db, string $prompt): string {
+    $key = integ($db, "openrouter_key");
+    if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
+    $model = integ($db, "openrouter_image_model");
+    if (!$model) throw new RuntimeException("Set an image model in Settings → Integrations (AI) first.");
     $payload = json_encode([
         "model" => $model,
         "messages" => [["role" => "user", "content" => $prompt]],
-        "max_tokens" => 900,
+        "modalities" => ["image", "text"],
     ]);
     $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
     curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 45,
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 90,
         CURLOPT_POSTFIELDS => $payload,
         CURLOPT_HTTPHEADER => [
             "Authorization: Bearer $key", "Content-Type: application/json",
@@ -152,13 +207,32 @@ function ai_draft(mysqli $db, string $prompt): string {
     $resp = curl_exec($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
-    if ($code === 429) throw new RuntimeException("AI is busy right now (rate limit) — try again in a moment.");
-    if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key in Settings → Integrations.");
-    if ($code !== 200) throw new RuntimeException("AI service error ($code) — try again shortly.");
+    if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key.");
+    if ($code !== 200) throw new RuntimeException("Image model error ($code) — check the model id in Settings.");
     $j = json_decode($resp, true);
-    $text = $j["choices"][0]["message"]["content"] ?? "";
-    if ($text === "") throw new RuntimeException("OpenRouter returned no text");
-    return trim($text);
+    $url = $j["choices"][0]["message"]["images"][0]["image_url"]["url"] ?? "";
+    if ($url === "") {
+        $content = $j["choices"][0]["message"]["content"] ?? "";
+        $hay = is_array($content) ? json_encode($content) : (string) $content;
+        if (preg_match('#(data:image/[a-z]+;base64,[A-Za-z0-9+/=]+)#', $hay, $m)) $url = $m[1];
+        elseif (preg_match('#(https?://\S+\.(?:png|jpg|jpeg|webp))#i', $hay, $m)) $url = $m[1];
+    }
+    if ($url === "") throw new RuntimeException("No image came back — try a different image model.");
+
+    $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
+    $host = $_SERVER["HTTP_HOST"] ?? "egolimited.com";
+    if (str_starts_with($url, "data:image")) {
+        [$meta, $b64] = array_pad(explode(",", $url, 2), 2, "");
+        $ext = str_contains($meta, "png") ? "png" : (str_contains($meta, "webp") ? "webp" : "jpg");
+        $bin = base64_decode($b64);
+        if ($bin === false || strlen($bin) < 64) throw new RuntimeException("Bad image data");
+        $dir = __DIR__ . "/uploads";
+        if (!is_dir($dir)) @mkdir($dir, 0755, true);
+        $name = "campaign_" . bin2hex(random_bytes(6)) . ".$ext";
+        file_put_contents("$dir/$name", $bin);
+        return "$scheme://$host" . dirname($_SERVER["SCRIPT_NAME"]) . "/uploads/$name";
+    }
+    return $url; // already a hosted URL
 }
 
 /** Marketing subscribers/contacts list — created lazily so no manual migration
@@ -173,6 +247,44 @@ function ensure_subscribers_table(mysqli $db): void {
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_sub_email (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** Mailbox flags (archive/flag) — added lazily so no manual migration on deploy. Idempotent. */
+function ensure_message_cols(mysqli $db): void {
+    $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS archived TINYINT(1) NOT NULL DEFAULT 0");
+    $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS flagged TINYINT(1) NOT NULL DEFAULT 0");
+}
+
+/** Saved email templates — created + seeded with the EGO brand sequences on first
+ *  use, so the office has on-brand starting points. Idempotent. */
+function ensure_email_templates(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_email_templates (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(190) NOT NULL,
+        kind VARCHAR(24) NOT NULL DEFAULT 'campaign',
+        subject VARCHAR(255) NULL,
+        body MEDIUMTEXT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $has = (int) ($db->query("SELECT COUNT(*) c FROM ego_email_templates")->fetch_assoc()["c"] ?? 0);
+    if ($has > 0) return;
+    $sig = "\n\nCheers,\n{{sender_name}}\nEGO LTD — general maintenance, homes & commercial\n07539 705576 · hello@egolimited.com\nThe jobs that need doing, done properly.";
+    $seed = [
+        ["Quote follow-up (homeowner)", "marketing", "Quick one on your quote, {{first_name}}",
+         "Hi {{first_name}},\n\nJust checking the quote for {{job_summary}} landed alright.\n\nIf the price or the timing isn't quite right, tell me — I'd rather adjust it than leave you guessing. If you want to go ahead, reply here or call 07539 705576 and I'll book you in." . $sig],
+        ["B2B intro (agents)", "marketing", "A reliable maintenance contractor for {{agency_name}}",
+         "Hi {{first_name}},\n\nI run EGO LTD — general maintenance across South-East London, homes and commercial. Carpentry, decorating, minor plumbing, tiling: the day-to-day repairs that keep managed properties tidy and tenants quiet.\n\nOne number, fixed prices in writing, and a maintenance record kept per property so you're never starting from scratch. Worth a 10-minute call to take some pressure off {{agency_name}}? I'm on 07539 705576, or just reply." . $sig],
+        ["Review request", "marketing", "How did we do on {{job_summary}}?",
+         "Hi {{first_name}},\n\nHope you're happy with {{job_summary}} — it was good to get it sorted for you.\n\nIf you've got 30 seconds, a quick honest review helps other people round here find us: {{review_link}}. And if anything's not quite right, tell me first — I'd always rather put it right." . $sig],
+        ["Win-back (dormant)", "marketing", "Still here when you need us, {{first_name}}",
+         "Hi {{first_name}},\n\nIt's been a while since we last sorted something for you. No agenda here, just a hello.\n\nIf anything around {{property_or_premises}} has been on the 'I'll get to that' list, that's exactly what we're good at — the small jobs, the repairs, the bits that never reach the top of the pile. Reply or call 07539 705576 whenever something crops up." . $sig],
+        ["Winter prep (seasonal)", "marketing", "Get ahead of winter before it gets ahead of you",
+         "Hi {{first_name}},\n\nCold weather finds every weak spot — draughty doors, dodgy seals, gutters that should've been cleared.\n\nA pre-winter once-over sorts it cheaply now. We'll check the property, fix the small stuff on the spot, and flag anything bigger with a fixed price before we touch it. Reply or call 07539 705576 and I'll book you in for {{seasonal_slot}}." . $sig],
+        ["Referral ask", "marketing", "Know anyone who needs a job doing properly?",
+         "Hi {{first_name}},\n\nThanks again for having us out for {{job_summary}}.\n\nQuick favour: if a friend, neighbour or family member needs a reliable pair of hands, point them our way. A name from someone like you is worth more than any advert. Just forward this email or pass on 07539 705576." . $sig],
+    ];
+    $stmt = $db->prepare("INSERT INTO ego_email_templates (name,kind,subject,body) VALUES (?,?,?,?)");
+    foreach ($seed as $t) { $stmt->bind_param("ssss", $t[0], $t[1], $t[2], $t[3]); $stmt->execute(); }
 }
 
 /** Mint (or reuse) the customer-portal access token for a job. */
@@ -1461,6 +1573,118 @@ switch ("$method $route") {
         send(["text" => $text]);
     }
 
+    /* ===================== AI DRAFT HELPERS (brand-voice) ===================== */
+    case "POST /announcements/draft": {
+        require_role($db, "manager");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe the announcement");
+        $audience = trim($b["audience"] ?? "") ?: "the team";
+        $task = "Write a short internal announcement for $audience. Owner's brief: $brief\n\n"
+            . "Return EXACTLY as:\nTitle: <one clear line>\n\n<body, 1-3 short paragraphs>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db), 500); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $title = ""; $bodyTxt = trim($text);
+        if (preg_match('/^\s*title:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $title = trim($m[1]); $bodyTxt = trim($m[2]); }
+        send(["title" => $title, "body" => $bodyTxt]);
+    }
+    case "POST /tasks/draft": {
+        require_role($db, "admin");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe the task");
+        $task = "Turn this into a clear, short internal task for a maintenance team — easy to understand at a glance. "
+            . "Owner's note: $brief\n\nReturn EXACTLY as:\nTitle: <max 8 words>\n\n<one or two sentences: what to do and what 'done' looks like>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db), 300); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $title = ""; $desc = trim($text);
+        if (preg_match('/^\s*title:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $title = trim($m[1]); $desc = trim($m[2]); }
+        send(["title" => $title, "description" => $desc]);
+    }
+    case "POST /incidents/polish": {
+        require_role($db, "admin");
+        $b = body();
+        $text = trim($b["text"] ?? ""); if ($text === "") fail("Nothing to polish yet");
+        $field = trim($b["field"] ?? "") ?: "incident report";
+        $task = "Rewrite this $field clearly and factually for a health-and-safety record. Keep every fact; do not add or invent anything. "
+            . "Neutral, complete sentences, plain English.\n\nDRAFT:\n$text\n\nReturn only the rewritten text.";
+        try { $out = ai_draft($db, $task, ego_brand_voice($db), 600); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        send(["text" => $out]);
+    }
+    case "POST /procurement/draft": {
+        require_role($db, "admin");
+        $b = body();
+        $kind = trim($b["kind"] ?? "") ?: "item";
+        $name = trim($b["name"] ?? "");
+        $brief = trim($b["brief"] ?? "");
+        if ($name === "" && $brief === "") fail("Add a name or a short brief first");
+        $task = "Write clear, well-detailed procurement notes for a UK maintenance company's $kind"
+            . ($name !== "" ? " named \"$name\"" : "") . ". "
+            . ($brief !== "" ? "Details so far: $brief. " : "")
+            . "Cover what it is or what they do, typical use, and anything useful to record (specs, trades, lead time, terms) — only where reasonable to infer. "
+            . "Never invent specifics like exact prices, certificate numbers or phone numbers. A few short lines.\n\nReturn only the notes text.";
+        try { $out = ai_draft($db, $task, ego_brand_voice($db), 500); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        send(["text" => $out]);
+    }
+    case "POST /email/compose": {
+        // One-to-one brand-voice email draft for the inbox composer.
+        require_role($db, "admin");
+        $b = body();
+        $brief = trim($b["brief"] ?? ""); if ($brief === "") fail("Describe the email");
+        $to = trim($b["to_name"] ?? "");
+        $task = "Write a one-to-one email" . ($to !== "" ? " to $to" : "") . " for EGO LTD. Owner's brief: $brief\n\n"
+            . "Return EXACTLY as:\nSubject: <subject line>\n\n<email body>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db)); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        $subject = ""; $bodyTxt = trim($text);
+        if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
+        send(["subject" => $subject, "body" => $bodyTxt]);
+    }
+    case "POST /ai/image": {
+        // Generate a marketing header image for an email (makes a campaign read like a post).
+        require_role($db, "admin");
+        $b = body();
+        $prompt = trim($b["prompt"] ?? ""); if ($prompt === "") fail("Describe the image");
+        $full = "A clean, professional marketing image for a UK property maintenance company (EGO LTD). "
+            . "Warm, grounded, premium, not stocky or cheesy. Landscape banner suitable for an email header. " . $prompt;
+        try { $url = ai_generate_image($db, $full); }
+        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        send(["url" => $url]);
+    }
+
+    /* ===================== EMAIL TEMPLATES (saved brand sequences) ===================== */
+    case "GET /email-templates": {
+        require_role($db, "admin");
+        ensure_email_templates($db);
+        $rows = db_all($db, "SELECT id,name,kind,subject,body,created_at FROM ego_email_templates ORDER BY name");
+        foreach ($rows as &$r) $r["id"] = (int)$r["id"];
+        send(["templates" => $rows]);
+    }
+    case "POST /email-templates": {
+        require_role($db, "admin");
+        ensure_email_templates($db);
+        $b = body();
+        $name = trim($b["name"] ?? ""); if ($name === "") fail("Name required");
+        $subject = trim($b["subject"] ?? "");
+        $bodyTxt = trim($b["body"] ?? ""); if ($bodyTxt === "") fail("Body required");
+        $kind = trim($b["kind"] ?? "") ?: "campaign";
+        $id = (int)($b["id"] ?? 0);
+        if ($id) {
+            db_exec($db, "UPDATE ego_email_templates SET name=?,kind=?,subject=?,body=? WHERE id=?", "ssssi", $name, $kind, $subject, $bodyTxt, $id);
+        } else {
+            db_exec($db, "INSERT INTO ego_email_templates (name,kind,subject,body) VALUES (?,?,?,?)", "ssss", $name, $kind, $subject, $bodyTxt);
+            $id = (int)$db->insert_id;
+        }
+        send(["id" => $id], 201);
+    }
+    case "POST /email-templates/delete": {
+        require_role($db, "admin");
+        ensure_email_templates($db);
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "DELETE FROM ego_email_templates WHERE id=?", "i", $id);
+        send(["ok" => true]);
+    }
+
     /* ===================== M15: INBOUND EMAIL (IMAP) ===================== */
     case "POST /inbox/sync": {
         require_role($db, "admin");
@@ -1472,15 +1696,16 @@ switch ("$method $route") {
 
     case "GET /inbox": {
         require_role($db, "admin");
+        ensure_message_cols($db);
         $rows = db_all($db,
-            "SELECT m.id,m.direction,m.channel,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.acknowledged,m.created_at,
+            "SELECT m.id,m.direction,m.channel,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.acknowledged,m.archived,m.flagged,m.created_at,
                     m.customer_id,m.job_id, c.name AS customer_name, j.reference AS job_reference
              FROM ego_messages m
              LEFT JOIN ego_customers c ON c.id=m.customer_id
              LEFT JOIN ego_jobs j ON j.id=m.job_id
              WHERE (m.channel IS NULL OR m.channel <> 'portal')
-             ORDER BY m.id DESC LIMIT 100");
-        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["acknowledged"] = (int)($r["acknowledged"] ?? 0); $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
+             ORDER BY m.id DESC LIMIT 200");
+        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["acknowledged"] = (int)($r["acknowledged"] ?? 0); $r["archived"] = (int)($r["archived"] ?? 0); $r["flagged"] = (int)($r["flagged"] ?? 0); $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
         send(["messages" => $rows]);
     }
 
@@ -2675,11 +2900,9 @@ switch ("$method $route") {
         $kind = trim($b["kind"] ?? "marketing") ?: "marketing";
         $co = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
         $name = $co["company_name"] ?? "EGO LIMITED";
-        $prompt = "You write $kind emails for $name, a UK property maintenance company. "
-            . "Brand voice: plain, direct, warm, no jargon, no em dashes, never overpromise, give people a clear next step. "
-            . "Write a short punchy subject line, then the email body (a few short paragraphs, sign off as the $name team). "
-            . "Brief from the owner: $brief\n\nReturn EXACTLY as:\nSubject: <subject line>\n\n<email body>";
-        try { $text = ai_draft($db, $prompt); }
+        $task = "Write a $kind email for $name. A short, punchy subject line, then the body in a few short paragraphs, signed off as the $name team. "
+            . "Owner's brief: $brief\n\nReturn EXACTLY as:\nSubject: <subject line>\n\n<email body>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db)); }
         catch (Throwable $e) { fail($e->getMessage(), 400); }
         $subject = ""; $bodyTxt = trim($text);
         if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
@@ -2710,7 +2933,12 @@ switch ("$method $route") {
         foreach (db_all($db, "SELECT email FROM ego_subscribers WHERE subscribed=0") as $r) unset($rows[strtolower($r["email"])]);
         if (!$rows) fail("No recipients for that audience yet");
         require_once __DIR__ . "/lib/mailer.php";
-        $bodyHtml = nl2br(htmlspecialchars($bodyTxt));
+        // Optional header image makes the campaign read like a post, not a plain email.
+        $img = trim($b["image_url"] ?? "");
+        $imgHtml = ($img !== "" && filter_var($img, FILTER_VALIDATE_URL))
+            ? "<img src='" . htmlspecialchars($img) . "' alt='' style='display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:0 0 18px'>"
+            : "";
+        $bodyHtml = $imgHtml . nl2br(htmlspecialchars($bodyTxt));
         $coName = htmlspecialchars((db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED");
         $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
         $unsubBase = "$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe";
@@ -2745,9 +2973,48 @@ switch ("$method $route") {
     case "POST /messages/delete": {
         require_role($db, "admin");
         $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
-        // Only drafts and internal notes are deletable here (real inbound/sent mail is kept).
-        db_exec($db, "DELETE FROM ego_messages WHERE id=? AND status IN ('draft','note')", "i", $id);
+        // Office can clear anything from their own mailbox (inbox/sent/drafts/notes).
+        // Portal threads stay (they belong to the customer's job record).
+        db_exec($db, "DELETE FROM ego_messages WHERE id=? AND (channel IS NULL OR channel <> 'portal')", "i", $id);
         send(["ok" => true]);
+    }
+    case "POST /messages/archive": {
+        require_role($db, "admin");
+        ensure_message_cols($db);
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        $on = (int)!!($b["archived"] ?? 1);
+        db_exec($db, "UPDATE ego_messages SET archived=? WHERE id=?", "ii", $on, $id);
+        send(["ok" => true]);
+    }
+    case "POST /messages/flag": {
+        require_role($db, "admin");
+        ensure_message_cols($db);
+        $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        $on = (int)!!($b["flagged"] ?? 1);
+        db_exec($db, "UPDATE ego_messages SET flagged=? WHERE id=?", "ii", $on, $id);
+        send(["ok" => true]);
+    }
+    case "POST /messages/bulk": {
+        // Multiselect actions: delete | archive | unarchive | flag | unflag.
+        require_role($db, "admin");
+        ensure_message_cols($db);
+        $b = body();
+        $action = (string)($b["action"] ?? "");
+        $ids = array_values(array_filter(array_map("intval", (array)($b["ids"] ?? [])), fn($n) => $n > 0));
+        if (!$ids) fail("Select at least one message");
+        if (count($ids) > 500) fail("Too many at once");
+        $place = implode(",", array_fill(0, count($ids), "?"));
+        $types = str_repeat("i", count($ids));
+        switch ($action) {
+            case "delete":    $sql = "DELETE FROM ego_messages WHERE id IN ($place) AND (channel IS NULL OR channel <> 'portal')"; break;
+            case "archive":   $sql = "UPDATE ego_messages SET archived=1 WHERE id IN ($place)"; break;
+            case "unarchive": $sql = "UPDATE ego_messages SET archived=0 WHERE id IN ($place)"; break;
+            case "flag":      $sql = "UPDATE ego_messages SET flagged=1 WHERE id IN ($place)"; break;
+            case "unflag":    $sql = "UPDATE ego_messages SET flagged=0 WHERE id IN ($place)"; break;
+            default: fail("Unknown action");
+        }
+        db_exec($db, $sql, $types, ...$ids);
+        send(["ok" => true, "count" => count($ids)]);
     }
 
     /* ============================ PUBLIC (landing — no auth) ============================ */

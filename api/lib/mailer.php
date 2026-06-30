@@ -54,7 +54,21 @@ function ego_mime_alt(string $html, string $boundary): string {
         . "--$boundary\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n$html\r\n\r\n--$boundary--\r\n";
 }
 
+/** RFC 2606/6761 reserved + demo placeholder domains — mail here can never be
+ *  delivered and just rots in the queue (the "delayed 72 hours" warnings). Skip it. */
+function ego_is_undeliverable(string $email): bool {
+    $at = strrchr($email, "@");
+    if ($at === false) return true;
+    $d = strtolower(substr($at, 1));
+    foreach (["example.com", "example.org", "example.net", "example.co.uk", "example.edu", "test", "invalid", "localhost", "local", "example"] as $r) {
+        if ($d === $r || str_ends_with($d, ".$r")) return true;
+    }
+    return false;
+}
+
 function ego_send_mail(mysqli $db, string $to, ?string $toName, string $subject, string $html): void {
+    // Never queue mail to reserved/demo addresses — prevents the 72h bounce warnings.
+    if (ego_is_undeliverable($to)) return;
     if (integ($db, "smtp_host")) {
         try { ego_send_smtp($db, $to, $toName, $subject, $html); return; }
         catch (Throwable $e) { /* fall back to local sendmail */ }
