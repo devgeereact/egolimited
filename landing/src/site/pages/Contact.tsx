@@ -194,6 +194,19 @@ export default function Contact() {
                 </div>
               </div>
             </div>
+
+            {/* Clean, muted office map — keyless embed, desaturated to sit
+                quietly inside the brand rather than shout primary-blue. */}
+            <div className="overflow-hidden rounded-xl border border-border shadow-sm">
+              <iframe
+                title={`Map showing ${company.name}`}
+                src={`https://maps.google.com/maps?q=${encodeURIComponent(company.address)}&z=14&output=embed`}
+                className="h-56 w-full grayscale-[35%] contrast-[0.95]"
+                style={{ border: 0 }}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
           </div>
         </div>
       </Section>
