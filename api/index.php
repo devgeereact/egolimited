@@ -160,6 +160,7 @@ function integration_fields(): array {
         // AI via OpenRouter — primary model, comma/space-separated backup models, image model, editable brand voice
         "openrouter_key" => true, "openrouter_model" => false, "openrouter_models" => false,
         "openrouter_image_model" => false, "brand_voice" => false,
+        "ai_daily_cap" => false, "ai_image_daily_cap" => false,
         // Inbound email (provider IMAP)
         "imap_host" => false, "imap_port" => false, "imap_user" => false, "imap_pass" => true, "imap_secure" => false,
         // Google reviews import (Places API)
@@ -185,9 +186,25 @@ function ai_models(mysqli $db): array {
 /** Draft text via OpenRouter with an optional brand system prompt and automatic
  *  model fallback — a busy or unavailable model rolls over to the next backup.
  *  Human always approves before anything sends. */
+/** Per-user daily AI spend guard — caps AI calls per user per day so a rogue or
+ *  compromised token can't run up the OpenRouter bill. Text and images have separate
+ *  caps (images cost more). Set the cap to 0 to disable. Configured in Settings. */
+function ai_rate_guard(mysqli $db, string $kind = "text"): void {
+    $u = current_user($db);
+    $uid = $u ? (int) $u["id"] : 0;
+    $cap = (int) ($kind === "image" ? (integ($db, "ai_image_daily_cap") ?? "20") : (integ($db, "ai_daily_cap") ?? "150"));
+    if ($cap <= 0) return; // 0 = unlimited
+    $key = "ai-$kind:$uid:" . gmdate("Y-m-d");
+    if (!rate_check($db, $key, $cap, 86400)) throw new RuntimeException("Daily AI limit reached ($cap $kind requests) — it resets tomorrow, or raise it in Settings → Integrations.");
+    rate_hit($db, $key);
+}
+
 function ai_draft(mysqli $db, string $prompt, ?string $system = null, int $maxTokens = 900): string {
     $key = integ($db, "openrouter_key");
     if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
+    ai_rate_guard($db, "text");
+    if (mb_strlen($prompt) > 8000) $prompt = mb_substr($prompt, 0, 8000); // cap input size (cost + abuse)
+    $maxTokens = max(1, min($maxTokens, 1500));                          // cap output size
     $messages = [];
     if ($system !== null && trim($system) !== "") $messages[] = ["role" => "system", "content" => $system];
     $messages[] = ["role" => "user", "content" => $prompt];
@@ -230,6 +247,7 @@ function ai_generate_image(mysqli $db, string $prompt): string {
     if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
     $model = integ($db, "openrouter_image_model");
     if (!$model) throw new RuntimeException("Set an image model in Settings → Integrations (AI) first.");
+    ai_rate_guard($db, "image");
     $payload = json_encode([
         "model" => $model,
         "messages" => [["role" => "user", "content" => $prompt]],
@@ -2920,6 +2938,9 @@ switch ("$method $route") {
     }
     case "POST /me/totp/setup": {
         $me = require_user($db);
+        // Require the current password so a hijacked session can't pivot the 2FA secret.
+        $row = db_one($db, "SELECT password_hash FROM ego_users WHERE id=?", "i", (int)$me["id"]);
+        if (!$row || !$row["password_hash"] || !password_verify((string)(body()["password"] ?? ""), $row["password_hash"])) fail("Confirm your password to set up 2FA", 403);
         require_once __DIR__ . "/lib/totp.php";
         $secret = totp_secret();
         db_exec($db, "UPDATE ego_users SET totp_secret=?, totp_enabled=0 WHERE id=?", "si", $secret, (int)$me["id"]);

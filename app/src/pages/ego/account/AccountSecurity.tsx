@@ -31,6 +31,7 @@ export default function AccountSecurity() {
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [disablePw, setDisablePw] = useState("")
+  const [setupPw, setSetupPw] = useState("")
 
   useEffect(() => {
     api<{ user: { totp_enabled?: number } }>("/auth/me")
@@ -56,8 +57,8 @@ export default function AccountSecurity() {
   async function startSetup() {
     setBusy(true)
     try {
-      const r = await api<{ secret: string; otpauth: string }>("/me/totp/setup", { method: "POST" })
-      setSecret(r.secret); setOtpauth(r.otpauth)
+      const r = await api<{ secret: string; otpauth: string }>("/me/totp/setup", { method: "POST", body: { password: setupPw } })
+      setSecret(r.secret); setOtpauth(r.otpauth); setSetupPw("")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Setup failed") } finally { setBusy(false) }
   }
   async function enable() {
@@ -159,11 +160,16 @@ export default function AccountSecurity() {
                 </div>
               </div>
             ) : (
-              <div className="flex items-start gap-3">
-                <p className="flex-1 text-sm text-muted-foreground">
+              <div className="space-y-3">
+                <p className="text-sm text-muted-foreground">
                   Your account is protected by your password only. Turn on 2FA for an extra layer of security.
                 </p>
-                <Button onClick={startSetup} disabled={busy}>{busy && <Loader2 className="animate-spin" />} Set up 2FA</Button>
+                <div className="space-y-1.5">
+                  <Label htmlFor="spw">Confirm your password to begin</Label>
+                  <Input id="spw" type="password" autoComplete="current-password" value={setupPw}
+                    onChange={(e) => setSetupPw(e.target.value)} className="max-w-xs" />
+                </div>
+                <Button onClick={startSetup} disabled={busy || !setupPw}>{busy && <Loader2 className="animate-spin" />} Set up 2FA</Button>
               </div>
             )}
           </CardContent>

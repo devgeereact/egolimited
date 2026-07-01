@@ -33,13 +33,17 @@ const SECTIONS: Section[] = [
   {
     id: "ai", title: "AI (OpenRouter)", icon: Sparkles, fields: [
       { key: "openrouter_key", label: "API key", secret: true, placeholder: "sk-or-…" },
-      { key: "openrouter_model", label: "Primary model", placeholder: "anthropic/claude-3.5-sonnet",
-        hint: "The model used first for every AI draft. Switch any time — e.g. openai/gpt-4o-mini, google/gemini-2.0-flash-001." },
+      { key: "openrouter_model", label: "Primary model", placeholder: "deepseek/deepseek-chat-v3-0324:free",
+        hint: "The model used first for every AI draft. To spend nothing, use a free model — its id ends with :free (e.g. deepseek/deepseek-chat-v3-0324:free, meta-llama/llama-3.3-70b-instruct:free). Cheap paid options: openai/gpt-4o-mini, google/gemini-2.0-flash-001." },
       { key: "openrouter_models", label: "Backup models", multiline: true,
-        placeholder: "openai/gpt-4o-mini\ngoogle/gemini-2.0-flash-001",
-        hint: "Optional. One per line (or comma-separated). Tried in order if the primary is busy or unavailable." },
+        placeholder: "meta-llama/llama-3.3-70b-instruct:free\nopenai/gpt-4o-mini",
+        hint: "Optional. One per line (or comma-separated). Tried in order if the primary is busy — put another :free model first, a cheap paid one last." },
       { key: "openrouter_image_model", label: "Image model (email marketing)", placeholder: "google/gemini-2.5-flash-image-preview",
-        hint: "Optional. Used to generate header images for marketing emails." },
+        hint: "Optional. Used to generate header images for marketing emails. Image models are paid — leave blank if you don't want image costs." },
+      { key: "ai_daily_cap", label: "Daily AI limit per user (text)", type: "number", placeholder: "150",
+        hint: "Spend cap: max AI text drafts each user can run per day. 0 = unlimited. Even on paid models, 150/day of short drafts is only pennies." },
+      { key: "ai_image_daily_cap", label: "Daily AI image limit per user", type: "number", placeholder: "20",
+        hint: "Max AI images per user per day (images cost more than text). 0 = unlimited." },
     ],
   },
   {

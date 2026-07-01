@@ -3,6 +3,7 @@ import { Outlet, useLocation } from "react-router-dom"
 import { useTheme } from "next-themes"
 import SiteNav from "./components/SiteNav"
 import SiteFooter from "./components/SiteFooter"
+import CookieConsent from "./components/CookieConsent"
 import { CompanyProvider } from "./CompanyProvider"
 
 export default function SiteLayout() {
@@ -34,6 +35,7 @@ export default function SiteLayout() {
           </Suspense>
         </main>
         <SiteFooter />
+        <CookieConsent />
       </div>
     </CompanyProvider>
   )
