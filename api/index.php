@@ -326,6 +326,19 @@ function ensure_message_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS flagged TINYINT(1) NOT NULL DEFAULT 0");
 }
 
+/** Per-user notification preferences — which categories reach the notification bell.
+ *  Stored as a small JSON blob on the user; defaults to everything on. Idempotent. */
+function notify_defaults(): array { return ["emails" => 1, "enquiries" => 1, "portal" => 1, "reviews" => 1, "completed" => 1]; }
+function ensure_notify_prefs(mysqli $db): void {
+    $db->query("ALTER TABLE ego_users ADD COLUMN IF NOT EXISTS notify_prefs VARCHAR(255) NULL");
+}
+function user_notify_prefs(mysqli $db, int $uid): array {
+    ensure_notify_prefs($db);
+    $row = db_one($db, "SELECT notify_prefs FROM ego_users WHERE id=?", "i", $uid);
+    $p = json_decode((string) ($row["notify_prefs"] ?? ""), true);
+    return array_merge(notify_defaults(), is_array($p) ? $p : []);
+}
+
 /** Tombstone of deleted IMAP uids — so an inbox re-sync never resurrects mail the
  *  office already deleted. Idempotent. */
 function ensure_deleted_uids(mysqli $db): void {
@@ -1388,6 +1401,7 @@ switch ("$method $route") {
     case "GET /notifications": {
         $me = require_role($db, "admin");
         $seen = db_one($db, "SELECT notifications_seen_at FROM ego_users WHERE id=?", "i", (int)$me["id"])["notifications_seen_at"] ?? null;
+        $pref = user_notify_prefs($db, (int)$me["id"]); // per-user category toggles
         $items = [];
 
         // Recent inbound messages → emails, client portal messages, reviews
@@ -1402,23 +1416,27 @@ switch ("$method $route") {
         foreach ($msgs as $m) {
             $who = $m["from_name"] ?: ($m["customer_name"] ?: ($m["from_email"] ?: "Customer"));
             if ($m["channel"] === "review") {
+                if (!$pref["reviews"]) continue;
                 $items[] = ["type" => "review", "tone" => "warning", "created_at" => $m["created_at"],
                     "title" => "New review" . ($m["rating"] ? " · {$m['rating']}★" : ""), "description" => $who, "to" => "/ego/reviews"];
             } elseif ($m["channel"] === "enquiry") {
+                if (!$pref["enquiries"]) continue;
                 $items[] = ["type" => "message", "tone" => "success", "created_at" => $m["created_at"],
                     "title" => "New website enquiry", "description" => $who . ": " . substr((string)$m["body"], 0, 48), "to" => "/apps/email"];
             } elseif ($m["channel"] === "portal") {
+                if (!$pref["portal"]) continue;
                 $items[] = ["type" => "message", "tone" => "info", "created_at" => $m["created_at"],
                     "title" => "Client message", "description" => $who . ": " . substr((string)$m["body"], 0, 48),
                     "to" => $m["job_id"] ? "/ego/jobs/detail?id=" . (int)$m["job_id"] : "/apps/email"];
             } else {
+                if (!$pref["emails"]) continue;
                 $items[] = ["type" => "email", "tone" => "info", "created_at" => $m["created_at"],
                     "title" => "New email", "description" => $who . ": " . ($m["subject"] ?: "(no subject)"), "to" => "/apps/email"];
             }
         }
 
         // Recently completed jobs (ready to invoice)
-        foreach (db_all($db,
+        if ($pref["completed"]) foreach (db_all($db,
             "SELECT j.id,j.reference,j.completed_at, c.name AS customer_name
              FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id
              WHERE j.deleted_at IS NULL AND j.completed_at IS NOT NULL
@@ -1444,6 +1462,21 @@ switch ("$method $route") {
         $me = require_role($db, "admin");
         db_exec($db, "UPDATE ego_users SET notifications_seen_at=NOW() WHERE id=?", "i", (int)$me["id"]);
         send(["ok" => true]);
+    }
+
+    /* ===================== Personal: notification preferences ===================== */
+    case "GET /me/notify-prefs": {
+        $me = require_user($db);
+        send(["prefs" => user_notify_prefs($db, (int)$me["id"])]);
+    }
+    case "POST /me/notify-prefs": {
+        $me = require_user($db);
+        ensure_notify_prefs($db);
+        $b = body();
+        $prefs = [];
+        foreach (array_keys(notify_defaults()) as $k) $prefs[$k] = !empty($b[$k]) ? 1 : 0;
+        db_exec($db, "UPDATE ego_users SET notify_prefs=? WHERE id=?", "si", json_encode($prefs), (int)$me["id"]);
+        send(["ok" => true, "prefs" => $prefs]);
     }
 
     /* ===================== WORKSPACE: ACTIVITY LOG (audit trail) ===================== */
@@ -1535,13 +1568,13 @@ switch ("$method $route") {
 
     /* ===================== M8: SETTINGS (admin) ===================== */
     case "GET /settings": {
-        require_role($db, "admin");
+        require_min($db, "manager"); // company config visible to managers (read-only) + founder
         $s = db_one($db, "SELECT * FROM ego_company_settings ORDER BY id LIMIT 1");
         send(["settings" => $s]);
     }
 
     case "POST /settings": {
-        require_min($db, "manager"); // company config: manager + founder only
+        require_min($db, "founder"); // ONLY the founder may change company / bank / tax / numbering
         $b = body();
         $s = db_one($db, "SELECT id FROM ego_company_settings ORDER BY id LIMIT 1");
         if (!$s) fail("Settings missing", 500);

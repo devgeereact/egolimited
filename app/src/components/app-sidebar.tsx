@@ -108,12 +108,13 @@ const NAV: EgoSection[] = [
     label: "Admin",
     items: [
       { title: "Activity", url: "ego/activity", icon: GanttChartSquare },
-      { title: "Settings", url: "ego/settings", icon: Settings2, min: "manager" },
+      { title: "Settings", url: "ego/settings", icon: Settings2, min: "office" },
       { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
     ],
   },
   {
     label: "Surfaces",
+    min: "founder", // backstage preview of the engineer/portal surfaces — owner only
     items: [
       {
         title: "Engineer App",

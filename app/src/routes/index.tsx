@@ -167,6 +167,7 @@ export const router = createBrowserRouter (
             {path: "ego/inbox", element: <EgoInbox /> },
             {path: "ego/tasks", element: <TaskBoard /> },
             {path: "ego/account/profile", element: <UserProfile /> },
+            {path: "ego/settings", element: <SettingsPage /> },
             {path: "ego/activity", element: <EgoActivity /> },
             {path: "ego/reviews", element: <EgoReviews /> },
           ],
@@ -175,7 +176,6 @@ export const router = createBrowserRouter (
         {
           element: <RequireRole role="manager" />,
           children: [
-            {path: "ego/settings", element: <SettingsPage /> },
             {path: "ego/team", element: <TeamPage /> },
             {path: "ego/announcements", element: <AnnouncementsList /> },
             {path: "ego/announcements/new", element: <AnnouncementForm /> },
