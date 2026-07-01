@@ -500,6 +500,19 @@ switch ("$method $route") {
         send(["ok" => true, "available" => $on]);
     }
 
+    // Everyone edits their OWN name + phone (role is never self-editable here).
+    case "POST /me/profile": {
+        $me = require_user($db);
+        $b = body();
+        $set = []; $types = ""; $args = [];
+        if (array_key_exists("name", $b)) { $n = trim((string)$b["name"]); if ($n === "") fail("Name can't be empty"); $set[] = "name=?"; $types .= "s"; $args[] = $n; }
+        if (array_key_exists("phone", $b)) { $set[] = "phone=?"; $types .= "s"; $args[] = trim((string)$b["phone"]) ?: null; }
+        if (!$set) send(["ok" => true]);
+        $types .= "i"; $args[] = (int)$me["id"];
+        db_exec($db, "UPDATE ego_users SET " . implode(",", $set) . " WHERE id=?", $types, ...$args);
+        send(["ok" => true]);
+    }
+
     case "POST /auth/logout": {
         $tok = bearer();
         if ($tok) db_exec($db, "DELETE FROM ego_sessions WHERE token = ?", "s", $tok);
@@ -2177,6 +2190,17 @@ switch ("$method $route") {
                 "INSERT INTO ego_messages (customer_id,job_id,direction,channel,from_name,subject,body,rating,status)
                  VALUES (?,?, 'inbound','review', ?,?,?,?, 'received')",
                 "iisssi", (int)$job["customer_id"], $jobId, $name, "Customer review", $bodyTxt, $rating);
+            // Notify the office of a new review at the alerts email (falls back to company email).
+            $cs = db_one($db, "SELECT company_name,email,notify_email FROM ego_company_settings ORDER BY id LIMIT 1");
+            $to = trim($cs["notify_email"] ?? "") ?: trim($cs["email"] ?? "");
+            if (filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                require_once __DIR__ . "/lib/mailer.php";
+                $stars = str_repeat("★", $rating) . str_repeat("☆", 5 - $rating);
+                $inner = "<p style='margin:0 0 6px'><strong>New review</strong> from " . htmlspecialchars($name ?: "a customer") . "</p>"
+                    . "<p style='font-size:20px;color:#EF9F27;margin:0 0 10px;letter-spacing:2px'>$stars</p>"
+                    . ($bodyTxt !== "" ? "<p style='margin:0'>" . nl2br(htmlspecialchars($bodyTxt)) . "</p>" : "<p style='margin:0;color:#6b7280'>(no comment left)</p>");
+                try { ego_send_mail($db, $to, $cs["company_name"] ?? null, "New customer review · {$rating}★", ego_email_shell($db, "New review", $inner)); } catch (Throwable $e) { /* best-effort */ }
+            }
         }
         log_activity($db, $jobId, null, "review", ["rating" => $rating]);
         send(["ok" => true], 201);

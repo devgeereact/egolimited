@@ -1,4 +1,4 @@
-import { createBrowserRouter } from "react-router-dom"
+import { createBrowserRouter, Navigate } from "react-router-dom"
 
 import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
@@ -19,7 +19,6 @@ import CoverRegisterPage from "@/auth/cover/CoverRegisterPage"
 import CoverResetPasswordPage from "@/auth/cover/CoverResetPasswordPage"
 import CoverVerifyEmailPage from "@/auth/cover/CoverVerifyEmailPage"
 import CoverPasswordResetSuccessPage from "@/auth/cover/CoverPasswordResetSuccessPage"
-import UserProfile from "@/pages/account/UserProfile"
 
 // 🏗️ EGO LIMITED — auth + guards
 import RequireRole from "@/components/ego/RequireRole"
@@ -166,7 +165,7 @@ export const router = createBrowserRouter (
             {path: "ego/contacts", element: <EgoContacts /> },
             {path: "ego/inbox", element: <EgoInbox /> },
             {path: "ego/tasks", element: <TaskBoard /> },
-            {path: "ego/account/profile", element: <UserProfile /> },
+            {path: "ego/account/profile", element: <Navigate to="/ego/settings" replace /> },
             {path: "ego/settings", element: <SettingsPage /> },
             {path: "ego/activity", element: <EgoActivity /> },
             {path: "ego/reviews", element: <EgoReviews /> },

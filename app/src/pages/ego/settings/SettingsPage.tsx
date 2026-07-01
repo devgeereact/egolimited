@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { Settings2, Loader2, Users, Bell, Palette, UserRound, Lock, Building2, ShieldCheck } from "lucide-react"
+import {
+  Loader2, Users, Bell, Palette, UserRound, Building2, ShieldCheck, Mail, Phone,
+  MapPin, Receipt, Landmark, Pencil, Lock, Hash,
+} from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { useAuth } from "@/store/auth.store"
-import { atLeast } from "@/lib/roles"
+import { ROLE_LABEL, atLeast, type Role } from "@/lib/roles"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import ThemePicker from "@/components/ego/ThemePicker"
+import AccountSecurity from "@/pages/ego/account/AccountSecurity"
+import ActivityPage from "@/pages/ego/workspace/ActivityPage"
 
 type Settings = Record<string, string | number | null>
 
@@ -21,7 +26,7 @@ const FIELDS: { key: string; label: string; group: string; type?: string }[] = [
   { key: "address", label: "Address", group: "Company" },
   { key: "phone", label: "Phone", group: "Company" },
   { key: "email", label: "Email", group: "Company" },
-  { key: "notify_email", label: "Alerts email (job-complete notices)", group: "Company" },
+  { key: "notify_email", label: "Alerts email (enquiries, reviews, job-complete)", group: "Company" },
   { key: "vat_number", label: "VAT number (shown on website)", group: "Tax" },
   { key: "companies_house_no", label: "Companies House number (shown on website)", group: "Tax" },
   { key: "default_vat_rate", label: "Default VAT rate (%)", group: "Tax", type: "number" },
@@ -33,9 +38,9 @@ const FIELDS: { key: string; label: string; group: string; type?: string }[] = [
   { key: "quote_prefix", label: "Quote prefix", group: "Numbering" },
   { key: "payment_terms_days", label: "Payment terms (days)", group: "Numbering", type: "number" },
 ]
-const GROUPS = ["Company", "Tax", "Bank", "Numbering"]
+const GROUPS = ["Company", "Tax", "Bank", "Numbering"] as const
+const GROUP_ICON: Record<string, typeof Building2> = { Company: Building2, Tax: Receipt, Bank: Landmark, Numbering: Hash }
 
-// Notification-bell categories the user can toggle.
 const NOTIFY: { key: string; label: string; hint: string }[] = [
   { key: "emails", label: "New emails", hint: "When a new email lands in the shared inbox." },
   { key: "enquiries", label: "Website enquiries", hint: "New leads from the marketing site." },
@@ -44,38 +49,53 @@ const NOTIFY: { key: string; label: string; hint: string }[] = [
   { key: "completed", label: "Jobs completed", hint: "When an engineer marks a job done — ready to invoice." },
 ]
 
-export default function SettingsPage() {
-  const user = useAuth((s) => s.user)
-  const isFounder = user?.role === "founder"
-  const canSeeCompany = atLeast(user?.role, "manager") // managers view, founder edits
+const initials = (s: string) => (s || "?").split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()
 
-  // Company settings (only loaded for manager+).
+export default function SettingsPage() {
+  const { user, loadMe } = useAuth()
+  const role = (user?.role ?? null) as Role | null
+  const isFounder = role === "founder"
+  const canSeeCompany = atLeast(role, "manager") // managers view, founder edits
+
+  // Identity / account
+  const [me, setMe] = useState<{ name: string; email: string; phone: string | null }>({ name: user?.name ?? "", email: user?.email ?? "", phone: null })
+  const [editAcct, setEditAcct] = useState(false)
+  const [acct, setAcct] = useState({ name: "", phone: "" })
+  const [savingAcct, setSavingAcct] = useState(false)
+
+  // Company (manager+)
   const [s, setS] = useState<Settings>({})
   const [saved, setSaved] = useState<Settings>({})
   const [loadingCo, setLoadingCo] = useState(canSeeCompany)
   const [savingGroup, setSavingGroup] = useState<string | null>(null)
 
-  // Notification preferences (everyone).
+  // Notifications (everyone)
   const [prefs, setPrefs] = useState<Record<string, number>>({})
   const [savingPrefs, setSavingPrefs] = useState(false)
 
   useEffect(() => {
+    api<{ user: { name: string; email: string; phone: string | null } }>("/auth/me")
+      .then((r) => { setMe(r.user); setAcct({ name: r.user.name ?? "", phone: r.user.phone ?? "" }) }).catch(() => {})
     api<{ prefs: Record<string, number> }>("/me/notify-prefs").then((r) => setPrefs(r.prefs)).catch(() => {})
     if (canSeeCompany) {
-      api<{ settings: Settings }>("/settings")
-        .then((r) => { setS(r.settings); setSaved(r.settings) })
-        .catch(() => {})
-        .finally(() => setLoadingCo(false))
+      api<{ settings: Settings }>("/settings").then((r) => { setS(r.settings); setSaved(r.settings) }).catch(() => {}).finally(() => setLoadingCo(false))
     }
   }, [canSeeCompany])
 
+  async function saveAcct() {
+    setSavingAcct(true)
+    try {
+      await api("/me/profile", { method: "POST", body: { name: acct.name, phone: acct.phone } })
+      setMe((m) => ({ ...m, name: acct.name, phone: acct.phone }))
+      setEditAcct(false); await loadMe(); toast.success("Profile updated")
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save") } finally { setSavingAcct(false) }
+  }
+
   async function togglePref(key: string, on: boolean) {
-    const next = { ...prefs, [key]: on ? 1 : 0 }
-    const prev = prefs
+    const next = { ...prefs, [key]: on ? 1 : 0 }; const prev = prefs
     setPrefs(next); setSavingPrefs(true)
     try { await api("/me/notify-prefs", { method: "POST", body: next }) }
-    catch { toast.error("Couldn't save that"); setPrefs(prev) }
-    finally { setSavingPrefs(false) }
+    catch { toast.error("Couldn't save that"); setPrefs(prev) } finally { setSavingPrefs(false) }
   }
 
   function groupDirty(g: string) {
@@ -87,38 +107,80 @@ export default function SettingsPage() {
     const body = Object.fromEntries(keys.map((k) => [k, s[k] ?? ""]))
     try {
       await api("/settings", { method: "POST", body })
-      setSaved((p) => ({ ...p, ...body }))
-      toast.success(`${g} saved`)
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") }
-    finally { setSavingGroup(null) }
+      setSaved((p) => ({ ...p, ...body })); toast.success(`${g} saved`)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") } finally { setSavingGroup(null) }
   }
 
-  return (
-    <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
-      <div className="flex items-center gap-3">
-        <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><Settings2 className="size-5" /></div>
-        <div>
-          <h1 className="text-2xl font-semibold leading-none tracking-tight">Settings</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Your personal preferences and account.</p>
-        </div>
-      </div>
+  const InfoRow = ({ icon: Icon, label, value }: { icon: typeof Mail; label: string; value?: string | null }) => (
+    <div className="flex items-start gap-3 text-sm">
+      <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+      <span><span className="font-medium">{label}:</span> {value || <span className="text-muted-foreground">—</span>}</span>
+    </div>
+  )
 
-      {/* ---------- PERSONAL (everyone) ---------- */}
+  return (
+    <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 md:p-6">
+      {/* ---------- Profile header ---------- */}
+      <Card className="overflow-hidden">
+        <div className="h-28 bg-gradient-to-r from-primary via-primary to-primary/70" />
+        <CardContent className="pt-0">
+          <div className="-mt-10 flex flex-wrap items-end gap-4">
+            <div className="flex size-20 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground ring-4 ring-background">
+              {initials(me.name)}
+            </div>
+            <div className="pb-1">
+              <h1 className="text-2xl font-semibold leading-tight tracking-tight">{me.name || "Your account"}</h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                  <ShieldCheck className="size-3" /> {role ? ROLE_LABEL[role] : ""}
+                </span>
+                {canSeeCompany && s.company_name && <span className="inline-flex items-center gap-1"><Building2 className="size-3.5" /> {String(s.company_name)}</span>}
+                <span className="inline-flex items-center gap-1"><Mail className="size-3.5" /> {me.email}</span>
+              </div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ---------- My account (editable) + Appearance ---------- */}
       <div className="grid gap-6 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="flex-row items-center justify-between space-y-0">
+            <CardTitle className="flex items-center gap-2 text-base"><UserRound className="size-4 text-muted-foreground" /> My account</CardTitle>
+            {!editAcct ? (
+              <Button variant="ghost" size="sm" onClick={() => setEditAcct(true)}><Pencil className="size-3.5" /> Edit</Button>
+            ) : (
+              <div className="flex gap-1">
+                <Button size="sm" onClick={saveAcct} disabled={savingAcct || !acct.name.trim()}>{savingAcct && <Loader2 className="animate-spin" />} Save</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setEditAcct(false); setAcct({ name: me.name, phone: me.phone ?? "" }) }}>Cancel</Button>
+              </div>
+            )}
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {editAcct ? (
+              <>
+                <div className="space-y-1.5"><Label htmlFor="acct-name">Name</Label><Input id="acct-name" value={acct.name} onChange={(e) => setAcct((a) => ({ ...a, name: e.target.value }))} /></div>
+                <div className="space-y-1.5"><Label htmlFor="acct-phone">Phone</Label><Input id="acct-phone" value={acct.phone} onChange={(e) => setAcct((a) => ({ ...a, phone: e.target.value }))} placeholder="+44 …" /></div>
+                <p className="text-xs text-muted-foreground">Your email and role are set by an administrator.</p>
+              </>
+            ) : (
+              <>
+                <InfoRow icon={UserRound} label="Name" value={me.name} />
+                <InfoRow icon={Mail} label="Email" value={me.email} />
+                <InfoRow icon={Phone} label="Phone" value={me.phone} />
+                <InfoRow icon={ShieldCheck} label="Role" value={role ? ROLE_LABEL[role] : ""} />
+              </>
+            )}
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Palette className="size-4 text-muted-foreground" /> Appearance</CardTitle></CardHeader>
           <CardContent><ThemePicker /></CardContent>
         </Card>
-
-        <Card>
-          <CardHeader><CardTitle className="flex items-center gap-2 text-base"><UserRound className="size-4 text-muted-foreground" /> Your account</CardTitle></CardHeader>
-          <CardContent className="space-y-2">
-            <Button asChild variant="outline" className="w-full justify-start"><Link to="/ego/account/profile"><UserRound className="size-4" /> Profile</Link></Button>
-            <Button asChild variant="outline" className="w-full justify-start"><Link to="/ego/account/security"><Lock className="size-4" /> Password &amp; two-factor</Link></Button>
-          </CardContent>
-        </Card>
       </div>
 
+      {/* ---------- Notifications ---------- */}
       <Card>
         <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Bell className="size-4 text-muted-foreground" /> Notifications</CardTitle></CardHeader>
         <CardContent className="space-y-1">
@@ -135,13 +197,22 @@ export default function SettingsPage() {
         </CardContent>
       </Card>
 
-      {/* ---------- COMPANY (manager+ view · founder edit) ---------- */}
+      {/* ---------- Security: password + 2FA ---------- */}
+      <div>
+        <div className="mb-3 flex items-center gap-2">
+          <Lock className="size-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold tracking-tight">Security</h2>
+        </div>
+        <AccountSecurity />
+      </div>
+
+      {/* ---------- Company (manager+ view · founder edit) ---------- */}
       {canSeeCompany && (
-        <>
+        <div className="space-y-4">
           <div className="flex items-center gap-2 pt-2">
             <Building2 className="size-5 text-muted-foreground" />
             <h2 className="text-lg font-semibold tracking-tight">Company</h2>
-            {isFounder ? null : (
+            {!isFounder && (
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
                 <ShieldCheck className="size-3" /> View only · the founder edits these
               </span>
@@ -152,30 +223,33 @@ export default function SettingsPage() {
             <div className="flex min-h-[20vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
           ) : (
             <div className="grid gap-6 lg:grid-cols-2">
-              {GROUPS.map((g) => (
-                <Card key={g}>
-                  <CardHeader><CardTitle>{g}</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    {FIELDS.filter((f) => f.group === g).map((f) => (
-                      <div key={f.key} className="space-y-1.5">
-                        <Label htmlFor={f.key}>{f.label}</Label>
-                        <Input
-                          id={f.key} type={f.type ?? "text"} value={(s[f.key] ?? "") as string | number}
-                          readOnly={!isFounder} disabled={!isFounder}
-                          onChange={(e) => setS((p) => ({ ...p, [f.key]: e.target.value }))}
-                        />
-                      </div>
-                    ))}
-                    {isFounder && (
-                      <div className="flex justify-end pt-1">
-                        <Button size="sm" onClick={() => saveGroup(g)} disabled={!groupDirty(g) || savingGroup === g}>
-                          {savingGroup === g && <Loader2 className="animate-spin" />} {groupDirty(g) ? `Save ${g}` : "Saved"}
-                        </Button>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
+              {GROUPS.map((g) => {
+                const Icon = GROUP_ICON[g]
+                return (
+                  <Card key={g}>
+                    <CardHeader><CardTitle className="flex items-center gap-2 text-base"><Icon className="size-4 text-muted-foreground" /> {g}</CardTitle></CardHeader>
+                    <CardContent className="space-y-4">
+                      {FIELDS.filter((f) => f.group === g).map((f) => (
+                        <div key={f.key} className="space-y-1.5">
+                          <Label htmlFor={f.key}>{f.label}</Label>
+                          <Input
+                            id={f.key} type={f.type ?? "text"} value={(s[f.key] ?? "") as string | number}
+                            readOnly={!isFounder} disabled={!isFounder}
+                            onChange={(e) => setS((p) => ({ ...p, [f.key]: e.target.value }))}
+                          />
+                        </div>
+                      ))}
+                      {isFounder && (
+                        <div className="flex justify-end pt-1">
+                          <Button size="sm" onClick={() => saveGroup(g)} disabled={!groupDirty(g) || savingGroup === g}>
+                            {savingGroup === g && <Loader2 className="animate-spin" />} {groupDirty(g) ? `Save ${g}` : "Saved"}
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              })}
             </div>
           )}
 
@@ -191,8 +265,13 @@ export default function SettingsPage() {
               <Button asChild variant="outline"><Link to="/ego/team">Manage team</Link></Button>
             </CardContent>
           </Card>
-        </>
+        </div>
       )}
+
+      {/* ---------- Activity (with filter) ---------- */}
+      <div className="pt-2">
+        <ActivityPage embedded />
+      </div>
     </div>
   )
 }

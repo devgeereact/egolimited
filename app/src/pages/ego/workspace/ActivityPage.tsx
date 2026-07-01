@@ -57,7 +57,7 @@ function describe(action: string, detail: string | null): string {
   }
 }
 
-export default function ActivityPage() {
+export default function ActivityPage({ embedded = false }: { embedded?: boolean } = {}) {
   const [data, setData] = useState<Resp | null>(null)
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -84,21 +84,31 @@ export default function ActivityPage() {
   const pages = data?.pages ?? 1
 
   return (
-    <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-            <Activity className="size-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-semibold leading-none tracking-tight">Activity log</h1>
-            <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
-              {isFounder ? "Full company audit trail — who did what." : (<><Lock className="size-3.5" /> Your activity only.</>)}
-              {data ? ` · ${data.total} entries` : ""}
-            </p>
+    <div className={embedded ? "flex flex-col gap-5" : "flex flex-1 flex-col gap-6 p-4 md:p-6"}>
+      {embedded ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Activity className="size-5 text-muted-foreground" />
+          <h2 className="text-lg font-semibold tracking-tight">Activity</h2>
+          <span className="flex items-center gap-1 text-sm text-muted-foreground">
+            {isFounder ? "· full audit trail" : (<>· <Lock className="size-3.5" /> your activity</>)}{data ? ` · ${data.total}` : ""}
+          </span>
+        </div>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Activity className="size-5" />
+            </div>
+            <div>
+              <h1 className="text-2xl font-semibold leading-none tracking-tight">Activity log</h1>
+              <p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground">
+                {isFounder ? "Full company audit trail — who did what." : (<><Lock className="size-3.5" /> Your activity only.</>)}
+                {data ? ` · ${data.total} entries` : ""}
+              </p>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-3">
