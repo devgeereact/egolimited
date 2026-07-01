@@ -106,6 +106,19 @@ function client_error(Throwable $e, string $fallback = "Something went wrong", i
     fail($e->getMessage(), $code);
 }
 
+/* ---------- private job-photo storage (GDPR: auth-gated, signed URLs) ---------- */
+// Job photos (customer property, possibly inside homes) live OUTSIDE the web root and
+// are served ONLY via short-lived signed URLs — no permanent public capability. Signed
+// URLs work with <img> (no auth header needed) and are only issued by the authed job
+// views. Marketing/campaign images stay public under /uploads (they're meant to be).
+function job_photo_dir(): string { return __DIR__ . "/../../ego_private/job_photos"; }
+function photo_secret(): string { global $cfg; return hash("sha256", ($cfg["db_pass"] ?? "ego") . "|ego-photo-v1"); }
+function photo_url(int $photoId, int $ttl = 86400): string {
+    $exp = time() + $ttl;
+    $sig = substr(hash_hmac("sha256", "$photoId.$exp", photo_secret()), 0, 32);
+    return "/api/jobs/photo-file?id=$photoId&exp=$exp&sig=$sig";
+}
+
 /* ---------- auth helpers ---------- */
 function current_user(mysqli $db): ?array {
     $tok = bearer();
@@ -991,7 +1004,8 @@ switch ("$method $route") {
         $c = db_one($db, "SELECT name,phone,email FROM ego_customers WHERE id=?", "i", (int)$job["customer_id"]);
         $addr = $job["address_id"] ? db_one($db, "SELECT line1,line2,city,postcode FROM ego_addresses WHERE id=?", "i", (int)$job["address_id"]) : null;
         $photos = db_all($db, "SELECT id,url,caption,created_at FROM ego_job_photos WHERE job_id=? ORDER BY id DESC", "i", (int)$job["id"]);
-        foreach ($photos as &$ph) { $ph["id"] = (int)$ph["id"]; }
+        foreach ($photos as &$ph) { $ph["id"] = (int)$ph["id"]; $ph["url"] = photo_url((int)$ph["id"]); }
+        unset($ph);
         $notes = db_all($db, "SELECT n.body,n.created_at,u.name AS author FROM ego_job_notes n LEFT JOIN ego_users u ON u.id=n.author_id WHERE n.job_id=? ORDER BY n.id DESC", "i", (int)$job["id"]);
         $checklist = db_all($db, "SELECT id,label,done FROM ego_job_checklist WHERE job_id=? ORDER BY sort,id", "i", (int)$job["id"]);
         foreach ($checklist as &$ck) { $ck["id"] = (int)$ck["id"]; $ck["done"] = (int)$ck["done"]; }
@@ -1099,15 +1113,40 @@ switch ("$method $route") {
         $ext = $m[1] === "jpeg" ? "jpg" : $m[1];
         $bin = base64_decode($m[2], true);
         if ($bin === false || strlen($bin) > 6_000_000) fail("Image too large or invalid");
-        $dir = __DIR__ . "/uploads";
-        if (!is_dir($dir)) mkdir($dir, 0755, true);
-        $fname = "job{$job['id']}_" . bin2hex(random_bytes(6)) . ".$ext";
+        // Store OUTSIDE the web root; the file is only reachable via a signed URL (below).
+        $dir = job_photo_dir();
+        if (!is_dir($dir)) mkdir($dir, 0700, true);
+        $fname = "job{$job['id']}_" . bin2hex(random_bytes(8)) . ".$ext";
         file_put_contents("$dir/$fname", $bin);
-        $url = "/api/uploads/$fname";
         $caption = trim($b["caption"] ?? "") ?: null;
-        db_exec($db, "INSERT INTO ego_job_photos (job_id,url,caption,uploaded_by) VALUES (?,?,?,?)", "issi", (int)$job["id"], $url, $caption, (int)$me["id"]);
-        log_activity($db, (int)$job["id"], (int)$me["id"], "photo", ["url" => $url]);
-        send(["ok" => true, "url" => $url], 201);
+        db_exec($db, "INSERT INTO ego_job_photos (job_id,url,caption,uploaded_by) VALUES (?,?,?,?)", "issi", (int)$job["id"], $fname, $caption, (int)$me["id"]);
+        $pid = (int)$db->insert_id;
+        log_activity($db, (int)$job["id"], (int)$me["id"], "photo", ["file" => $fname]);
+        send(["ok" => true, "id" => $pid, "url" => photo_url($pid)], 201);
+    }
+
+    case "GET /jobs/photo-file": {
+        // Serve a private job photo by signed URL. No session header required (so it works
+        // in <img>), but the signature is only ever minted by the authenticated job views,
+        // and it expires. Files live outside the web root; basename() blocks path traversal.
+        $id = (int)($_GET["id"] ?? 0);
+        $exp = (int)($_GET["exp"] ?? 0);
+        $sig = (string)($_GET["sig"] ?? "");
+        if ($id <= 0 || $exp < time()) fail("This image link has expired", 403);
+        $expect = substr(hash_hmac("sha256", "$id.$exp", photo_secret()), 0, 32);
+        if (!hash_equals($expect, $sig)) fail("Forbidden", 403);
+        $row = db_one($db, "SELECT url FROM ego_job_photos WHERE id=?", "i", $id);
+        if (!$row) fail("Not found", 404);
+        $file = job_photo_dir() . "/" . basename((string)$row["url"]);
+        if (!is_file($file)) fail("Not found", 404);
+        $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+        $mime = ["jpg" => "image/jpeg", "jpeg" => "image/jpeg", "png" => "image/png", "webp" => "image/webp"][$ext] ?? "application/octet-stream";
+        header("Content-Type: $mime");           // replaces the JSON content-type
+        header("Cache-Control: private, max-age=3600");
+        header("Content-Disposition: inline");
+        header("Content-Length: " . (string) filesize($file));
+        readfile($file);
+        exit;
     }
 
     /* ===================== M6/M7: QUOTES + INVOICES (admin) ===================== */
@@ -1865,6 +1904,7 @@ switch ("$method $route") {
         $actor = require_role($db, "admin");
         $id = (int)(body()["id"] ?? 0);
         if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_messages WHERE id=?", "i", $id)) fail("Message not found", 404);
         db_exec($db, "UPDATE ego_messages SET acknowledged=1 WHERE id=?", "i", $id);
         send(["ok" => true]);
     }
@@ -1878,8 +1918,10 @@ switch ("$method $route") {
         $id = (int)($b["id"] ?? 0);
         $bodyTxt = trim($b["body"] ?? "");
         if (!$id || $bodyTxt === "") fail("id and body required");
-        $orig = db_one($db, "SELECT id,job_id,customer_id FROM ego_messages WHERE id=?", "i", $id);
+        $orig = db_one($db, "SELECT id,job_id,customer_id,direction,channel FROM ego_messages WHERE id=?", "i", $id);
         if (!$orig) fail("Message not found", 404);
+        // Only reply to an actual incoming message (not an outbound row, a review, or a note).
+        if ($orig["direction"] !== "inbound" || in_array((string)$orig["channel"], ["review", "note"], true)) fail("You can only reply to an incoming message", 409);
         db_exec($db,
             "INSERT INTO ego_messages (customer_id,job_id,direction,channel,from_name,subject,body,status)
              VALUES (?,?, 'outbound','portal', 'Office', 'Reply', ?, 'sent')",
@@ -1902,6 +1944,7 @@ switch ("$method $route") {
         $id = (int)($b["id"] ?? 0);
         $vis = !empty($b["visible"]) ? 1 : 0;
         if (!$id) fail("id required");
+        if (!db_one($db, "SELECT id FROM ego_messages WHERE id=?", "i", $id)) fail("Message not found", 404);
         db_exec($db, "UPDATE ego_messages SET visible_to_engineer=? WHERE id=?", "ii", $vis, $id);
         send(["ok" => true, "visible" => $vis]);
     }
@@ -3143,6 +3186,9 @@ switch ("$method $route") {
         ensure_message_cols($db);
         $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
         $on = (int)!!($b["archived"] ?? 1);
+        // Mailbox action only — must exist and never be a private portal thread.
+        $m = db_one($db, "SELECT channel FROM ego_messages WHERE id=?", "i", $id);
+        if (!$m || $m["channel"] === "portal") fail("Message not found", 404);
         db_exec($db, "UPDATE ego_messages SET archived=? WHERE id=?", "ii", $on, $id);
         send(["ok" => true]);
     }
@@ -3151,6 +3197,8 @@ switch ("$method $route") {
         ensure_message_cols($db);
         $b = body(); $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
         $on = (int)!!($b["flagged"] ?? 1);
+        $m = db_one($db, "SELECT channel FROM ego_messages WHERE id=?", "i", $id);
+        if (!$m || $m["channel"] === "portal") fail("Message not found", 404);
         db_exec($db, "UPDATE ego_messages SET flagged=? WHERE id=?", "ii", $on, $id);
         send(["ok" => true]);
     }
