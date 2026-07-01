@@ -568,9 +568,11 @@ switch ("$method $route") {
     // Roles a given actor is allowed to assign (never above their own rank; founder is exclusive).
     case "GET /team": {
         $me = require_min($db, "manager");
+        // The founder account is invisible to everyone below founder — only founders see founders.
+        $hideFounders = $me["role"] !== "founder" ? " AND role <> 'founder'" : "";
         $rows = db_all($db,
             "SELECT id,name,email,phone,role,active,available,(password_hash IS NULL) AS pending,created_at
-             FROM ego_users WHERE deleted_at IS NULL ORDER BY FIELD(role,'founder','manager','office','engineer'), name");
+             FROM ego_users WHERE deleted_at IS NULL" . $hideFounders . " ORDER BY FIELD(role,'founder','manager','office','engineer'), name");
         foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["active"] = (int)$r["active"]; $r["available"] = (int)$r["available"]; $r["pending"] = (int)$r["pending"]; }
         // Roles this actor may grant: strictly below their own rank. A founder may also
         // create another founder (succession / credential rotation before go-live).
