@@ -44,7 +44,20 @@ export default function TrackJob() {
     return api<Track>(`/track?token=${encodeURIComponent(token)}`, { auth: false }).then(setT)
   }
   useEffect(() => {
-    load()
+    let seeded = false
+    api<Track>(`/track?token=${encodeURIComponent(token)}`, { auth: false })
+      .then((data) => {
+        setT(data)
+        // Seed the review fields once from any existing review so clicking a star
+        // (which sets `rating`) never wipes the already-typed body.
+        if (!seeded) {
+          seeded = true
+          if (data.review) {
+            setRating(data.review.rating)
+            setReviewBody(data.review.body ?? "")
+          }
+        }
+      })
       .catch((e) => setError(e instanceof Error ? e.message : "This link has expired — contact the office."))
       .finally(() => setLoading(false))
   }, [token])
@@ -215,7 +228,7 @@ export default function TrackJob() {
                 )
               })}
             </div>
-            <Textarea rows={3} value={reviewBody || (rating ? "" : t.review?.body ?? "")} onChange={(e) => setReviewBody(e.target.value)} placeholder="Tell us about the work (optional)…" />
+            <Textarea rows={3} value={reviewBody} onChange={(e) => setReviewBody(e.target.value)} placeholder="Tell us about the work (optional)…" />
             <Button className="mt-2 w-full" onClick={submitReview} disabled={savingReview || !(rating || t.review?.rating)}>
               {savingReview ? <Loader2 className="animate-spin" /> : <Star className="size-4" />} {t.review ? "Update review" : "Submit review"}
             </Button>

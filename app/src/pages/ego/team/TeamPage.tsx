@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/store/auth.store"
 import { ROLE_LABEL, type Role } from "@/lib/roles"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -29,6 +30,7 @@ const ROLE_TONE: Record<Role, string> = {
 }
 
 export default function TeamPage() {
+  const user = useAuth((s) => s.user)
   const [team, setTeam] = useState<Member[]>([])
   const [assignable, setAssignable] = useState<Role[]>([])
   const [myRole, setMyRole] = useState<Role | null>(null)
@@ -78,8 +80,14 @@ export default function TeamPage() {
   }
 
   // A member is manageable if their rank is strictly below mine (founder can't be edited by manager, etc.)
+  // Exception: a founder can manage everyone — including other founders — except themselves,
+  // so a real founder can remove the seed/demo founder once they've onboarded.
   const RANK: Record<Role, number> = { engineer: 1, office: 2, manager: 3, founder: 4 }
-  const canManage = (m: Member) => myRole != null && RANK[m.role] < RANK[myRole]
+  const canManage = (m: Member) => {
+    if (myRole == null) return false
+    if (myRole === "founder") return m.id !== user?.id
+    return RANK[m.role] < RANK[myRole]
+  }
 
   return (
     <div className="flex flex-1 flex-col gap-5 p-4 md:p-6">

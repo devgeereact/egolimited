@@ -45,7 +45,8 @@ foreach ($due as $p) {
             "sisssd", $ref, $cid, $p["title"], $p["description"], $p["priority"], $quote);
         $jid = (int)$db->insert_id;
         db_exec($db, "INSERT INTO ego_activity_log (job_id,action,detail) VALUES (?,?,?)", "iss", $jid, "created", json_encode(["reference" => $ref, "recurring" => true]));
-        db_exec($db, "UPDATE ego_recurring_plans SET next_due = DATE_ADD(next_due, INTERVAL ? " . strtoupper($p["interval_unit"]) . "), last_generated=NOW() WHERE id=?", "ii", (int)$p["interval_count"], (int)$p["id"]);
+        $unit = ["day" => "DAY", "week" => "WEEK", "month" => "MONTH"][$p["interval_unit"]] ?? "MONTH";
+        db_exec($db, "UPDATE ego_recurring_plans SET next_due = DATE_ADD(next_due, INTERVAL ? $unit), last_generated=NOW() WHERE id=?", "ii", (int)$p["interval_count"], (int)$p["id"]);
         $db->commit(); $made++;
     } catch (Throwable $e) { $db->rollback(); }
 }

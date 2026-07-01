@@ -57,6 +57,10 @@ export default function JobsList() {
   }, [all, tab, q])
 
   const pager = usePager(rows)
+  // Reset to page 1 whenever the filter/search changes so we never land on a
+  // now-empty page after narrowing the list.
+  useEffect(() => { pager.setPage(1) }, [tab, q])
+
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">

@@ -43,6 +43,15 @@ export async function api<T = unknown>(
 
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
+    // Session expired / no longer valid: clear the token and bounce to login so
+    // pages don't silently blank out. Guard against redirect loops on the login page.
+    if (res.status === 401) {
+      setToken(null)
+      const loginPath = `${import.meta.env.BASE_URL.replace(/\/$/, "")}/ego/login`
+      if (window.location.pathname !== loginPath) {
+        window.location.assign(loginPath)
+      }
+    }
     throw new ApiError(res.status, (data as { error?: string }).error || `Request failed (${res.status})`)
   }
   return data as T

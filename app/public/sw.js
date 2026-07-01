@@ -2,7 +2,15 @@
 const CACHE = "ego-shell-v1"
 
 self.addEventListener("install", () => self.skipWaiting())
-self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()))
+self.addEventListener("activate", (e) =>
+  e.waitUntil(
+    // Drop any stale caches from previous shell versions, then take control.
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  )
+)
 
 self.addEventListener("fetch", (e) => {
   const req = e.request

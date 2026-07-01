@@ -22,6 +22,11 @@ if (in_array($origin, $cfg["cors_origins"] ?? [], true)) {
 }
 if (($_SERVER["REQUEST_METHOD"] ?? "") === "OPTIONS") { http_response_code(204); exit; }
 header("Content-Type: application/json; charset=utf-8");
+// Baseline security headers (JSON API — no caching, no sniffing, no framing).
+header("X-Content-Type-Options: nosniff");
+header("Referrer-Policy: no-referrer");
+header("X-Frame-Options: DENY");
+header("Cache-Control: no-store");
 
 /* ---------- helpers ---------- */
 function send($data, int $code = 200): never { http_response_code($code); echo json_encode($data); exit; }
@@ -64,6 +69,41 @@ function db_exec(mysqli $db, string $sql, string $types = "", ...$args): mysqli_
     if ($types) $st->bind_param($types, ...$args);
     $st->execute();
     return $st;
+}
+
+/* ---------- abuse controls + safe errors ---------- */
+/** Best-effort client IP (behind Cloudflare in production). */
+function client_ip(): string {
+    return (string) ($_SERVER["HTTP_CF_CONNECTING_IP"] ?? $_SERVER["REMOTE_ADDR"] ?? "0.0.0.0");
+}
+/** Persistent sliding-window counter (lazy table). rate_check reads; rate_hit records
+ *  a strike. Record strikes on FAILURE only so normal use is never throttled. */
+function rate_ensure(mysqli $db): void {
+    static $done = false;
+    if ($done) return;
+    $db->query("CREATE TABLE IF NOT EXISTS ego_rate_hits (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        k VARCHAR(190) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_rl (k, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $done = true;
+}
+function rate_check(mysqli $db, string $key, int $max, int $windowSec): bool {
+    rate_ensure($db);
+    $n = (int) (db_one($db, "SELECT COUNT(*) c FROM ego_rate_hits WHERE k=? AND created_at > (NOW() - INTERVAL ? SECOND)", "si", $key, $windowSec)["c"] ?? 0);
+    return $n < $max;
+}
+function rate_hit(mysqli $db, string $key): void {
+    rate_ensure($db);
+    db_exec($db, "INSERT INTO ego_rate_hits (k) VALUES (?)", "s", $key);
+    if (random_int(1, 50) === 1) $db->query("DELETE FROM ego_rate_hits WHERE created_at < (NOW() - INTERVAL 1 DAY)");
+}
+/** Return a user-safe error. DB internals (mysqli_sql_exception) are logged, never echoed;
+ *  our own RuntimeExceptions carry deliberate, safe messages and pass through. */
+function client_error(Throwable $e, string $fallback = "Something went wrong", int $code = 400): never {
+    if ($e instanceof mysqli_sql_exception) { error_log("[ego-db] " . $e->getMessage()); fail($fallback, $code); }
+    fail($e->getMessage(), $code);
 }
 
 /* ---------- auth helpers ---------- */
@@ -353,6 +393,14 @@ $path = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH) ?? "/";
 $route = "/" . trim(substr($path, strlen($base)), "/");
 $method = $_SERVER["REQUEST_METHOD"];
 
+// Forced password change is enforced HERE (not just in the UI): a user flagged
+// must_change_password can only reach logout, their own identity, and the change route.
+$MCP_ALLOW = ["POST /auth/login", "POST /auth/logout", "GET /auth/me", "GET /health", "GET /", "POST /me/change-password"];
+if (!in_array("$method $route", $MCP_ALLOW, true)) {
+    $cu = current_user($db);
+    if ($cu && (int) ($cu["must_change_password"] ?? 0) === 1) fail("Password change required", 403);
+}
+
 switch ("$method $route") {
 
     case "GET /":
@@ -364,14 +412,24 @@ switch ("$method $route") {
         $email = trim(strtolower($b["email"] ?? ""));
         $pass = (string)($b["password"] ?? "");
         if (!$email || !$pass) fail("Email and password required");
+        // Brute-force guard: cap failed attempts per IP and per account (15-min window).
+        $ipKey = "login-ip:" . client_ip();
+        $emKey = "login-em:" . $email;
+        if (!rate_check($db, $ipKey, 30, 900) || !rate_check($db, $emKey, 10, 900)) fail("Too many attempts. Wait 15 minutes and try again.", 429);
         $u = db_one($db, "SELECT * FROM ego_users WHERE email = ? AND active = 1 AND deleted_at IS NULL", "s", $email);
-        if (!$u || !$u["password_hash"] || !password_verify($pass, $u["password_hash"])) fail("Invalid email or password", 401);
+        if (!$u || !$u["password_hash"] || !password_verify($pass, $u["password_hash"])) {
+            rate_hit($db, $ipKey); rate_hit($db, $emKey);
+            fail("Invalid email or password", 401);
+        }
         // 2FA gate (only for users who opted in — additive, never locks others out).
         if ((int)($u["totp_enabled"] ?? 0) === 1) {
             $code = trim((string)($b["totp_code"] ?? $b["code"] ?? ""));
             if ($code === "") send(["totp_required" => true]); // 200: client prompts for code, no token issued
+            // Cap 2FA guesses per account so the password-holder can't grind the ±1 code window.
+            $tKey = "totp:" . $u["id"];
+            if (!rate_check($db, $tKey, 6, 900)) fail("Too many 2FA attempts. Wait 15 minutes.", 429);
             require_once __DIR__ . "/lib/totp.php";
-            if (!totp_verify((string)($u["totp_secret"] ?? ""), $code)) fail("Invalid 2FA code", 401);
+            if (!totp_verify((string)($u["totp_secret"] ?? ""), $code)) { rate_hit($db, $tKey); fail("Invalid 2FA code", 401); }
         }
         $token = bin2hex(random_bytes(32));
         db_exec($db, "INSERT INTO ego_sessions (token,user_id,expires_at) VALUES (?,?, DATE_ADD(NOW(), INTERVAL 30 DAY))", "si", $token, $u["id"]);
@@ -457,8 +515,11 @@ switch ("$method $route") {
             "SELECT id,name,email,phone,role,active,available,(password_hash IS NULL) AS pending,created_at
              FROM ego_users WHERE deleted_at IS NULL ORDER BY FIELD(role,'founder','manager','office','engineer'), name");
         foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["active"] = (int)$r["active"]; $r["available"] = (int)$r["available"]; $r["pending"] = (int)$r["pending"]; }
-        // Roles this actor may grant: strictly below their own rank, plus 'engineer'/'office' baseline.
-        $assignable = array_values(array_filter(["manager","office","engineer"], fn($r) => role_rank($r) < role_rank($me["role"])));
+        // Roles this actor may grant: strictly below their own rank. A founder may also
+        // create another founder (succession / credential rotation before go-live).
+        $assignable = $me["role"] === "founder"
+            ? ["founder", "manager", "office", "engineer"]
+            : array_values(array_filter(["manager","office","engineer"], fn($r) => role_rank($r) < role_rank($me["role"])));
         send(["team" => $rows, "assignable_roles" => $assignable, "my_role" => $me["role"]]);
     }
 
@@ -469,9 +530,12 @@ switch ("$method $route") {
         $email = trim(strtolower($b["email"] ?? ""));
         $role = trim($b["role"] ?? "engineer");
         $phone = trim($b["phone"] ?? "");
+        $isFounder = $me["role"] === "founder";
         if (!$name || !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Name and valid email required");
-        if (!in_array($role, ["manager","office","engineer"], true)) fail("Invalid role");
-        if (role_rank($role) >= role_rank($me["role"])) fail("You can't create a user at or above your own role", 403);
+        // Only a founder may create another founder; everyone else is capped below their own rank.
+        $allowedRoles = $isFounder ? ["founder","manager","office","engineer"] : ["manager","office","engineer"];
+        if (!in_array($role, $allowedRoles, true)) fail("Invalid role");
+        if (!$isFounder && role_rank($role) >= role_rank($me["role"])) fail("You can't create a user at or above your own role", 403);
         if (db_one($db, "SELECT id FROM ego_users WHERE email = ?", "s", $email)) fail("That email already exists", 409);
         $invite = bin2hex(random_bytes(24));
         db_exec($db, "INSERT INTO ego_users (name,email,phone,role,active,invite_token) VALUES (?,?,?,?,1,?)",
@@ -486,16 +550,19 @@ switch ("$method $route") {
         if (!$id) fail("id required");
         $target = db_one($db, "SELECT id,role FROM ego_users WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$target) fail("User not found", 404);
-        // You may only manage users strictly below your rank (and never a founder).
-        if (role_rank($target["role"]) >= role_rank($me["role"]) && (int)$target["id"] !== (int)$me["id"]) fail("You can't manage this user", 403);
+        // You may only manage users strictly below your rank. A founder may manage other
+        // founders too (but never below prevents self lock-out — self is always allowed here).
+        $isFounder = $me["role"] === "founder";
+        if (!$isFounder && role_rank($target["role"]) >= role_rank($me["role"]) && (int)$target["id"] !== (int)$me["id"]) fail("You can't manage this user", 403);
         $set = []; $types = ""; $args = [];
         if (array_key_exists("name", $b))  { $set[] = "name=?";  $types .= "s"; $args[] = trim($b["name"]); }
         if (array_key_exists("phone", $b)) { $set[] = "phone=?"; $types .= "s"; $args[] = trim($b["phone"]) ?: null; }
         if (array_key_exists("active", $b)){ $set[] = "active=?";$types .= "i"; $args[] = (int)!!$b["active"]; }
         if (array_key_exists("role", $b)) {
             $newRole = trim($b["role"]);
-            if (!in_array($newRole, ["manager","office","engineer"], true)) fail("Invalid role");
-            if (role_rank($newRole) >= role_rank($me["role"])) fail("You can't grant a role at or above your own", 403);
+            $allowedRoles = $isFounder ? ["founder","manager","office","engineer"] : ["manager","office","engineer"];
+            if (!in_array($newRole, $allowedRoles, true)) fail("Invalid role");
+            if (!$isFounder && role_rank($newRole) >= role_rank($me["role"])) fail("You can't grant a role at or above your own", 403);
             $set[] = "role=?"; $types .= "s"; $args[] = $newRole;
         }
         if (!$set) send(["ok" => true]);
@@ -512,7 +579,9 @@ switch ("$method $route") {
         $target = db_one($db, "SELECT id,role FROM ego_users WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$target) fail("User not found", 404);
         if ((int)$target["id"] === (int)$me["id"]) fail("You can't remove yourself", 403);
-        if (role_rank($target["role"]) >= role_rank($me["role"])) fail("You can't remove this user", 403);
+        // A founder may remove other founders (e.g. the demo founder after minting a real
+        // one). Self-removal is already blocked above, so the last founder can never be deleted.
+        if ($me["role"] !== "founder" && role_rank($target["role"]) >= role_rank($me["role"])) fail("You can't remove this user", 403);
         db_exec($db, "UPDATE ego_users SET active=0, deleted_at=NOW() WHERE id=?", "i", $id);
         db_exec($db, "DELETE FROM ego_sessions WHERE user_id=?", "i", $id);
         send(["ok" => true]);
@@ -701,7 +770,7 @@ switch ("$method $route") {
             . "\"brief\":\"2-4 sentence explanation for the engineer: what to do, what good looks like, and any cautions that apply to THIS trade\","
             . "\"checklist\":[\"short, concrete on-site step\",\"...3 to 6 items relevant to this task\"]}";
         try { $text = ai_draft($db, $prompt); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         $clean = trim(preg_replace('/```(json)?|```/', '', $text));
         $parsed = json_decode($clean, true);
         if (!is_array($parsed)) fail("AI returned an unexpected format — try again", 400);
@@ -760,7 +829,7 @@ switch ("$method $route") {
             send(["id" => $jid, "reference" => $ref], 201);
         } catch (Throwable $e) {
             $db->rollback();
-            fail($e->getMessage(), 400);
+            client_error($e, "Something went wrong");
         }
     }
 
@@ -944,7 +1013,7 @@ switch ("$method $route") {
             . "Rewrite the engineer's rough note into 2-3 clear, professional sentences. Keep ONLY the facts given — do not invent details, prices, or promises. Plain text only, no preamble.\n\n"
             . "Rough note: " . $text;
         try { $out = ai_draft($db, $prompt); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         send(["text" => trim($out)]);
     }
 
@@ -1074,18 +1143,24 @@ switch ("$method $route") {
         if (!$job) fail("Job not found", 404);
         $vatRate = (float)($b["vat_rate"] ?? 20);
         $t = compute_totals($b["lines"] ?? [], $vatRate);
-        db_exec($db,
-            "INSERT INTO ego_invoices (kind,job_id,customer_id,payment_reference,status,subtotal,vat_rate,vat_amount,total,notes)
-             VALUES (?,?,?,?, 'draft', ?,?,?,?,?)",
-            "siisdddds", $kind, $jobId, (int)$job["customer_id"], $job["reference"], $t["subtotal"], $vatRate, $t["vat_amount"], $t["total"], trim($b["notes"] ?? "") ?: null);
-        $invId = (int)$db->insert_id;
-        $sort = 0;
-        foreach ($t["lines"] as $l) {
-            db_exec($db, "INSERT INTO ego_invoice_lines (invoice_id,description,quantity,unit_price,line_total,sort) VALUES (?,?,?,?,?,?)",
-                "isdddi", $invId, $l["description"], $l["quantity"], $l["unit_price"], $l["line_total"], $sort++);
-        }
-        log_activity($db, $jobId, (int)$actor["id"], $kind === "quote" ? "quote_created" : "invoice_created", ["id" => $invId]);
-        send(["id" => $invId], 201);
+        // Header + lines in one transaction so a mid-loop failure can't leave a document
+        // whose stored totals disagree with its lines.
+        $db->begin_transaction();
+        try {
+            db_exec($db,
+                "INSERT INTO ego_invoices (kind,job_id,customer_id,payment_reference,status,subtotal,vat_rate,vat_amount,total,notes)
+                 VALUES (?,?,?,?, 'draft', ?,?,?,?,?)",
+                "siisdddds", $kind, $jobId, (int)$job["customer_id"], $job["reference"], $t["subtotal"], $vatRate, $t["vat_amount"], $t["total"], trim($b["notes"] ?? "") ?: null);
+            $invId = (int)$db->insert_id;
+            $sort = 0;
+            foreach ($t["lines"] as $l) {
+                db_exec($db, "INSERT INTO ego_invoice_lines (invoice_id,description,quantity,unit_price,line_total,sort) VALUES (?,?,?,?,?,?)",
+                    "isdddi", $invId, $l["description"], $l["quantity"], $l["unit_price"], $l["line_total"], $sort++);
+            }
+            log_activity($db, $jobId, (int)$actor["id"], $kind === "quote" ? "quote_created" : "invoice_created", ["id" => $invId]);
+            $db->commit();
+            send(["id" => $invId], 201);
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not create the document"); }
     }
 
     case "POST /invoices/update": {
@@ -1133,7 +1208,7 @@ switch ("$method $route") {
             log_activity($db, (int)$inv["job_id"], (int)$actor["id"], $inv["kind"] === "quote" ? "quote_sent" : "invoice_sent", ["number" => $number]);
             $db->commit();
             send(["ok" => true, "number" => $number]);
-        } catch (Throwable $e) { $db->rollback(); fail($e->getMessage(), 400); }
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Something went wrong"); }
     }
 
     case "POST /invoices/void": {
@@ -1142,6 +1217,7 @@ switch ("$method $route") {
         $id = (int)($b["id"] ?? 0);
         $inv = db_one($db, "SELECT id,kind,status,job_id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$inv) fail("Not found", 404);
+        if (in_array($inv["status"], ["paid", "void"], true)) fail("A paid or already-void document can't be voided", 409);
         db_exec($db, "UPDATE ego_invoices SET status='void' WHERE id=?", "i", $id);
         if ($inv["kind"] === "invoice") {
             $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
@@ -1160,22 +1236,35 @@ switch ("$method $route") {
         $inv = db_one($db, "SELECT id,kind,status,job_id,total FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$inv) fail("Not found", 404);
         if ($inv["kind"] !== "invoice") fail("Only invoices take payment", 400);
-        $amount = (float)($b["amount"] ?? $inv["total"]);
+        if (in_array($inv["status"], ["paid", "void"], true)) fail("This invoice is already " . $inv["status"], 409);
+        $total = round((float)$inv["total"], 2);
+        $amount = round((float)($b["amount"] ?? $inv["total"]), 2);
+        if ($amount <= 0) fail("Payment amount must be more than zero");
         $paidOn = trim($b["paid_on"] ?? "") ?: date("Y-m-d");
         $ref = trim($b["reference"] ?? "") ?: null;
         $note = trim($b["note"] ?? "") ?: null;
-        db_exec($db, "INSERT INTO ego_payments (invoice_id,amount,paid_on,reference,note,recorded_by) VALUES (?,?,?,?,?,?)",
-            "idsssi", $id, $amount, $paidOn, $ref, $note, (int)$actor["id"]);
-        db_exec($db, "UPDATE ego_invoices SET status='paid', paid_at=NOW() WHERE id=?", "i", $id);
-        // job invoiced -> paid -> closed
-        $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
-        if ($job && in_array($job["status"], ["invoiced"], true)) {
-            db_exec($db, "UPDATE ego_jobs SET status='closed' WHERE id=?", "i", (int)$inv["job_id"]);
-            log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => $job["status"], "to" => "paid"]);
-            log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "paid", "to" => "closed"]);
-        }
-        log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "payment_recorded", ["amount" => $amount, "reference" => $ref]);
-        send(["ok" => true]);
+        // Partial payments are allowed: the invoice only flips to 'paid' (and the job to
+        // 'closed') once the summed payments cover the total. Record + update atomically.
+        $db->begin_transaction();
+        try {
+            $already = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=?", "i", $id)["s"] ?? 0), 2);
+            if ($amount > $total - $already + 0.01) throw new RuntimeException("That's more than the outstanding balance of £" . number_format(max(0, $total - $already), 2));
+            db_exec($db, "INSERT INTO ego_payments (invoice_id,amount,paid_on,reference,note,recorded_by) VALUES (?,?,?,?,?,?)",
+                "idsssi", $id, $amount, $paidOn, $ref, $note, (int)$actor["id"]);
+            $paidNow = round($already + $amount, 2);
+            $fullyPaid = $paidNow >= $total - 0.01;
+            if ($fullyPaid) {
+                db_exec($db, "UPDATE ego_invoices SET status='paid', paid_at=NOW() WHERE id=?", "i", $id);
+                $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
+                if ($job && $job["status"] === "invoiced") {
+                    db_exec($db, "UPDATE ego_jobs SET status='closed' WHERE id=?", "i", (int)$inv["job_id"]);
+                    log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "invoiced", "to" => "closed"]);
+                }
+            }
+            log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "payment_recorded", ["amount" => $amount, "reference" => $ref, "balance" => round(max(0, $total - $paidNow), 2)]);
+            $db->commit();
+            send(["ok" => true, "paid_in_full" => $fullyPaid, "balance" => round(max(0, $total - $paidNow), 2)]);
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not record the payment"); }
     }
 
     /* ===================== M7: DASHBOARD ===================== */
@@ -1517,6 +1606,24 @@ switch ("$method $route") {
         if (!$inv) fail("Not found", 404);
         $to = trim($b["to"] ?? ($inv["customer_email"] ?? ""));
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) fail("No valid recipient email");
+        // Emailing a DRAFT invoice first turns it into a real, numbered, sent invoice —
+        // a customer must never receive an un-numbered "VAT invoice". (Quotes may go as drafts.)
+        if ($inv["kind"] === "invoice" && $inv["status"] === "draft") {
+            $db->begin_transaction();
+            try {
+                $number = allocate_doc_number($db, "invoice", (int)$inv["customer_id"]);
+                $terms = (int)(db_one($db, "SELECT payment_terms_days FROM ego_company_settings ORDER BY id LIMIT 1")["payment_terms_days"] ?? 14);
+                db_exec($db, "UPDATE ego_invoices SET number=?, status='sent', issue_date=CURDATE(),
+                              due_date=DATE_ADD(CURDATE(), INTERVAL ? DAY), sent_at=NOW() WHERE id=?", "sii", $number, $terms, $id);
+                $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
+                if ($job && $job["status"] === "completed") {
+                    db_exec($db, "UPDATE ego_jobs SET status='invoiced' WHERE id=?", "i", (int)$inv["job_id"]);
+                    log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "completed", "to" => "invoiced"]);
+                }
+                $db->commit();
+            } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not finalise the invoice"); }
+            $inv["number"] = $number; $inv["status"] = "sent"; // reflect it in the emailed doc + log
+        }
         $company = db_one($db, "SELECT * FROM ego_company_settings ORDER BY id LIMIT 1");
         require __DIR__ . "/lib/mailer.php";
         $label = $inv["kind"] === "quote" ? "Quote" : "Invoice";
@@ -1525,14 +1632,10 @@ switch ("$method $route") {
         try {
             ego_send_mail($db, $to, $inv["customer_name"], $subject, $html);
         } catch (Throwable $e) {
-            fail("Email failed: " . $e->getMessage(), 400); // 502 gets swallowed by the gateway
-        }
-        // sending an invoice also marks it sent (if still draft)
-        if ($inv["kind"] === "invoice" && $inv["status"] === "draft") {
-            // reuse the send path lightly: allocate number + flip status
+            client_error($e, "Email failed — check the SMTP settings", 400);
         }
         log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "emailed", ["to" => $to, "doc" => $inv["number"] ?? $inv["payment_reference"]]);
-        send(["ok" => true, "to" => $to]);
+        send(["ok" => true, "to" => $to, "number" => $inv["number"] ?? null]);
     }
 
     /* ===================== Email any client + AI draft ===================== */
@@ -1547,7 +1650,7 @@ switch ("$method $route") {
         require __DIR__ . "/lib/mailer.php";
         $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyText)));
         try { ego_send_mail($db, $to, trim($b["to_name"] ?? "") ?: null, $subject, $html); }
-        catch (Throwable $e) { fail("Email failed: " . $e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Email failed — check the SMTP settings", 400); }
         $jobId = isset($b["job_id"]) && $b["job_id"] !== "" ? (int)$b["job_id"] : null;
         $cid = isset($b["customer_id"]) && $b["customer_id"] !== "" ? (int)$b["customer_id"] : null;
         db_exec($db, "INSERT INTO ego_messages (customer_id,job_id,direction,channel,to_email,subject,body,status) VALUES (?,?, 'outbound','email', ?,?,?, 'sent')",
@@ -1572,7 +1675,7 @@ switch ("$method $route") {
         $html = render_invoice_email($inv, $co, track_link($db, (int)$inv["job_id"])); // amount + bank + ref + tracker
         try {
             ego_send_mail($db, $to, $inv["customer_name"], "Payment reminder: " . ($inv["number"] ?? $inv["payment_reference"]), $html);
-        } catch (Throwable $e) { fail("Email failed: " . $e->getMessage(), 400); }
+        } catch (Throwable $e) { client_error($e, "Email failed — check the SMTP settings", 400); }
         db_exec($db, "UPDATE ego_invoices SET reminded_at=NOW() WHERE id=?", "i", $id);
         log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "invoice_reminder", ["to" => $to, "number" => $inv["number"]]);
         send(["ok" => true, "to" => $to]);
@@ -1584,7 +1687,7 @@ switch ("$method $route") {
         $prompt = trim($b["prompt"] ?? "");
         if ($prompt === "") fail("Prompt required");
         try { $text = ai_draft($db, $prompt); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         send(["text" => $text]);
     }
 
@@ -1597,7 +1700,7 @@ switch ("$method $route") {
         $task = "Write a short internal announcement for $audience. Owner's brief: $brief\n\n"
             . "Return EXACTLY as:\nTitle: <one clear line>\n\n<body, 1-3 short paragraphs>";
         try { $text = ai_draft($db, $task, ego_brand_voice($db), 500); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         $title = ""; $bodyTxt = trim($text);
         if (preg_match('/^\s*title:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $title = trim($m[1]); $bodyTxt = trim($m[2]); }
         send(["title" => $title, "body" => $bodyTxt]);
@@ -1609,7 +1712,7 @@ switch ("$method $route") {
         $task = "Turn this into a clear, short internal task for a maintenance team — easy to understand at a glance. "
             . "Owner's note: $brief\n\nReturn EXACTLY as:\nTitle: <max 8 words>\n\n<one or two sentences: what to do and what 'done' looks like>";
         try { $text = ai_draft($db, $task, ego_brand_voice($db), 300); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         $title = ""; $desc = trim($text);
         if (preg_match('/^\s*title:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $title = trim($m[1]); $desc = trim($m[2]); }
         send(["title" => $title, "description" => $desc]);
@@ -1622,7 +1725,7 @@ switch ("$method $route") {
         $task = "Rewrite this $field clearly and factually for a health-and-safety record. Keep every fact; do not add or invent anything. "
             . "Neutral, complete sentences, plain English.\n\nDRAFT:\n$text\n\nReturn only the rewritten text.";
         try { $out = ai_draft($db, $task, ego_brand_voice($db), 600); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         send(["text" => $out]);
     }
     case "POST /procurement/draft": {
@@ -1638,7 +1741,7 @@ switch ("$method $route") {
             . "Cover what it is or what they do, typical use, and anything useful to record (specs, trades, lead time, terms) — only where reasonable to infer. "
             . "Never invent specifics like exact prices, certificate numbers or phone numbers. A few short lines.\n\nReturn only the notes text.";
         try { $out = ai_draft($db, $task, ego_brand_voice($db), 500); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         send(["text" => $out]);
     }
     case "POST /email/compose": {
@@ -1650,7 +1753,7 @@ switch ("$method $route") {
         $task = "Write a one-to-one email" . ($to !== "" ? " to $to" : "") . " for EGO LTD. Owner's brief: $brief\n\n"
             . "Return EXACTLY as:\nSubject: <subject line>\n\n<email body>";
         try { $text = ai_draft($db, $task, ego_brand_voice($db)); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         $subject = ""; $bodyTxt = trim($text);
         if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
         send(["subject" => $subject, "body" => $bodyTxt]);
@@ -1663,7 +1766,7 @@ switch ("$method $route") {
         $full = "A clean, professional marketing image for a UK property maintenance company (EGO LTD). "
             . "Warm, grounded, premium, not stocky or cheesy. Landscape banner suitable for an email header. " . $prompt;
         try { $url = ai_generate_image($db, $full); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         send(["url" => $url]);
     }
 
@@ -1707,7 +1810,7 @@ switch ("$method $route") {
         ensure_deleted_uids($db); // tombstone table must exist before sync reads it
         ensure_message_cols($db); // archived/flagged columns — bounces arrive pre-archived
         try { $n = inbox_sync($db); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         send(["synced" => $n]);
     }
 
@@ -1728,10 +1831,12 @@ switch ("$method $route") {
 
     case "GET /inbox/get": {
         require_role($db, "admin");
+        // Same scope as the inbox list: never expose private customer↔office portal threads
+        // here (those belong to the job record, not the shared mailbox).
         $m = db_one($db,
             "SELECT m.*, c.name AS customer_name, j.reference AS job_reference
              FROM ego_messages m LEFT JOIN ego_customers c ON c.id=m.customer_id LEFT JOIN ego_jobs j ON j.id=m.job_id
-             WHERE m.id=?", "i", (int)($_GET["id"] ?? 0));
+             WHERE m.id=? AND (m.channel IS NULL OR m.channel <> 'portal')", "i", (int)($_GET["id"] ?? 0));
         if (!$m) fail("Not found", 404);
         $m["id"] = (int)$m["id"];
         send(["message" => $m]);
@@ -1796,6 +1901,10 @@ switch ("$method $route") {
         $service = trim($b["service"] ?? "");
         $message = trim($b["message"] ?? "");
         if ($name === "" || $message === "") fail("Name and message required");
+        // Public, unauthenticated endpoint: throttle per IP and cap lengths (anti-spam / DB bloat).
+        if (!rate_check($db, "enquiry:" . client_ip(), 5, 3600)) fail("Too many enquiries from your connection. Please try again later or call us.", 429);
+        rate_hit($db, "enquiry:" . client_ip());
+        if (mb_strlen($name) > 120 || mb_strlen($message) > 5000 || mb_strlen($address) > 300 || mb_strlen($service) > 120 || mb_strlen($phone) > 40) fail("One of your fields is too long.");
 
         // Newsletter signups are explicit consent — add them to the marketing list.
         if (($b["source"] ?? "") === "newsletter" && $email) {
@@ -1844,6 +1953,8 @@ switch ("$method $route") {
         $ref = strtoupper(trim($b["reference"] ?? ""));
         $surname = trim($b["surname"] ?? "");
         if ($ref === "" || $surname === "") fail("Enter your job reference and the surname on the booking.");
+        // Rate-limit public lookups to blunt reference/surname enumeration.
+        if (!rate_check($db, "track:" . client_ip(), 15, 900)) fail("Too many attempts. Please wait a few minutes and try again.", 429);
         // Generic message either way so the form can't be used to enumerate refs.
         $notFound = "We couldn't find a job with that reference and surname. Check your booking confirmation, or give us a call.";
         $job = db_one($db,
@@ -1983,7 +2094,9 @@ switch ("$method $route") {
         $b = body();
         $msg = trim($b["body"] ?? "");
         if ($msg === "") fail("Message is empty");
-        $job = db_one($db, "SELECT customer_id FROM ego_jobs WHERE id=?", "i", $jobId);
+        if (mb_strlen($msg) > 5000) fail("Message is too long");
+        $job = db_one($db, "SELECT customer_id FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $jobId);
+        if (!$job) fail("This link has expired", 404);
         $name = trim($b["name"] ?? "") ?: null;
         db_exec($db,
             "INSERT INTO ego_messages (customer_id,job_id,direction,channel,from_name,subject,body,status)
@@ -2032,7 +2145,9 @@ switch ("$method $route") {
 
     case "POST /recurring/generate": {
         $actor = require_role($db, "admin");
-        $due = db_all($db, "SELECT * FROM ego_recurring_plans WHERE active=1 AND next_due <= CURDATE()");
+        // Skip plans whose customer has been deleted (no orphaned jobs/invoices).
+        $due = db_all($db, "SELECT r.* FROM ego_recurring_plans r JOIN ego_customers c ON c.id=r.customer_id
+                            WHERE r.active=1 AND r.next_due <= CURDATE() AND c.deleted_at IS NULL");
         $created = [];
         foreach ($due as $p) {
             $db->begin_transaction();
@@ -2046,8 +2161,10 @@ switch ("$method $route") {
                     "sisssd", $ref, $cid, $p["title"], $p["description"], $p["priority"], $quote);
                 $jid = (int)$db->insert_id;
                 log_activity($db, $jid, (int)$actor["id"], "created", ["reference" => $ref, "recurring" => true]);
+                // Hard-whitelist the interval unit at the point of interpolation (never trust the stored value).
+                $unit = ["day" => "DAY", "week" => "WEEK", "month" => "MONTH"][$p["interval_unit"]] ?? "MONTH";
                 db_exec($db,
-                    "UPDATE ego_recurring_plans SET next_due = DATE_ADD(next_due, INTERVAL ? " . strtoupper($p["interval_unit"]) . "), last_generated=NOW() WHERE id=?",
+                    "UPDATE ego_recurring_plans SET next_due = DATE_ADD(next_due, INTERVAL ? $unit), last_generated=NOW() WHERE id=?",
                     "ii", (int)$p["interval_count"], (int)$p["id"]);
                 $db->commit();
                 $created[] = $ref;
@@ -2380,7 +2497,7 @@ switch ("$method $route") {
             send(["id" => $id], $editing ? 200 : 201);
         } catch (Throwable $e) {
             $db->rollback();
-            fail($e->getMessage(), 400);
+            client_error($e, "Something went wrong");
         }
     }
     case "POST /purchase-orders/receive": {
@@ -2403,7 +2520,7 @@ switch ("$method $route") {
             send(["ok" => true]);
         } catch (Throwable $e) {
             $db->rollback();
-            fail($e->getMessage(), 400);
+            client_error($e, "Something went wrong");
         }
     }
     case "POST /purchase-orders/cancel": {
@@ -2638,7 +2755,7 @@ switch ("$method $route") {
             send(["id" => $id], $route === "/contracts/update" ? 200 : 201);
         } catch (Throwable $e) {
             $db->rollback();
-            fail($e->getMessage(), 400);
+            client_error($e, "Something went wrong");
         }
     }
     case "POST /contracts/delete": {
@@ -2796,6 +2913,8 @@ switch ("$method $route") {
         if (!$row || !$row["password_hash"] || !password_verify($cur, $row["password_hash"])) fail("Current password is incorrect", 403);
         db_exec($db, "UPDATE ego_users SET password_hash=?, must_change_password=0, password_changed_at=NOW() WHERE id=?",
             "si", password_hash($new, PASSWORD_DEFAULT), (int)$me["id"]);
+        // Revoke every other session so a stolen/older token can't survive a password change.
+        db_exec($db, "DELETE FROM ego_sessions WHERE user_id=? AND token<>?", "si", (int)$me["id"], (string)bearer());
         log_activity($db, null, (int)$me["id"], "password_changed", []);
         send(["ok" => true]);
     }
@@ -2920,7 +3039,7 @@ switch ("$method $route") {
         $task = "Write a $kind email for $name. A short, punchy subject line, then the body in a few short paragraphs, signed off as the $name team. "
             . "Owner's brief: $brief\n\nReturn EXACTLY as:\nSubject: <subject line>\n\n<email body>";
         try { $text = ai_draft($db, $task, ego_brand_voice($db)); }
-        catch (Throwable $e) { fail($e->getMessage(), 400); }
+        catch (Throwable $e) { client_error($e, "Something went wrong"); }
         $subject = ""; $bodyTxt = trim($text);
         if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
         send(["subject" => $subject, "body" => $bodyTxt]);

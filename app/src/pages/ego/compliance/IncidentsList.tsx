@@ -24,6 +24,8 @@ export default function IncidentsList() {
     return () => clearTimeout(t)
   }, [q])
   const pager = usePager(rows)
+  useEffect(() => { pager.setPage(1) }, [q])
+
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">

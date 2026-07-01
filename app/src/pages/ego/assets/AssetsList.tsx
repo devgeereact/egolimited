@@ -52,6 +52,8 @@ export default function AssetsList() {
   }, [q, dueOnly])
 
   const pager = usePager(rows)
+  useEffect(() => { pager.setPage(1) }, [q, dueOnly])
+
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
