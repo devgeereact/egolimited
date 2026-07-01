@@ -122,20 +122,25 @@ export default function SettingsPage() {
     <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 p-4 md:p-6">
       {/* ---------- Profile header ---------- */}
       <Card className="overflow-hidden">
-        <div className="h-28 bg-gradient-to-r from-primary via-primary to-primary/70" />
+        <div className="h-24 bg-gradient-to-r from-primary via-primary to-primary/80" />
         <CardContent className="pt-0">
-          <div className="-mt-10 flex flex-wrap items-end gap-4">
-            <div className="flex size-20 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground ring-4 ring-background">
+          {/* Only the avatar overlaps the banner; the name stays below on the card so it
+              reads as foreground text, never dark-on-purple. */}
+          <div className="flex flex-wrap items-start gap-4">
+            <div className="-mt-10 flex size-20 items-center justify-center rounded-full bg-primary text-2xl font-bold text-primary-foreground shadow-md ring-4 ring-background">
               {initials(me.name)}
             </div>
-            <div className="pb-1">
-              <h1 className="text-2xl font-semibold leading-tight tracking-tight">{me.name || "Your account"}</h1>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
-                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+            <div className="min-w-0 flex-1 pt-1">
+              <h1 className="truncate text-2xl font-semibold leading-tight tracking-tight text-foreground">{me.name || "Your account"}</h1>
+              <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
                   <ShieldCheck className="size-3" /> {role ? ROLE_LABEL[role] : ""}
                 </span>
-                {canSeeCompany && s.company_name && <span className="inline-flex items-center gap-1"><Building2 className="size-3.5" /> {String(s.company_name)}</span>}
-                <span className="inline-flex items-center gap-1"><Mail className="size-3.5" /> {me.email}</span>
+                {canSeeCompany && s.company_name && (
+                  <><span className="text-muted-foreground/40">·</span><span className="inline-flex items-center gap-1"><Building2 className="size-3.5" /> {String(s.company_name)}</span></>
+                )}
+                <span className="text-muted-foreground/40">·</span>
+                <span className="inline-flex min-w-0 items-center gap-1"><Mail className="size-3.5 shrink-0" /> <span className="truncate">{me.email}</span></span>
               </div>
             </div>
           </div>
