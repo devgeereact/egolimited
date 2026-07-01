@@ -163,9 +163,14 @@ export default function TeamPage() {
           {invite ? (
             <div className="space-y-3">
               <p className="text-sm text-muted-foreground">Share this invite link so they can set a password:</p>
-              <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-2">
-                <code className="min-w-0 flex-1 truncate text-xs">{invite}</code>
-                <Button size="icon" variant="outline" className="size-8 shrink-0" onClick={() => { navigator.clipboard.writeText(invite); toast.success("Copied") }}>
+              <div className="flex items-center gap-2">
+                <Input
+                  readOnly
+                  value={invite}
+                  onFocus={(e) => e.currentTarget.select()}
+                  className="min-w-0 flex-1 font-mono text-xs"
+                />
+                <Button size="icon" variant="outline" className="size-9 shrink-0" onClick={() => { navigator.clipboard.writeText(invite); toast.success("Copied") }}>
                   <Copy className="size-4" />
                 </Button>
               </div>
