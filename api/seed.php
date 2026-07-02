@@ -5,6 +5,7 @@
  * Idempotent: safe to run more than once.
  */
 declare(strict_types=1);
+if (PHP_SAPI !== "cli") { http_response_code(404); exit; } // CLI only — never web-triggerable
 $cfg = require __DIR__ . "/config.php";
 
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);

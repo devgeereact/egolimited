@@ -5,6 +5,7 @@
  * runs as the DB user. Schedule in cPanel:  php /home/.../egolimited.com/api/cron.php
  */
 declare(strict_types=1);
+if (PHP_SAPI !== "cli") { http_response_code(404); exit; } // CLI only — never web-triggerable
 $cfg = require __DIR__ . "/config.php";
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 $db = new mysqli($cfg["db_host"], $cfg["db_user"], $cfg["db_pass"], $cfg["db_name"]);

@@ -72,9 +72,34 @@ function db_exec(mysqli $db, string $sql, string $types = "", ...$args): mysqli_
 }
 
 /* ---------- abuse controls + safe errors ---------- */
-/** Best-effort client IP (behind Cloudflare in production). */
+/** True if $ip falls within the CIDR (IPv4 or IPv6). */
+function ip_in_cidr(string $ip, string $cidr): bool {
+    [$net, $bits] = array_pad(explode("/", $cidr, 2), 2, null);
+    $ipB = @inet_pton($ip); $netB = @inet_pton((string) $net);
+    if ($ipB === false || $netB === false || strlen($ipB) !== strlen($netB)) return false;
+    $bits = (int) $bits; $bytes = intdiv($bits, 8); $rem = $bits % 8;
+    if ($bytes && strncmp($ipB, $netB, $bytes) !== 0) return false;
+    if ($rem) {
+        $mask = chr((0xff << (8 - $rem)) & 0xff);
+        if ((ord($ipB[$bytes]) & ord($mask)) !== (ord($netB[$bytes]) & ord($mask))) return false;
+    }
+    return true;
+}
+/** Real client IP. Cloudflare sends it in CF-Connecting-IP, but that header is spoofable if
+ *  the origin is hit directly — so only trust it when the request actually came FROM a
+ *  Cloudflare edge (REMOTE_ADDR within Cloudflare's published ranges). Else use REMOTE_ADDR. */
 function client_ip(): string {
-    return (string) ($_SERVER["HTTP_CF_CONNECTING_IP"] ?? $_SERVER["REMOTE_ADDR"] ?? "0.0.0.0");
+    $remote = (string) ($_SERVER["REMOTE_ADDR"] ?? "0.0.0.0");
+    $cf = (string) ($_SERVER["HTTP_CF_CONNECTING_IP"] ?? "");
+    if ($cf === "") return $remote;
+    static $CF = [
+        "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18",
+        "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17",
+        "162.158.0.0/15", "104.16.0.0/13", "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+        "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+    ];
+    foreach ($CF as $cidr) if (ip_in_cidr($remote, $cidr)) return $cf;
+    return $remote;
 }
 /** Persistent sliding-window counter (lazy table). rate_check reads; rate_hit records
  *  a strike. Record strikes on FAILURE only so normal use is never throttled. */
@@ -2300,7 +2325,8 @@ switch ("$method $route") {
         $file = mail_attach_dir() . "/" . basename((string)$row["storage"]);
         if (!is_file($file)) fail("Not found", 404);
         $dl = preg_replace('/[\r\n"]+/', "", (string)$row["filename"]) ?: "attachment";
-        header("Content-Type: " . (((string)$row["mime"]) ?: "application/octet-stream"));
+        // Always a neutral type (never reflect the sender/uploader's MIME) + force download.
+        header("Content-Type: application/octet-stream");
         header("Content-Disposition: attachment; filename=\"$dl\"");
         header("Content-Length: " . (string) filesize($file));
         header("Cache-Control: private, max-age=3600");
@@ -2439,7 +2465,9 @@ switch ("$method $route") {
         $name = strtolower($job["customer_name"] ?? "");
         $sn = strtolower($surname);
         $tokens = preg_split('/\s+/', $name, -1, PREG_SPLIT_NO_EMPTY) ?: [];
-        $ok = in_array($sn, $tokens, true) || ($sn !== "" && str_contains($name, $sn));
+        // Exact match against a whole name token only (min 2 chars). A substring fallback
+        // would let a single letter satisfy the surname gate → reference enumeration.
+        $ok = strlen($sn) >= 2 && in_array($sn, $tokens, true);
         if (!$ok) fail($notFound, 404);
 
         // Canonical 7-stage customer-facing track. on_hold pauses at "On site".
