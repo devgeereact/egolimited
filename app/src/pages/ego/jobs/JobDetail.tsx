@@ -472,16 +472,26 @@ export default function JobDetail() {
 
               {isOffice(user?.role) && (
                 <div className="flex flex-wrap gap-2 border-t pt-2">
-                  <Button size="sm" variant="outline" onClick={() => createDoc("quote")}>Create quote</Button>
+                  {/* Once the job is paid/closed it's settled — no new quotes or invoices. */}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => createDoc("quote")}
+                    disabled={["paid", "closed"].includes(job.status)}
+                    title={["paid", "closed"].includes(job.status) ? "This job is settled" : ""}
+                  >
+                    Create quote
+                  </Button>
                   {/* Raise an invoice as soon as the job is assigned (payment can take days) —
-                      not only at completion. Blocked only before the job is scheduled or if cancelled. */}
+                      not only at completion. Blocked before it's scheduled, if cancelled, or once settled. */}
                   <Button
                     size="sm"
                     onClick={() => createDoc("invoice")}
-                    disabled={["new", "cancelled"].includes(job.status)}
+                    disabled={["new", "cancelled", "paid", "closed"].includes(job.status)}
                     title={
                       job.status === "new" ? "Schedule/assign the job first"
                       : job.status === "cancelled" ? "This job is cancelled"
+                      : ["paid", "closed"].includes(job.status) ? "This job is settled"
                       : ""
                     }
                   >
