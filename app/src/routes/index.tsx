@@ -193,6 +193,10 @@ export const router = createBrowserRouter (
         {path: "ego/portal/track", element: <TrackJob /> },
         {path: "ego/portal/contact", element: <PortalContact /> },
 
+        // Legacy PULSE-template alias — old notification/bookmark links pointed at
+        // /apps/email. Redirect to the real inbox so they never dead-end at 404.
+        {path: "apps/email", element: <Navigate to="/ego/inbox" replace /> },
+
         // ✅ 404 HANDLER
         { path: "*", element: <NotFound /> },
       ],

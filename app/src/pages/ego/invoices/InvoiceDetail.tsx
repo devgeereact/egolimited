@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
-import { Link, useSearchParams } from "react-router-dom"
+import { Link, useSearchParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft, Plus, Trash2, Send, Download, Eye, BadgePoundSterling, Ban, Loader2, Wrench, Mail,
+  CheckCircle2, Undo2,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -37,6 +38,7 @@ export default function InvoiceDetail() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [inv, setInv] = useState<Invoice | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [vatRate, setVatRate] = useState(20)
@@ -86,12 +88,25 @@ export default function InvoiceDetail() {
   }
   async function emailDoc() {
     if (!inv) return
-    const to = prompt("Send to email:", inv.customer_email ?? "")
-    if (!to) return
+    const to = prompt("Send to email (leave blank to issue without emailing):", inv.customer_email ?? "")
+    if (to === null) return // cancelled
+    // Admin override: no email address → issue/finalise the document WITHOUT sending, so
+    // a customer with no email doesn't produce a bounce/error. It's marked sent + numbered
+    // (job moves to invoiced for invoices) so you can print or hand it over.
+    if (!to.trim()) {
+      if (!confirm(`No email entered. Issue this ${label.toLowerCase()} without emailing it? It'll be numbered and marked as sent so you can print or hand it over.`)) return
+      setBusy(true)
+      try {
+        if (isDraft) await api("/invoices/update", { method: "POST", body: { id: inv.id, vat_rate: vatRate, lines } })
+        const r = await api<{ number: string }>("/invoices/send", { method: "POST", body: { id: inv.id } })
+        toast.success(`${label} ${r.number} issued (not emailed)`); await load()
+      } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't issue") } finally { setBusy(false) }
+      return
+    }
     setBusy(true)
     try {
       await api("/invoices/email", { method: "POST", body: { id: inv.id, to } })
-      toast.success(`Emailed to ${to}`)
+      toast.success(`Emailed to ${to}`); await load()
     } catch (e) { toast.error(e instanceof Error ? e.message : "Email failed") } finally { setBusy(false) }
   }
 
@@ -108,6 +123,29 @@ export default function InvoiceDetail() {
     if (!inv || !confirm(`Void this ${label.toLowerCase()}?`)) return
     await api("/invoices/void", { method: "POST", body: { id: inv.id } })
     toast.success("Voided"); load()
+  }
+
+  // Quote accepted → server marks it accepted + creates a DRAFT invoice; jump to it.
+  async function accept() {
+    if (!inv) return
+    setBusy(true)
+    try {
+      const r = await api<{ invoice_id: number }>("/invoices/accept", { method: "POST", body: { id: inv.id } })
+      toast.success("Quote accepted — draft invoice created")
+      if (r.invoice_id) navigate(`/ego/invoices/detail?id=${r.invoice_id}`); else load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") } finally { setBusy(false) }
+  }
+  async function decline() {
+    if (!inv || !confirm("Mark this quote as declined? No invoice will be created.")) return
+    setBusy(true)
+    try { await api("/invoices/decline", { method: "POST", body: { id: inv.id } }); toast.success("Quote declined"); await load() }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed") } finally { setBusy(false) }
+  }
+  async function unpay() {
+    if (!inv || !confirm("Undo the payment? This removes the recorded payment(s), returns the invoice to unpaid, and reopens the job if this had closed it.")) return
+    setBusy(true)
+    try { await api("/invoices/unpay", { method: "POST", body: { id: inv.id } }); toast.success("Payment reversed"); await load() }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed") } finally { setBusy(false) }
   }
 
   function buildPdf() {
@@ -144,6 +182,12 @@ export default function InvoiceDetail() {
         <div className="flex flex-wrap gap-2">
           {isDraft && <Button variant="outline" onClick={save} disabled={busy}>Save draft</Button>}
           {(isDraft || inv.status === "draft") && <Button onClick={send} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <Send />} Send</Button>}
+          {inv.kind === "quote" && !["void", "declined"].includes(inv.status) && (
+            <Button onClick={accept} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Accept → invoice</Button>
+          )}
+          {inv.kind === "quote" && !["void", "declined", "accepted", "paid"].includes(inv.status) && (
+            <Button variant="outline" onClick={decline} disabled={busy}>Decline</Button>
+          )}
           <Button variant="outline" onClick={previewPdf}><Eye /> Preview</Button>
           <Button variant="outline" onClick={downloadPdf}><Download /> PDF</Button>
           <Button variant="outline" onClick={emailDoc} disabled={busy}><Mail /> Email</Button>
@@ -152,6 +196,9 @@ export default function InvoiceDetail() {
               <Button onClick={() => setPayOpen(true)}><BadgePoundSterling /> Mark paid</Button>
               <Button variant="outline" onClick={remind} disabled={busy}><Mail /> Reminder</Button>
             </>
+          )}
+          {inv.kind === "invoice" && inv.status === "paid" && atLeast(user?.role, "manager") && (
+            <Button variant="outline" onClick={unpay} disabled={busy}><Undo2 /> Undo payment</Button>
           )}
           {inv.status !== "paid" && inv.status !== "void" && (
             <Button variant="outline" className="text-destructive" onClick={voidDoc}><Ban /> Void</Button>

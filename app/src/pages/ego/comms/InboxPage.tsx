@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react"
 import {
   Inbox, Send as SendIcon, FileEdit, StickyNote, RefreshCw, Loader2, Reply, Check,
   PenSquare, Search, ChevronLeft, ChevronRight, Save, Trash2, Plus, Archive, ArchiveRestore, Flag,
+  Paperclip, Download, X,
 } from "lucide-react"
+import DOMPurify from "dompurify"
 import { toast } from "sonner"
-import { api } from "@/lib/api"
+import { api, apiForm } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -39,9 +41,14 @@ interface MsgRow {
   acknowledged?: number
   archived?: number
   flagged?: number
+  attachment_count?: number
 }
-interface MsgFull extends MsgRow { body: string | null; body_html: string | null; acknowledged: number }
+interface Attachment { id: number; filename: string; mime: string; size: number; url: string }
+interface MsgFull extends MsgRow { body: string | null; body_html: string | null; acknowledged: number; attachments?: Attachment[] }
 interface Draft { id?: number; to: string; subject: string; body: string }
+
+const API_ORIGIN = import.meta.env.DEV ? "https://egolimited.com" : ""
+const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 
 type Folder = "inbox" | "sent" | "drafts" | "notes" | "archived"
 const initials = (s: string) => s.split(/[\s@.]+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "?"
@@ -269,6 +276,7 @@ export default function InboxPage() {
                       <TableCell className={cn("max-w-0 truncate", unread ? "font-bold text-foreground" : "text-muted-foreground")}>
                         {!!m.flagged && <Flag className="mr-1 inline size-3.5 fill-amber-500 text-amber-500 align-[-2px]" />}
                         {m.subject || "(no subject)"}
+                        {!!m.attachment_count && <Paperclip className="ml-1 inline size-3.5 text-muted-foreground align-[-2px]" />}
                       </TableCell>
                       <TableCell className="hidden text-muted-foreground md:table-cell">{m.customer_name || m.job_reference || "—"}</TableCell>
                       <TableCell className="text-right tabular-nums text-muted-foreground">{fmtDate(m.created_at)}</TableCell>
@@ -323,8 +331,26 @@ export default function InboxPage() {
               </DialogHeader>
               <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 text-sm leading-relaxed">
                 {msg.body_html
-                  ? <div className="prose prose-sm max-w-none [&_a]:text-primary" dangerouslySetInnerHTML={{ __html: msg.body_html }} />
+                  ? <div className="prose prose-sm max-w-none [&_a]:text-primary"
+                         dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(msg.body_html, { ADD_ATTR: ["target"] }) }} />
                   : <p className="whitespace-pre-wrap">{msg.body || "(empty)"}</p>}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="mt-5 border-t pt-4">
+                    <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <Paperclip className="size-3.5" /> {msg.attachments.length} attachment{msg.attachments.length > 1 ? "s" : ""}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {msg.attachments.map((a) => (
+                        <a key={a.id} href={`${API_ORIGIN}${a.url}`} target="_blank" rel="noopener noreferrer"
+                           className="flex items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2 text-xs transition-colors hover:bg-muted">
+                          <Download className="size-4 shrink-0 text-muted-foreground" />
+                          <span className="max-w-[220px] truncate font-medium">{a.filename}</span>
+                          <span className="shrink-0 text-muted-foreground">{fmtBytes(a.size)}</span>
+                        </a>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
               {msg.direction === "inbound" && msg.channel !== "note" && (
                 <div className="shrink-0 space-y-2 border-t p-4">
@@ -351,14 +377,19 @@ function ComposeDialog({ open, onOpenChange, draft, onSaved }:
   { open: boolean; onOpenChange: (o: boolean) => void; draft: Draft; onSaved: () => void }) {
   const [to, setTo] = useState(""); const [subject, setSubject] = useState(""); const [body, setBody] = useState("")
   const [id, setId] = useState<number | undefined>()
+  const [files, setFiles] = useState<File[]>([])
   const [busy, setBusy] = useState(false)
-  useEffect(() => { if (open) { setTo(draft.to); setSubject(draft.subject); setBody(draft.body); setId(draft.id) } }, [open, draft])
+  useEffect(() => { if (open) { setTo(draft.to); setSubject(draft.subject); setBody(draft.body); setId(draft.id); setFiles([]) } }, [open, draft])
 
   async function send() {
     if (!to.trim() || !subject.trim() || !body.trim()) return toast.error("To, subject and body are required")
     setBusy(true)
     try {
-      await api("/email/send", { method: "POST", body: { to, subject, body } })
+      // Always send as multipart so attachments (if any) ride along; the API accepts both.
+      const fd = new FormData()
+      fd.append("to", to); fd.append("subject", subject); fd.append("body", body)
+      files.forEach((f) => fd.append("files[]", f))
+      await apiForm("/email/send", fd)
       if (id) await api("/messages/delete", { method: "POST", body: { id } }) // sent -> remove the draft
       toast.success(`Sent to ${to}`); onOpenChange(false); onSaved()
     } catch (e) { toast.error(e instanceof Error ? e.message : "Send failed") } finally { setBusy(false) }
@@ -388,6 +419,25 @@ function ComposeDialog({ open, onOpenChange, draft, onSaved }:
           <Input type="email" placeholder="To" value={to} onChange={(e) => setTo(e.target.value)} />
           <Input placeholder="Subject" value={subject} onChange={(e) => setSubject(e.target.value)} />
           <Textarea rows={8} placeholder="Write your message…" value={body} onChange={(e) => setBody(e.target.value)} />
+          <div className="space-y-2">
+            <label className="inline-flex cursor-pointer items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+              <Paperclip className="size-4" /> Attach files
+              <input type="file" multiple className="hidden"
+                onChange={(e) => { const fl = Array.from(e.target.files ?? []); setFiles((p) => [...p, ...fl]); e.target.value = "" }} />
+            </label>
+            {files.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {files.map((f, i) => (
+                  <span key={i} className="flex items-center gap-1.5 rounded-md border bg-muted/40 px-2 py-1 text-xs">
+                    <Paperclip className="size-3 text-muted-foreground" />
+                    <span className="max-w-[160px] truncate">{f.name}</span>
+                    <span className="text-muted-foreground">{fmtBytes(f.size)}</span>
+                    <button type="button" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive"><X className="size-3.5" /></button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <DialogFooter className="gap-2 sm:justify-between">
           <Button variant="outline" onClick={saveDraft} disabled={busy}><Save /> Save draft</Button>

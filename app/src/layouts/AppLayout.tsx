@@ -15,11 +15,19 @@ import Footer from "@/layouts/Footer"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { UserDropdown } from "@/components/UserDropdown"
+import { useAuth } from "@/store/auth.store"
 
 export default function AppLayout() {
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(true)
   const [hovered, setHovered] = useState(false)
+
+  // Load the signed-in user for the WHOLE shell (nav + header), not just guarded
+  // routes. Without this, an unmatched URL (a stale link, an old bookmark, a refresh
+  // on the 404 page) renders AppLayout with no user → empty sidebar + broken shell,
+  // because only the route guards used to trigger the /auth/me probe.
+  const { status, loadMe } = useAuth()
+  useEffect(() => { if (status === "loading") void loadMe() }, [status, loadMe])
 
   const isExpanded = open || hovered
 

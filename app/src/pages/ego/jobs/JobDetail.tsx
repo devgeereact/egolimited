@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, CalendarClock, CircleUserRound, Copy, Download, FileText, Mail, MapPin, Phone, Loader2, Package, PauseCircle,
-  Sparkles, Plus, X, ListChecks, Trash2,
+  Sparkles, Plus, X, ListChecks, Trash2, RotateCcw,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -182,12 +182,32 @@ export default function JobDetail() {
     }
   }
 
+  // Manager+ mistake-correction: pull a finished/cancelled job back to active. Reversing a
+  // recorded payment is a separate action on the invoice (Undo payment).
+  async function reopen() {
+    if (!job || !confirm("Reopen this job back to an active status? If a payment was recorded, reverse it separately with Undo payment on the invoice.")) return
+    setBusy(true)
+    try { await api("/jobs/reopen", { method: "POST", body: { id: job.id } }); toast.success("Job reopened"); await load() }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't reopen") } finally { setBusy(false) }
+  }
+
   async function ackMsg(id: number) { await api("/messages/ack", { method: "POST", body: { id } }); toast.success("Acknowledged"); load() }
   async function toggleVis(id: number, visible: boolean) { await api("/messages/visibility", { method: "POST", body: { id, visible } }); toast.success(visible ? "Engineer can see it" : "Hidden from engineer"); load() }
 
   async function createDoc(kind: "invoice" | "quote") {
     if (!job) return
     try {
+      // Invoice from an existing quote → carry over EVERY line + price (accept builds a
+      // draft invoice off the quote). Admin then adds any extra work / adjusts on the draft.
+      // No quote → fall back to a single job-title line.
+      if (kind === "invoice") {
+        const quote = job.invoices.filter((iv) => iv.kind === "quote" && !["void", "declined"].includes(iv.status)).at(-1)
+        if (quote) {
+          const r = await api<{ invoice_id: number }>("/invoices/accept", { method: "POST", body: { id: quote.id } })
+          navigate(`/ego/invoices/detail?id=${r.invoice_id}`)
+          return
+        }
+      }
       const res = await api<{ id: number }>("/invoices", {
         method: "POST",
         body: {
@@ -242,6 +262,10 @@ export default function JobDetail() {
             <Button variant="outline" disabled={busy} onClick={() => setSchedOpen(true)}>
               Reschedule
             </Button>
+          )}
+          {/* Reopen a finished/cancelled job (manager+) — undo a premature paid/closed. */}
+          {atLeast(user?.role, "manager") && ["completed", "invoiced", "paid", "closed", "cancelled"].includes(job.status) && (
+            <Button variant="outline" disabled={busy} onClick={reopen}><RotateCcw className="size-4" /> Reopen</Button>
           )}
           {atLeast(user?.role, "manager") && (
             <Button variant="outline" className="text-destructive hover:text-destructive" disabled={busy}
@@ -449,7 +473,18 @@ export default function JobDetail() {
               {isOffice(user?.role) && (
                 <div className="flex flex-wrap gap-2 border-t pt-2">
                   <Button size="sm" variant="outline" onClick={() => createDoc("quote")}>Create quote</Button>
-                  <Button size="sm" onClick={() => createDoc("invoice")} disabled={job.status !== "completed"} title={job.status !== "completed" ? "Available once the job is completed" : ""}>
+                  {/* Raise an invoice as soon as the job is assigned (payment can take days) —
+                      not only at completion. Blocked only before the job is scheduled or if cancelled. */}
+                  <Button
+                    size="sm"
+                    onClick={() => createDoc("invoice")}
+                    disabled={["new", "cancelled"].includes(job.status)}
+                    title={
+                      job.status === "new" ? "Schedule/assign the job first"
+                      : job.status === "cancelled" ? "This job is cancelled"
+                      : ""
+                    }
+                  >
                     Create invoice
                   </Button>
                 </div>

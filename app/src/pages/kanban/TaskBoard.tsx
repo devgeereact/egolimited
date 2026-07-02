@@ -3,7 +3,7 @@ import {
   DndContext, PointerSensor, useSensor, useSensors, useDraggable, useDroppable,
   type DragEndEvent,
 } from "@dnd-kit/core"
-import { KanbanSquare, Plus, Trash2, Loader2, Pencil, GripVertical } from "lucide-react"
+import { KanbanSquare, Plus, Trash2, Loader2, Pencil, GripVertical, Archive, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dialog"
 import { AiButton } from "@/components/ego/AiButton"
 
-interface Task { id: number; title: string; description: string | null; status: string; accent: string | null; sort: number; assignee_id: number | null; assignee_name: string | null }
+interface Task { id: number; title: string; description: string | null; status: string; accent: string | null; sort: number; assignee_id: number | null; assignee_name: string | null; completed_at: string | null; archived_at: string | null }
 interface Staff { id: number; name: string; role: string }
 
 const COLUMNS = [
@@ -108,10 +108,38 @@ export default function TaskBoard() {
   const [eDesc, setEDesc] = useState("")
   const [eAssignee, setEAssignee] = useState<string>(UNASSIGNED)
   const [saving, setSaving] = useState(false)
+  const [archivedCount, setArchivedCount] = useState(0)
+  const [archiveOpen, setArchiveOpen] = useState(false)
+  const [archived, setArchived] = useState<Task[]>([])
+  const [archiveLoading, setArchiveLoading] = useState(false)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
-  function load() { return api<{ tasks: Task[]; staff: Staff[] }>("/tasks").then((r) => { setTasks(r.tasks); setStaff(r.staff) }) }
+  function load() {
+    return api<{ tasks: Task[]; staff: Staff[]; archived_count: number }>("/tasks").then((r) => {
+      setTasks(r.tasks); setStaff(r.staff); setArchivedCount(r.archived_count ?? 0)
+    })
+  }
   useEffect(() => { load().finally(() => setLoading(false)) }, [])
+
+  async function openArchive() {
+    setArchiveOpen(true); setArchiveLoading(true)
+    try { const r = await api<{ tasks: Task[] }>("/tasks?archived=1"); setArchived(r.tasks) }
+    catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
+    finally { setArchiveLoading(false) }
+  }
+  async function restore(t: Task) {
+    try {
+      await api("/tasks/move", { method: "POST", body: { id: t.id, status: "todo", sort: 0 } })
+      setArchived((p) => p.filter((x) => x.id !== t.id))
+      await load()
+      toast.success("Restored to To do")
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
+  }
+  async function deleteArchived(id: number) {
+    setArchived((p) => p.filter((x) => x.id !== id))
+    setArchivedCount((n) => Math.max(0, n - 1))
+    await api("/tasks/delete", { method: "POST", body: { id } })
+  }
 
   const byCol = useMemo(() => {
     const m: Record<string, Task[]> = {}
@@ -167,16 +195,17 @@ export default function TaskBoard() {
             <p className="mt-1 text-sm text-muted-foreground">Assign work to each other. Colour = who owns the card. {tasks.length} tasks.</p>
           </div>
         </div>
-        {/* People legend */}
-        {staff.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2">
-            {staff.map((s) => (
-              <span key={s.id} className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs">
-                <span className="size-2.5 rounded-full" style={{ background: colorFor(s.id) }} /> {s.name}
-              </span>
-            ))}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* People legend */}
+          {staff.map((s) => (
+            <span key={s.id} className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs">
+              <span className="size-2.5 rounded-full" style={{ background: colorFor(s.id) }} /> {s.name}
+            </span>
+          ))}
+          <Button variant="outline" size="sm" onClick={openArchive} disabled={!archivedCount} title="Cards auto-archive 3 days after they're marked Done">
+            <Archive className="size-4" /> Archived{archivedCount ? ` (${archivedCount})` : ""}
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -222,6 +251,33 @@ export default function TaskBoard() {
             <Button variant="outline" onClick={() => setEdit(null)}>Cancel</Button>
             <Button onClick={saveEdit} disabled={saving || !eTitle.trim()}>{saving ? <Loader2 className="size-4 animate-spin" /> : null} Save</Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={archiveOpen} onOpenChange={setArchiveOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Archive className="size-4" /> Archived cards</DialogTitle>
+          </DialogHeader>
+          <p className="text-xs text-muted-foreground">Cards move here automatically 3 days after they're marked Done, keeping the board clean. Restore one to bring it back to To&nbsp;do.</p>
+          <div className="max-h-[55vh] space-y-2 overflow-y-auto">
+            {archiveLoading ? (
+              <div className="flex justify-center py-10 text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
+            ) : archived.length === 0 ? (
+              <div className="py-10 text-center text-sm text-muted-foreground">Nothing archived yet.</div>
+            ) : archived.map((t) => (
+              <div key={t.id} className="flex items-center gap-2 rounded-lg border bg-card p-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium">{t.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {t.assignee_name ?? "Unassigned"}{t.completed_at ? ` · done ${t.completed_at.slice(0, 10)}` : ""}
+                  </p>
+                </div>
+                <Button size="sm" variant="outline" onClick={() => restore(t)}><RotateCcw className="size-3.5" /> Restore</Button>
+                <Button size="icon" variant="ghost" className="size-8 text-muted-foreground hover:text-destructive" title="Delete permanently" onClick={() => deleteArchived(t.id)}><Trash2 className="size-4" /></Button>
+              </div>
+            ))}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

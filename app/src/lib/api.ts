@@ -40,7 +40,22 @@ export async function api<T = unknown>(
   }
 
   const res = await fetch(`${API_BASE}${path}`, { method, headers, body: payload })
+  return handle<T>(res)
+}
 
+/**
+ * Multipart/form-data POST (file uploads). Do NOT set Content-Type — the browser adds
+ * the boundary. Same auth + error handling as api().
+ */
+export async function apiForm<T = unknown>(path: string, form: FormData): Promise<T> {
+  const headers: Record<string, string> = {}
+  const token = getToken()
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers, body: form })
+  return handle<T>(res)
+}
+
+async function handle<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
     // Session expired / no longer valid: clear the token and bounce to login so
