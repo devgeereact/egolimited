@@ -368,6 +368,17 @@ function ensure_job_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS on_site_at DATETIME NULL");
 }
 
+/** Once a job is COMPLETED and an invoice exists for it (present in the system, even a draft),
+ *  move it straight to 'invoiced' — no need to wait for the invoice to be sent. No-op otherwise. */
+function maybe_mark_invoiced(mysqli $db, ?int $jobId, ?int $actorId): void {
+    if (!$jobId) return;
+    $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $jobId);
+    if (!$job || $job["status"] !== "completed") return;
+    if (!db_one($db, "SELECT id FROM ego_invoices WHERE job_id=? AND kind='invoice' AND status<>'void' AND deleted_at IS NULL LIMIT 1", "i", $jobId)) return;
+    db_exec($db, "UPDATE ego_jobs SET status='invoiced' WHERE id=?", "i", $jobId);
+    log_activity($db, $jobId, $actorId, "status_changed", ["from" => "completed", "to" => "invoiced", "note" => "invoice present"]);
+}
+
 /** Read multipart-uploaded files (field name files[]) into [{name,mime,data}]. Caps size. */
 function read_uploaded_files(): array {
     $out = []; $total = 0;
@@ -1146,8 +1157,10 @@ switch ("$method $route") {
         if ($to === "completed") {
             log_activity($db, $id, null, "ready_to_invoice", []);
             notify_job_completed($db, $id); // M12: alert the office
+            maybe_mark_invoiced($db, $id, (int)$actor["id"]); // invoice already exists → straight to invoiced
         }
-        send(["ok" => true, "status" => $to]);
+        $final = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", $id);
+        send(["ok" => true, "status" => $final["status"] ?? $to]);
     }
 
     // Mistake-correction (manager+): reopen a finished/cancelled job back to an active status.
@@ -1425,6 +1438,7 @@ switch ("$method $route") {
             }
             log_activity($db, $jobId, (int)$actor["id"], $kind === "quote" ? "quote_created" : "invoice_created", ["id" => $invId]);
             $db->commit();
+            maybe_mark_invoiced($db, $jobId, (int)$actor["id"]); // completed job + invoice now present → invoiced
             send(["id" => $invId], 201);
         } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not create the document"); }
     }
@@ -1536,6 +1550,7 @@ switch ("$method $route") {
                 log_activity($db, (int)$q["job_id"], (int)$actor["id"], "invoice_created", ["id" => $newId, "from_quote" => $id]);
             }
             $db->commit();
+            maybe_mark_invoiced($db, (int)$q["job_id"], (int)$actor["id"]); // completed job + new invoice → invoiced
             send(["ok" => true, "invoice_id" => $newId, "quote_number" => $quoteNumber]);
         } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not accept the quote"); }
     }
