@@ -26,6 +26,7 @@ interface Invoice {
   customer_address: { line1?: string; city?: string; postcode?: string } | null
   job_reference: string; job_title: string
   lines: Line[]
+  payments?: { amount: number | string; paid_on?: string; reference?: string | null }[]
   company: {
     company_name: string; address: string | null; phone: string | null; email: string | null; vat_number: string | null
     bank_account_name: string | null; bank_sort_code: string | null; bank_account_number: string | null
@@ -173,6 +174,8 @@ export default function InvoiceDetail() {
   if (loading) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
   if (!inv) return <div className="p-6 text-muted-foreground">Not found.</div>
   const co = inv.company
+  const paidSoFar = (inv.payments ?? []).reduce((s, p) => s + Number(p.amount || 0), 0)
+  const outstanding = Math.max(0, Number(inv.total) - paidSoFar)
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
@@ -309,6 +312,12 @@ export default function InvoiceDetail() {
                 ) : <span className="font-mono">{gbp(totals.vat_amount)}</span>}
               </div>
               <div className="flex justify-between border-t pt-1.5 text-base font-semibold"><span>Total</span><span className="font-mono">{gbp(totals.total)}</span></div>
+              {inv.kind === "invoice" && paidSoFar > 0 && (
+                <>
+                  <div className="flex justify-between text-sm text-muted-foreground"><span>Paid</span><span className="font-mono">−{gbp(paidSoFar)}</span></div>
+                  <div className="flex justify-between border-t pt-1.5 text-base font-semibold"><span>Balance</span><span className="font-mono">{gbp(outstanding)}</span></div>
+                </>
+              )}
             </div>
           </div>
 
@@ -332,7 +341,7 @@ export default function InvoiceDetail() {
         </CardContent>
       </Card>
 
-      <PaymentDialog invoiceId={inv.id} total={Number(inv.total)} open={payOpen} onOpenChange={setPayOpen} onDone={load} />
+      <PaymentDialog invoiceId={inv.id} total={Number(inv.total)} outstanding={outstanding} open={payOpen} onOpenChange={setPayOpen} onDone={load} />
     </div>
   )
 }

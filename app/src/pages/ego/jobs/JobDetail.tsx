@@ -36,6 +36,9 @@ interface JobDetailData {
   quoted_amount: string | null
   scheduled_start: string | null
   scheduled_end: string | null
+  en_route_at: string | null
+  on_site_at: string | null
+  completed_at: string | null
   customer_id: number
   customer_name: string
   customer_phone: string | null
@@ -229,6 +232,29 @@ export default function JobDetail() {
   const targets = user ? allowedTargets(job.status, user.role) : []
   const trackUrl = `${location.origin}${import.meta.env.BASE_URL}track/${job.track_token}`
 
+  const fmtStamp = (s: string | null) =>
+    s ? new Date(s.replace(" ", "T")).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"
+
+  // The single obvious "next step" for this job — a big primary button. Money steps included
+  // so the office is nudged straight from a finished job into invoicing / taking payment.
+  const unpaidInvoice = job.invoices.find((iv) => iv.kind === "invoice" && ["sent", "overdue"].includes(iv.status))
+  const nextStep: { label: string; run: () => void } | null =
+    job.status === "new" ? { label: "Schedule & assign", run: () => setSchedOpen(true) }
+    : job.status === "scheduled" ? { label: "Start travel", run: () => changeStatus("en_route") }
+    : job.status === "en_route" ? { label: "Arrived on site", run: () => changeStatus("on_site") }
+    : job.status === "on_site" ? { label: "Mark complete", run: () => changeStatus("completed") }
+    : job.status === "on_hold" ? { label: "Resume job", run: () => changeStatus("on_site") }
+    : job.status === "completed" ? { label: "Create invoice", run: () => createDoc("invoice") }
+    : job.status === "invoiced" && unpaidInvoice ? { label: "Record payment", run: () => navigate(`/ego/invoices/detail?id=${unpaidInvoice.id}`) }
+    : null
+  // Remaining transitions become demoted "override" buttons. 'invoiced'/'paid' are never manual
+  // (the invoice send + payment drive them), and the happy-path target is already the primary.
+  const primaryTargetStatus =
+    job.status === "new" ? "scheduled" : job.status === "scheduled" ? "en_route"
+    : job.status === "en_route" ? "on_site" : job.status === "on_site" ? "completed"
+    : job.status === "on_hold" ? "on_site" : null
+  const overrides = targets.filter((t) => t !== primaryTargetStatus && !["invoiced", "paid"].includes(t))
+
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -246,15 +272,17 @@ export default function JobDetail() {
           <p className="text-base">{job.title}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {targets.map((to) =>
+          {/* One obvious next step (primary), everything else demoted to outline */}
+          {nextStep && (
+            <Button disabled={busy} onClick={nextStep.run}>
+              {busy && <Loader2 className="animate-spin" />} {nextStep.label}
+            </Button>
+          )}
+          {overrides.map((to) =>
             to === "scheduled" ? (
-              <Button key={to} disabled={busy} onClick={() => setSchedOpen(true)}>
-                Schedule &amp; assign
-              </Button>
+              <Button key={to} variant="outline" disabled={busy} onClick={() => setSchedOpen(true)}>Schedule &amp; assign</Button>
             ) : (
-              <Button key={to} disabled={busy} onClick={() => changeStatus(to)} variant={to === "cancelled" ? "outline" : "default"}>
-                {busy && <Loader2 className="animate-spin" />} {STATUS_LABEL[to]}
-              </Button>
+              <Button key={to} variant="outline" disabled={busy} onClick={() => changeStatus(to)}>{STATUS_LABEL[to]}</Button>
             )
           )}
           {/* Edit the job's details (office+), any time */}
@@ -285,6 +313,28 @@ export default function JobDetail() {
           )}
         </div>
       </div>
+
+      {/* Lifecycle timeline — when each stage actually happened */}
+      {(job.scheduled_start || job.en_route_at || job.on_site_at || job.completed_at) && (
+        <Card>
+          <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-3 p-4">
+            {[
+              { label: "Scheduled", at: job.scheduled_start },
+              { label: "En route", at: job.en_route_at },
+              { label: "On site", at: job.on_site_at },
+              { label: "Completed", at: job.completed_at },
+            ].map((s) => (
+              <div key={s.label} className="flex items-center gap-2">
+                <span className={cn("size-2.5 rounded-full", s.at ? "bg-primary" : "bg-muted-foreground/30")} />
+                <div className="text-sm leading-tight">
+                  <p className={cn("font-medium", !s.at && "text-muted-foreground")}>{s.label}</p>
+                  <p className="text-xs tabular-nums text-muted-foreground">{fmtStamp(s.at)}</p>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <ScheduleDialog
         jobId={job.id}
@@ -476,6 +526,11 @@ export default function JobDetail() {
                 </div>
               )}
 
+              {job.status === "completed" && job.invoices.length === 0 && (
+                <div className="rounded-md bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-400">
+                  Ready to invoice — raise it below.
+                </div>
+              )}
               {isOffice(user?.role) && (
                 <div className="flex flex-wrap gap-2 border-t pt-2">
                   {/* Once the job is paid/closed it's settled — no new quotes or invoices. */}

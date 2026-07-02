@@ -362,6 +362,12 @@ function ensure_task_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL");
 }
 
+/** Per-stage job timestamps (en route / on site) — self-heal for the lifecycle timeline. */
+function ensure_job_cols(mysqli $db): void {
+    $db->query("ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS en_route_at DATETIME NULL");
+    $db->query("ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS on_site_at DATETIME NULL");
+}
+
 /** GDPR: when a message is deleted, remove its stored attachment files + rows so
  *  customer documents don't linger on disk. Best-effort on the file unlink. */
 function delete_message_attachments(mysqli $db, array $ids): void {
@@ -802,6 +808,7 @@ switch ("$method $route") {
 
     case "GET /jobs/get": {
         require_role($db, "admin");
+        ensure_job_cols($db);
         $id = (int)($_GET["id"] ?? 0);
         $j = db_one($db,
             "SELECT j.*, c.name AS customer_name, c.phone AS customer_phone, c.email AS customer_email,
@@ -1072,6 +1079,12 @@ switch ("$method $route") {
             db_exec($db, "UPDATE ego_jobs SET status='on_hold', hold_reason=?, parts_required=?, parts_note=? WHERE id=?",
                 "sisi", $reason, $parts, $partsNote, $id);
             $note = $reason ?: $note;
+        } elseif ($to === "en_route") {
+            ensure_job_cols($db);
+            db_exec($db, "UPDATE ego_jobs SET status='en_route', en_route_at=COALESCE(en_route_at, NOW()) WHERE id=?", "i", $id);
+        } elseif ($to === "on_site") {
+            ensure_job_cols($db);
+            db_exec($db, "UPDATE ego_jobs SET status='on_site', on_site_at=COALESCE(on_site_at, NOW()) WHERE id=?", "i", $id);
         } else {
             db_exec($db, "UPDATE ego_jobs SET status=? WHERE id=?", "si", $to, $id);
         }
@@ -1554,6 +1567,8 @@ switch ("$method $route") {
         require_role($db, "admin");
         $todayJobs = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL AND DATE(scheduled_start)=CURDATE() AND status NOT IN ('closed','cancelled')")["c"] ?? 0);
         $toSchedule = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL AND status='new'")["c"] ?? 0);
+        // Jobs finished but not yet invoiced — the money that's owed but not billed.
+        $awaitingInvoice = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL AND status='completed'")["c"] ?? 0);
         // Operational pulse
         $inProgress = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL AND status IN ('en_route','on_site')")["c"] ?? 0);
         $completedToday = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL AND DATE(completed_at)=CURDATE()")["c"] ?? 0);
@@ -1598,7 +1613,7 @@ switch ("$method $route") {
         foreach ($messages as &$m) { $m["id"] = (int)$m["id"]; $m["job_id"] = $m["job_id"] !== null ? (int)$m["job_id"] : null; $m["acknowledged"] = (int)$m["acknowledged"]; $m["rating"] = $m["rating"] !== null ? (int)$m["rating"] : null; }
         $unreadMsgs = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_messages WHERE direction='inbound' AND channel='review' AND acknowledged=0")["c"] ?? 0);
         send([
-            "today_jobs" => $todayJobs, "to_schedule" => $toSchedule,
+            "today_jobs" => $todayJobs, "to_schedule" => $toSchedule, "awaiting_invoice" => $awaitingInvoice,
             "in_progress" => $inProgress, "completed_today" => $completedToday, "open_jobs" => $openJobs,
             "unpaid_total" => $unpaid, "overdue_total" => $overdue, "collected_30d" => $collected30,
             "review_avg" => $reviewAvg, "review_count" => $reviewCount,

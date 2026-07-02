@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
-  Briefcase, CalendarPlus, PoundSterling, AlertTriangle, Loader2, Sparkles, Droplets, Wind,
+  Briefcase, CalendarPlus, PoundSterling, AlertTriangle, Loader2, Sparkles, Droplets, Wind, FileText,
   Thermometer, Clock, ArrowRight, CloudSun, MapPin, Truck, BadgePoundSterling,
   Star, CheckCircle2, type LucideIcon,
 } from "lucide-react"
@@ -23,7 +23,7 @@ interface Wx {
 }
 
 interface Dash {
-  today_jobs: number; to_schedule: number; in_progress: number; completed_today: number; open_jobs: number
+  today_jobs: number; to_schedule: number; awaiting_invoice: number; in_progress: number; completed_today: number; open_jobs: number
   unpaid_total: number; overdue_total: number; collected_30d: number
   review_avg: number | null; review_count: number
   today: { id: number; reference: string; title: string; status: EgoStatus; scheduled_start: string | null; customer_name: string }[]
@@ -85,7 +85,7 @@ export default function EgoDashboard() {
       const lines = d.recent.slice(0, 10).map((a) => `- ${recentText(a.action, a.detail)}${a.job_reference ? ` (${a.job_reference})` : ""}`).join("\n")
       const prompt =
         `You are the office assistant for EGO LIMITED, a maintenance company. Give a short morning briefing (3-4 bullets) and flag what needs attention. Be concise.\n\n` +
-        `Jobs today: ${d.today_jobs}. In progress now: ${d.in_progress}. Awaiting schedule: ${d.to_schedule}. Open jobs: ${d.open_jobs}. Completed today: ${d.completed_today}.\n` +
+        `Jobs today: ${d.today_jobs}. In progress now: ${d.in_progress}. Awaiting schedule: ${d.to_schedule}. Awaiting invoice: ${d.awaiting_invoice}. Open jobs: ${d.open_jobs}. Completed today: ${d.completed_today}.\n` +
         `Outstanding: £${d.unpaid_total}. Overdue: £${d.overdue_total}. Collected (30d): £${d.collected_30d}. Avg review: ${d.review_avg ?? "n/a"} (${d.review_count}).\n` +
         `Recent activity:\n${lines}`
       const r = await api<{ text: string }>("/ai/draft", { method: "POST", body: { prompt } })
@@ -100,6 +100,7 @@ export default function EgoDashboard() {
     { label: "Today's jobs", value: String(d.today_jobs), icon: Briefcase, to: "/ego/schedule", tone: "text-blue-600 dark:text-blue-400 bg-blue-500/10" },
     { label: "In progress", value: String(d.in_progress), icon: Truck, to: "/ego/schedule", tone: "text-violet-600 dark:text-violet-400 bg-violet-500/10" },
     { label: "To schedule", value: String(d.to_schedule), icon: CalendarPlus, to: "/ego/jobs", tone: "text-amber-600 dark:text-amber-400 bg-amber-500/10" },
+    { label: "Awaiting invoice", value: String(d.awaiting_invoice), icon: FileText, to: "/ego/jobs", tone: "text-orange-600 dark:text-orange-400 bg-orange-500/10" },
     { label: "Outstanding", value: gbp(d.unpaid_total), icon: PoundSterling, to: "/ego/payments", tone: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
     { label: "Overdue", value: gbp(d.overdue_total), icon: AlertTriangle, to: "/ego/payments", tone: "text-red-600 dark:text-red-400 bg-red-500/10" },
     { label: "Collected (30d)", value: gbp(d.collected_30d), icon: BadgePoundSterling, to: "/ego/payments", tone: "text-teal-600 dark:text-teal-400 bg-teal-500/10" },

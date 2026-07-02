@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS ego_jobs (
   quoted_amount   DECIMAL(10,2) NULL,
   scheduled_start DATETIME NULL,
   scheduled_end   DATETIME NULL,
+  en_route_at     DATETIME NULL,   -- stamped when engineer starts travelling
+  on_site_at      DATETIME NULL,   -- stamped on arrival
   signoff_name    VARCHAR(160) NULL,
   signoff_signature TEXT NULL,
   completed_at    DATETIME NULL,
@@ -298,6 +300,10 @@ CREATE TABLE IF NOT EXISTS ego_job_checklist (
 
 -- Invoicing: link an auto-created invoice back to the quote it was converted from
 ALTER TABLE ego_invoices ADD COLUMN IF NOT EXISTS converted_from_quote_id INT NULL;
+
+-- Jobs: per-stage timestamps for the lifecycle timeline + SLA visibility
+ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS en_route_at DATETIME NULL;
+ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS on_site_at DATETIME NULL;
 
 -- Task board: who a card is assigned to (workers assign to each other; colour = assignee)
 ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS assignee_id INT NULL;
