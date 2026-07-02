@@ -943,6 +943,42 @@ switch ("$method $route") {
         }
     }
 
+    // Edit a job's core details (title, description, priority, quote, site address). Status is
+    // driven by the state machine (/jobs/status); the customer stays fixed (reference + threading).
+    case "POST /jobs/update": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $job = db_one($db, "SELECT id,customer_id,address_id FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$job) fail("Job not found", 404);
+        $title = trim($b["title"] ?? "");
+        if ($title === "") fail("Title is required");
+        $priority = in_array($b["priority"] ?? "", ["low", "normal", "urgent"], true) ? $b["priority"] : "normal";
+        $quoted = isset($b["quoted_amount"]) && $b["quoted_amount"] !== "" ? (float)$b["quoted_amount"] : null;
+        $db->begin_transaction();
+        try {
+            db_exec($db, "UPDATE ego_jobs SET title=?, description=?, priority=?, quoted_amount=? WHERE id=?",
+                "sssdi", $title, trim($b["description"] ?? "") ?: null, $priority, $quoted, $id);
+            $a = $b["address"] ?? null;
+            if (is_array($a)) {
+                $line1 = trim($a["line1"] ?? "") ?: null;
+                $city = trim($a["city"] ?? "") ?: null;
+                $postcode = trim($a["postcode"] ?? "") ?: null;
+                if ($job["address_id"]) {
+                    db_exec($db, "UPDATE ego_addresses SET line1=?,city=?,postcode=? WHERE id=?",
+                        "sssi", $line1, $city, $postcode, (int)$job["address_id"]);
+                } elseif ($line1 !== null || $city !== null || $postcode !== null) {
+                    db_exec($db, "INSERT INTO ego_addresses (customer_id,line1,line2,city,postcode,is_primary) VALUES (?,?,?,?,?,0)",
+                        "issss", (int)$job["customer_id"], $line1, null, $city, $postcode);
+                    db_exec($db, "UPDATE ego_jobs SET address_id=? WHERE id=?", "ii", (int)$db->insert_id, $id);
+                }
+            }
+            log_activity($db, $id, (int)$actor["id"], "updated", ["title" => $title]);
+            $db->commit();
+            send(["ok" => true]);
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not update the job"); }
+    }
+
     case "GET /schedule": {
         require_role($db, "admin");
         $rows = db_all($db,

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, CalendarClock, CircleUserRound, Copy, Download, FileText, Mail, MapPin, Phone, Loader2, Package, PauseCircle,
-  Sparkles, Plus, X, ListChecks, Trash2, RotateCcw,
+  Sparkles, Plus, X, ListChecks, Trash2, RotateCcw, Pencil,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -256,6 +256,12 @@ export default function JobDetail() {
                 {busy && <Loader2 className="animate-spin" />} {STATUS_LABEL[to]}
               </Button>
             )
+          )}
+          {/* Edit the job's details (office+), any time */}
+          {isOffice(user?.role) && (
+            <Button asChild variant="outline" disabled={busy}>
+              <Link to={`/ego/jobs/edit?id=${job.id}`}><Pencil className="size-4" /> Edit</Link>
+            </Button>
           )}
           {/* Reschedule shortcut once already scheduled */}
           {(job.status === "scheduled" || job.status === "on_hold") && isOffice(user?.role) && (

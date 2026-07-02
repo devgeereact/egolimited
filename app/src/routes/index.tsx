@@ -124,6 +124,7 @@ export const router = createBrowserRouter (
             {path: "ego/jobs", element: <JobsList /> },
             {path: "ego/jobs/detail", element: <JobDetail /> },
             {path: "ego/jobs/new", element: <JobForm /> },
+            {path: "ego/jobs/edit", element: <JobForm /> },
             {path: "ego/schedule", element: <EgoScheduleBoard /> },
             {path: "ego/customers", element: <EgoCustomersList /> },
             {path: "ego/customers/detail", element: <EgoCustomerDetail /> },
