@@ -1427,22 +1427,31 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
 
-    // Accept a quote → mark it accepted and auto-create a DRAFT invoice for the same job
-    // (copying its lines/totals). Draft, not sent: the sequential invoice number is only
-    // allocated when the office reviews and sends it (UK gap-free numbering). Idempotent:
-    // a second accept won't create a duplicate invoice.
+    // Accept a quote → mark it ACCEPTED and auto-create a DRAFT invoice for the same job
+    // (copying its lines/totals). Acceptance needs NO send/email — a manager can accept a
+    // draft quote off the back of a phone/in-person agreement, or when the customer has no
+    // email. On acceptance the quote is given its number + issue date so it's a real recorded
+    // document (not a lingering "Draft"). Idempotent: a second accept won't duplicate anything.
+    // The draft invoice is where any extra work / price changes are added before sending.
     case "POST /invoices/accept": {
         $actor = require_role($db, "admin");
         $id = (int)(body()["id"] ?? 0);
         ensure_invoice_cols($db);
-        $q = db_one($db, "SELECT id,kind,status,job_id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
+        $q = db_one($db, "SELECT id,kind,status,job_id,customer_id,number FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$q) fail("Not found", 404);
         if ($q["kind"] !== "quote") fail("Only a quote can be accepted", 400);
         if (in_array($q["status"], ["void", "declined"], true)) fail("This quote is " . $q["status"], 409);
         $existing = db_one($db, "SELECT id FROM ego_invoices WHERE converted_from_quote_id=? AND deleted_at IS NULL", "i", $id);
         $db->begin_transaction();
         try {
-            db_exec($db, "UPDATE ego_invoices SET status='accepted' WHERE id=?", "i", $id);
+            // Number the quote if it was never sent — an accepted quote is a committed record.
+            $quoteNumber = $q["number"];
+            if (!$quoteNumber) {
+                $quoteNumber = allocate_doc_number($db, "quote", (int)$q["customer_id"]); // per-customer, gap-free
+                db_exec($db, "UPDATE ego_invoices SET number=?, status='accepted', issue_date=COALESCE(issue_date, CURDATE()) WHERE id=?", "si", $quoteNumber, $id);
+            } else {
+                db_exec($db, "UPDATE ego_invoices SET status='accepted' WHERE id=?", "i", $id);
+            }
             $newId = $existing ? (int)$existing["id"] : 0;
             if (!$existing) {
                 db_exec($db,
@@ -1458,7 +1467,7 @@ switch ("$method $route") {
                 log_activity($db, (int)$q["job_id"], (int)$actor["id"], "invoice_created", ["id" => $newId, "from_quote" => $id]);
             }
             $db->commit();
-            send(["ok" => true, "invoice_id" => $newId]);
+            send(["ok" => true, "invoice_id" => $newId, "quote_number" => $quoteNumber]);
         } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not accept the quote"); }
     }
 

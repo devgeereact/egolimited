@@ -125,13 +125,15 @@ export default function InvoiceDetail() {
     toast.success("Voided"); load()
   }
 
-  // Quote accepted → server marks it accepted + creates a DRAFT invoice; jump to it.
+  // Quote accepted → server numbers + marks it accepted (no send/email needed) and creates a
+  // DRAFT invoice; jump to it. For phone/in-person deals or customers with no email.
   async function accept() {
     if (!inv) return
+    if (!confirm("Mark this quote as accepted? Use this when the customer has agreed — in person, by phone, or when they have no email. The quote is numbered and recorded (no need to email it first), and a draft invoice is started for any extra work or price changes.")) return
     setBusy(true)
     try {
-      const r = await api<{ invoice_id: number }>("/invoices/accept", { method: "POST", body: { id: inv.id } })
-      toast.success("Quote accepted — draft invoice created")
+      const r = await api<{ invoice_id: number; quote_number: string }>("/invoices/accept", { method: "POST", body: { id: inv.id } })
+      toast.success(`Quote ${r.quote_number ?? ""} accepted — draft invoice created`.replace("  ", " "))
       if (r.invoice_id) navigate(`/ego/invoices/detail?id=${r.invoice_id}`); else load()
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") } finally { setBusy(false) }
   }
