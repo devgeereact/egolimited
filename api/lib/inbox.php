@@ -66,6 +66,93 @@ function inbox_plain_body($conn, int $i): string {
     return trim(mb_convert_encoding($body, "UTF-8", "UTF-8,ISO-8859-1"));
 }
 
+/* ---------------- Attachments (stored off web root; served via signed URL) ---------------- */
+// Self-contained here (not in index.php) because cron.php also drives inbox_sync().
+
+// NOTE: this file lives in api/lib, so it needs THREE "../" to reach ~/ego_private
+// (home dir, OUTSIDE the web root) — matching index.php's mail_attach_dir() which is
+// in api/ and uses two. Keep these two in sync or downloads 404 / files leak into docroot.
+function inbox_attach_dir(): string { return __DIR__ . "/../../../ego_private/mail_attach"; }
+
+function inbox_ensure_attachments(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_message_attachments (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        message_id INT NOT NULL,
+        filename   VARCHAR(255) NOT NULL,
+        mime       VARCHAR(160) NOT NULL DEFAULT 'application/octet-stream',
+        size       INT NOT NULL DEFAULT 0,
+        storage    VARCHAR(255) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX (message_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** Original filename of a MIME part (Content-Disposition filename, else Content-Type name). "" if none. */
+function inbox_part_filename($part): string {
+    $pick = function ($list, $attr): string {
+        if (!empty($list)) foreach ($list as $p) {
+            if (strcasecmp((string)($p->attribute ?? ""), $attr) === 0) return (string)($p->value ?? "");
+        }
+        return "";
+    };
+    $fn = $pick($part->dparameters ?? [], "filename");
+    if ($fn === "") $fn = $pick($part->parameters ?? [], "name");
+    if ($fn === "") return "";
+    return trim(imap_utf8($fn));
+}
+
+/** primary/subtype for a MIME part (IMAP encodes the primary type as an int). */
+function inbox_part_mime($part): string {
+    $types = [0 => "text", 1 => "multipart", 2 => "message", 3 => "application", 4 => "audio", 5 => "image", 6 => "video", 7 => "model", 8 => "other"];
+    $primary = $types[$part->type ?? 3] ?? "application";
+    return $primary . "/" . strtolower((string)($part->subtype ?? "octet-stream"));
+}
+
+/** basename + strip control chars; keeps the extension. Never empty. */
+function inbox_safe_filename(string $n): string {
+    $n = basename(str_replace("\\", "/", $n));
+    $n = trim((string) preg_replace('/[\r\n\x00]+/', "", $n));
+    if ($n === "") $n = "attachment";
+    return strlen($n) > 200 ? substr($n, 0, 200) : $n;
+}
+
+/** Walk the MIME tree, collecting every leaf that carries a filename (a real attachment). */
+function inbox_collect_attachments($conn, int $i, $struct, string $prefix, array &$out): void {
+    if (empty($struct->parts)) return;
+    foreach ($struct->parts as $idx => $part) {
+        $sec = $prefix . ($idx + 1);
+        $name = inbox_part_filename($part);
+        // A named, non-multipart part is an attachment — capture it and don't descend into it.
+        if ($name !== "" && ($part->type ?? -1) !== 1) { $out[] = ["section" => $sec, "part" => $part, "name" => $name]; continue; }
+        if (!empty($part->parts)) inbox_collect_attachments($conn, $i, $part, $sec . ".", $out);
+    }
+}
+
+/** Save a message's attachments to disk + ego_message_attachments. Returns count saved. */
+function inbox_store_attachments(mysqli $db, $conn, int $i, $struct, int $messageId): int {
+    $leaves = [];
+    inbox_collect_attachments($conn, $i, $struct, "", $leaves);
+    if (!$leaves) return 0;
+    inbox_ensure_attachments($db);
+    $dir = inbox_attach_dir();
+    if (!is_dir($dir) && !@mkdir($dir, 0700, true)) return 0;
+    $saved = 0;
+    foreach ($leaves as $lf) {
+        $raw = imap_fetchbody($conn, $i, $lf["section"]);
+        if ($raw === false || $raw === "") continue;
+        $bin = inbox_decode($raw, $lf["part"]->encoding ?? 0);
+        if ($bin === "" || strlen($bin) > 20_000_000) continue; // 20 MB per-file cap
+        $safeName = inbox_safe_filename($lf["name"]);
+        $ext = strtolower((string) preg_replace('/[^a-z0-9]+/i', "", pathinfo($safeName, PATHINFO_EXTENSION)));
+        $stored = "att{$messageId}_" . bin2hex(random_bytes(8)) . ($ext !== "" ? ".$ext" : "");
+        if (@file_put_contents("$dir/$stored", $bin) === false) continue;
+        db_exec($db, "INSERT INTO ego_message_attachments (message_id,filename,mime,size,storage) VALUES (?,?,?,?,?)",
+            "issis", $messageId, $safeName, inbox_part_mime($lf["part"]), strlen($bin), $stored);
+        $saved++;
+    }
+    return $saved;
+}
+
 /** Build the IMAP mailbox connection string from the saved integration settings. */
 function inbox_mailbox(mysqli $db): string {
     $host = integ($db, "imap_host");
@@ -139,6 +226,10 @@ function inbox_sync(mysqli $db): int {
             "INSERT INTO ego_messages (customer_id,job_id,direction,channel,from_email,from_name,subject,body,body_html,uid,status,archived)
              VALUES (?,?, 'inbound','email', ?,?,?,?,?,?, 'received', ?)",
             "iissssssi", $cid, $jobId, $fromEmail, $fromName, $subject, $body, $bodyHtml, $uid, $bounce);
+        // Save any attachments in their original form (off web root). Never let a bad
+        // attachment abort the whole sync — the message row is already stored.
+        $mid = (int) $db->insert_id;
+        try { inbox_store_attachments($db, $conn, $i, imap_fetchstructure($conn, $i), $mid); } catch (Throwable $e) { /* skip */ }
         $count++;
     }
     imap_close($conn);

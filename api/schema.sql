@@ -191,6 +191,8 @@ CREATE TABLE IF NOT EXISTS ego_tasks (
   status      VARCHAR(24) NOT NULL DEFAULT 'backlog',
   accent      VARCHAR(16) NULL,
   sort        INT NOT NULL DEFAULT 0,
+  completed_at DATETIME NULL,   -- set when card enters 'done'; basis for the 3-day auto-archive
+  archived_at  DATETIME NULL,   -- set once a done card ages out; hidden from the board by default
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -294,11 +296,30 @@ CREATE TABLE IF NOT EXISTS ego_job_checklist (
   INDEX (job_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Invoicing: link an auto-created invoice back to the quote it was converted from
+ALTER TABLE ego_invoices ADD COLUMN IF NOT EXISTS converted_from_quote_id INT NULL;
+
 -- Task board: who a card is assigned to (workers assign to each other; colour = assignee)
 ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS assignee_id INT NULL;
+-- Task board: done-timestamp + archive (auto-archive done cards after 3 days; hidden from board)
+ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS completed_at DATETIME NULL;
+ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL;
 
 -- Customer reviews: stored as a message with a star rating + channel='review'
 ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS rating TINYINT NULL;
+
+-- Email attachments (inbound captured on IMAP sync, outbound kept on send). Files live
+-- OUTSIDE the web root (~/ego_private/mail_attach) and are served only via signed URLs.
+CREATE TABLE IF NOT EXISTS ego_message_attachments (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  message_id INT NOT NULL,
+  filename   VARCHAR(255) NOT NULL,
+  mime       VARCHAR(160) NOT NULL DEFAULT 'application/octet-stream',
+  size       INT NOT NULL DEFAULT 0,
+  storage    VARCHAR(255) NOT NULL,   -- random on-disk name
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX (message_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ============================================================================
 -- PROCUREMENT (M-B): suppliers + subcontractors. ego_-prefixed, soft-delete.

@@ -63,9 +63,19 @@ $sent = 0;
 foreach ($overdue as $inv) {
     if (!filter_var($inv["customer_email"] ?? "", FILTER_VALIDATE_EMAIL)) continue;
     try {
-        ego_send_mail($db, $inv["customer_email"], $inv["customer_name"], "Payment reminder: " . ($inv["number"] ?? $inv["payment_reference"]), render_invoice_email($inv, $co));
+        $remHtml = render_invoice_email($inv, $co);
+        $remSubject = "Payment reminder: " . ($inv["number"] ?? $inv["payment_reference"]);
+        ego_send_mail($db, $inv["customer_email"], $inv["customer_name"], $remSubject, $remHtml);
+        ego_record_sent($db, (int)$inv["customer_id"], (int)$inv["job_id"], $inv["customer_email"], $remSubject, $remHtml); // → Sent folder
         db_exec($db, "UPDATE ego_invoices SET reminded_at=NOW() WHERE id=?", "i", (int)$inv["id"]);
         $sent++;
     } catch (Throwable $e) { /* skip — SMTP may be unset */ }
 }
 echo "reminders: $sent sent\n";
+
+// 3) task board housekeeping: archive cards that have sat in Done for > 3 days
+$db->query("ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS completed_at DATETIME NULL"); // self-heal
+$db->query("ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL");
+db_exec($db, "UPDATE ego_tasks SET completed_at=NOW() WHERE status IN ('done','complete') AND completed_at IS NULL AND archived_at IS NULL");
+$db->query("UPDATE ego_tasks SET archived_at=NOW() WHERE archived_at IS NULL AND status IN ('done','complete') AND completed_at IS NOT NULL AND completed_at < DATE_SUB(NOW(), INTERVAL 3 DAY)");
+echo "tasks archived: " . $db->affected_rows . "\n";

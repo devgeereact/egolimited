@@ -35,6 +35,26 @@ function ego_brand_voice(mysqli $db): string {
 }
 
 /**
+ * Brand style guide for GENERATED IMAGES (campaign headers, social). Keeps every
+ * image on-brand: real UK maintenance settings, the ember/charcoal palette, and the
+ * hard rules image models need (no text/logos — they render letters as gibberish).
+ * Owner can override via Settings key `brand_image_style`.
+ */
+const EGO_BRAND_IMAGE_STYLE_DEFAULT = <<<'EGOIMG'
+Create a photograph for EGO LTD, a UK property-maintenance company (homes and commercial) based in South-East London.
+STYLE: photorealistic, premium editorial/documentary feel. Real UK settings — terraced houses, flats, small commercial units, kitchens, bathrooms, roofs, boilers. Real tradespeople in clean plain workwear or hi-vis, tidy tools, a clean unbranded work van where it fits. Natural daylight, crisp focus, shallow depth of field. Warm, grounded and trustworthy — never stocky, staged, cheesy or over-saturated.
+COLOUR: warm amber/ember accents (like #EF9F27) against deep charcoal (#171816) and clean neutral backgrounds.
+COMPOSITION: landscape banner, uncluttered, with clear negative space so a headline can be added later.
+STRICT RULES: the image must contain NO text, NO words, NO letters, NO numbers, NO logos, NO watermarks and NO signage lettering (AI renders text as gibberish, so leave it out entirely). No distorted hands or faces, no clutter, no gore.
+EGOIMG;
+
+/** The editable brand image-style guide (Settings override, else the built-in default). */
+function ego_brand_image_style(mysqli $db): string {
+    $v = trim((string) (integ($db, "brand_image_style") ?? ""));
+    return $v !== "" ? $v : EGO_BRAND_IMAGE_STYLE_DEFAULT;
+}
+
+/**
  * Build a full system prompt: the brand voice plus a task-specific instruction.
  * Pass the per-surface instruction (e.g. "Write a short internal task description").
  */

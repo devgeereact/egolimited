@@ -54,6 +54,42 @@ function ego_mime_alt(string $html, string $boundary): string {
         . "--$boundary\r\nContent-Type: text/html; charset=UTF-8\r\n\r\n$html\r\n\r\n--$boundary--\r\n";
 }
 
+/** Full MIME body for the given top boundary. With attachments → multipart/mixed
+ *  wrapping the alternative part + each file (base64); without → plain alternative.
+ *  Each attachment: ["name"=>string, "mime"=>string, "data"=>raw bytes]. */
+function ego_mime_body(string $html, array $attachments, string $boundary): string {
+    if (!$attachments) return ego_mime_alt($html, $boundary);
+    $alt = "=_alt_" . bin2hex(random_bytes(6));
+    $out = "--$boundary\r\nContent-Type: multipart/alternative; boundary=\"$alt\"\r\n\r\n"
+        . ego_mime_alt($html, $alt) . "\r\n";
+    foreach ($attachments as $a) {
+        $fn = str_replace(['"', "\r", "\n"], "", (string) ($a["name"] ?? "attachment"));
+        $mime = str_replace(['"', "\r", "\n"], "", (string) ($a["mime"] ?? "application/octet-stream"));
+        $out .= "--$boundary\r\n"
+            . "Content-Type: $mime; name=\"$fn\"\r\n"
+            . "Content-Transfer-Encoding: base64\r\n"
+            . "Content-Disposition: attachment; filename=\"$fn\"\r\n\r\n"
+            . chunk_split(base64_encode((string) ($a["data"] ?? ""))) . "\r\n";
+    }
+    return $out . "--$boundary--\r\n";
+}
+
+/** The Content-Type for the top-level part given whether there are attachments. */
+function ego_top_ctype(array $attachments): string { return $attachments ? "multipart/mixed" : "multipart/alternative"; }
+
+/** Record an outbound email in ego_messages so EVERY email the app sends (invoices,
+ *  quotes, reminders, replies) shows up in the Sent folder. Best-effort — a logging
+ *  failure must never break the actual send. Self-contained so cron can call it too. */
+function ego_record_sent(mysqli $db, ?int $cid, ?int $jobId, string $to, string $subject, string $html): int {
+    $s = @$db->prepare("INSERT INTO ego_messages (customer_id,job_id,direction,channel,to_email,subject,body,body_html,status)
+                        VALUES (?,?, 'outbound','email', ?,?,?,?, 'sent')");
+    if (!$s) return 0;
+    $body = ego_html_to_text($html);
+    $s->bind_param("iissss", $cid, $jobId, $to, $subject, $body, $html);
+    try { $s->execute(); } catch (Throwable $e) { return 0; }
+    return (int)$db->insert_id;
+}
+
 /** RFC 2606/6761 reserved + demo placeholder domains — mail here can never be
  *  delivered and just rots in the queue (the "delayed 72 hours" warnings). Skip it. */
 function ego_is_undeliverable(string $email): bool {
@@ -66,29 +102,29 @@ function ego_is_undeliverable(string $email): bool {
     return false;
 }
 
-function ego_send_mail(mysqli $db, string $to, ?string $toName, string $subject, string $html): void {
+function ego_send_mail(mysqli $db, string $to, ?string $toName, string $subject, string $html, array $attachments = []): void {
     // Never queue mail to reserved/demo addresses — prevents the 72h bounce warnings.
     if (ego_is_undeliverable($to)) return;
     if (integ($db, "smtp_host")) {
-        try { ego_send_smtp($db, $to, $toName, $subject, $html); return; }
+        try { ego_send_smtp($db, $to, $toName, $subject, $html, $attachments); return; }
         catch (Throwable $e) { /* fall back to local sendmail */ }
     }
-    ego_send_phpmail($db, $to, $toName, $subject, $html);
+    ego_send_phpmail($db, $to, $toName, $subject, $html, $attachments);
 }
 
 /** Local sendmail (works from web on cPanel; no outbound socket needed). */
-function ego_send_phpmail(mysqli $db, string $to, ?string $toName, string $subject, string $html): void {
+function ego_send_phpmail(mysqli $db, string $to, ?string $toName, string $subject, string $html, array $attachments = []): void {
     $from = integ($db, "smtp_from") ?: integ($db, "smtp_user");
     if (!$from) throw new RuntimeException("No sender address (Settings → Integrations)");
     $fromName = integ($db, "smtp_from_name") ?: "EGO LIMITED";
     $boundary = "=_ego_" . bin2hex(random_bytes(8));
     $headers = "From: =?UTF-8?B?" . base64_encode($fromName) . "?= <$from>\r\n"
         . "Reply-To: $from\r\nMIME-Version: 1.0\r\n"
-        . "Content-Type: multipart/alternative; boundary=\"$boundary\"\r\n";
-    if (!@mail($to, $subject, ego_mime_alt($html, $boundary), $headers, "-f$from")) throw new RuntimeException("Local mail() failed");
+        . "Content-Type: " . ego_top_ctype($attachments) . "; boundary=\"$boundary\"\r\n";
+    if (!@mail($to, $subject, ego_mime_body($html, $attachments, $boundary), $headers, "-f$from")) throw new RuntimeException("Local mail() failed");
 }
 
-function ego_send_smtp(mysqli $db, string $to, ?string $toName, string $subject, string $html): void {
+function ego_send_smtp(mysqli $db, string $to, ?string $toName, string $subject, string $html, array $attachments = []): void {
     $host = integ($db, "smtp_host");
     $user = integ($db, "smtp_user");
     $pass = (string) integ($db, "smtp_pass");
@@ -142,8 +178,8 @@ function ego_send_smtp(mysqli $db, string $to, ?string $toName, string $subject,
     $headers = "From: " . mb_encode_mimeheader($fromName) . " <$from>\r\n"
         . "To: " . ($toName ? mb_encode_mimeheader($toName) . " <$to>" : $to) . "\r\n"
         . "Subject: " . mb_encode_mimeheader($subject) . "\r\n"
-        . "MIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"$boundary\"\r\n";
-    $body = preg_replace('/^\./m', '..', ego_mime_alt($html, $boundary)); // dot-stuffing
+        . "MIME-Version: 1.0\r\nContent-Type: " . ego_top_ctype($attachments) . "; boundary=\"$boundary\"\r\n";
+    $body = preg_replace('/^\./m', '..', ego_mime_body($html, $attachments, $boundary)); // dot-stuffing
     fwrite($fp, $headers . "\r\n" . $body . "\r\n.\r\n");
     $expect("", ["250"]);
     @fwrite($fp, "QUIT\r\n");

@@ -119,6 +119,16 @@ function photo_url(int $photoId, int $ttl = 86400): string {
     return "/api/jobs/photo-file?id=$photoId&exp=$exp&sig=$sig";
 }
 
+/* ---------- private email-attachment storage (same private-dir + signed-URL model) ---------- */
+// Email attachments (customer documents) live OUTSIDE the web root and are only reachable
+// through a short-lived signed URL — same pattern as job photos, so nothing is ever public.
+function mail_attach_dir(): string { return __DIR__ . "/../../ego_private/mail_attach"; }
+function attach_url(int $attId, int $ttl = 86400): string {
+    $exp = time() + $ttl;
+    $sig = substr(hash_hmac("sha256", "att.$attId.$exp", photo_secret()), 0, 32);
+    return "/api/email/attachment-file?id=$attId&exp=$exp&sig=$sig";
+}
+
 /* ---------- auth helpers ---------- */
 function current_user(mysqli $db): ?array {
     $tok = bearer();
@@ -324,6 +334,47 @@ function ensure_subscribers_table(mysqli $db): void {
 function ensure_message_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS archived TINYINT(1) NOT NULL DEFAULT 0");
     $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS flagged TINYINT(1) NOT NULL DEFAULT 0");
+}
+
+/** Email attachments (inbound + outbound), stored on disk off the web root; one row per file.
+ *  `storage` is the random on-disk filename; `filename` is the original name shown to users. */
+function ensure_message_attachments(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_message_attachments (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        message_id INT NOT NULL,
+        filename   VARCHAR(255) NOT NULL,
+        mime       VARCHAR(160) NOT NULL DEFAULT 'application/octet-stream',
+        size       INT NOT NULL DEFAULT 0,
+        storage    VARCHAR(255) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX (message_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** Links an auto-created invoice back to the quote it came from (idempotent conversion). */
+function ensure_invoice_cols(mysqli $db): void {
+    $db->query("ALTER TABLE ego_invoices ADD COLUMN IF NOT EXISTS converted_from_quote_id INT NULL");
+}
+
+/** Task-board done/archive timestamps — self-heal so the board works even before migrate.php runs. */
+function ensure_task_cols(mysqli $db): void {
+    $db->query("ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS completed_at DATETIME NULL");
+    $db->query("ALTER TABLE ego_tasks ADD COLUMN IF NOT EXISTS archived_at DATETIME NULL");
+}
+
+/** GDPR: when a message is deleted, remove its stored attachment files + rows so
+ *  customer documents don't linger on disk. Best-effort on the file unlink. */
+function delete_message_attachments(mysqli $db, array $ids): void {
+    $ids = array_values(array_filter(array_map("intval", $ids), fn($n) => $n > 0));
+    if (!$ids) return;
+    ensure_message_attachments($db);
+    $place = implode(",", array_fill(0, count($ids), "?"));
+    $types = str_repeat("i", count($ids));
+    foreach (db_all($db, "SELECT storage FROM ego_message_attachments WHERE message_id IN ($place)", $types, ...$ids) as $r) {
+        $f = mail_attach_dir() . "/" . basename((string)$r["storage"]);
+        if (is_file($f)) @unlink($f);
+    }
+    db_exec($db, "DELETE FROM ego_message_attachments WHERE message_id IN ($place)", $types, ...$ids);
 }
 
 /** Per-user notification preferences — which categories reach the notification bell.
@@ -996,6 +1047,26 @@ switch ("$method $route") {
         send(["ok" => true, "status" => $to]);
     }
 
+    // Mistake-correction (manager+): reopen a finished/cancelled job back to an active status.
+    // Deliberately bypasses the forward-only state machine — a marked-paid/closed job that's
+    // actually still in progress can be pulled back. Reversing the PAYMENT is separate (/invoices/unpay).
+    case "POST /jobs/reopen": {
+        $actor = require_min($db, "manager");
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $job = db_one($db, "SELECT id,status FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$job) fail("Job not found", 404);
+        $from = (string)$job["status"];
+        if (!in_array($from, ["completed", "invoiced", "paid", "closed", "cancelled"], true)) {
+            fail("This job is already active ('" . $from . "')", 409);
+        }
+        $to = trim($b["to"] ?? "scheduled");
+        if (!in_array($to, ["new", "scheduled", "on_site"], true)) $to = "scheduled";
+        db_exec($db, "UPDATE ego_jobs SET status=? WHERE id=?", "si", $to, $id);
+        log_activity($db, $id, (int)$actor["id"], "status_changed", ["from" => $from, "to" => $to, "note" => "reopened"]);
+        send(["ok" => true, "status" => $to]);
+    }
+
     /* ===================== M5: ENGINEER (own jobs only) ===================== */
     case "GET /me/jobs/today": {
         $me = require_user($db);
@@ -1226,6 +1297,12 @@ switch ("$method $route") {
         $kind = ($b["kind"] ?? "invoice") === "quote" ? "quote" : "invoice";
         $job = db_one($db, "SELECT id,customer_id,reference,status FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $jobId);
         if (!$job) fail("Job not found", 404);
+        // A quote can be raised at any time (it's how work gets priced). An INVOICE needs the
+        // job actually under way — assigned/scheduled onward — so we can invoice for payment
+        // even while the work continues, but not before it's a committed job.
+        if ($kind === "invoice" && in_array($job["status"], ["new", "cancelled"], true)) {
+            fail("Assign/schedule the job before invoicing it (job is '" . $job["status"] . "')", 422);
+        }
         $vatRate = (float)($b["vat_rate"] ?? 20);
         $t = compute_totals($b["lines"] ?? [], $vatRate);
         // Header + lines in one transaction so a mid-loop failure can't leave a document
@@ -1312,6 +1389,81 @@ switch ("$method $route") {
             }
         }
         send(["ok" => true]);
+    }
+
+    // Accept a quote → mark it accepted and auto-create a DRAFT invoice for the same job
+    // (copying its lines/totals). Draft, not sent: the sequential invoice number is only
+    // allocated when the office reviews and sends it (UK gap-free numbering). Idempotent:
+    // a second accept won't create a duplicate invoice.
+    case "POST /invoices/accept": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0);
+        ensure_invoice_cols($db);
+        $q = db_one($db, "SELECT id,kind,status,job_id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$q) fail("Not found", 404);
+        if ($q["kind"] !== "quote") fail("Only a quote can be accepted", 400);
+        if (in_array($q["status"], ["void", "declined"], true)) fail("This quote is " . $q["status"], 409);
+        $existing = db_one($db, "SELECT id FROM ego_invoices WHERE converted_from_quote_id=? AND deleted_at IS NULL", "i", $id);
+        $db->begin_transaction();
+        try {
+            db_exec($db, "UPDATE ego_invoices SET status='accepted' WHERE id=?", "i", $id);
+            $newId = $existing ? (int)$existing["id"] : 0;
+            if (!$existing) {
+                db_exec($db,
+                    "INSERT INTO ego_invoices (kind,job_id,customer_id,payment_reference,status,subtotal,vat_rate,vat_amount,total,notes,converted_from_quote_id)
+                     SELECT 'invoice',job_id,customer_id,payment_reference,'draft',subtotal,vat_rate,vat_amount,total,notes,id
+                     FROM ego_invoices WHERE id=?", "i", $id);
+                $newId = (int)$db->insert_id;
+                db_exec($db,
+                    "INSERT INTO ego_invoice_lines (invoice_id,description,quantity,unit_price,line_total,sort)
+                     SELECT ?,description,quantity,unit_price,line_total,sort FROM ego_invoice_lines WHERE invoice_id=?",
+                    "ii", $newId, $id);
+                log_activity($db, (int)$q["job_id"], (int)$actor["id"], "quote_accepted", ["quote_id" => $id, "invoice_id" => $newId]);
+                log_activity($db, (int)$q["job_id"], (int)$actor["id"], "invoice_created", ["id" => $newId, "from_quote" => $id]);
+            }
+            $db->commit();
+            send(["ok" => true, "invoice_id" => $newId]);
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not accept the quote"); }
+    }
+
+    // Decline a quote (client not interested). No invoice is created.
+    case "POST /invoices/decline": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0);
+        $q = db_one($db, "SELECT id,kind,status,job_id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$q) fail("Not found", 404);
+        if ($q["kind"] !== "quote") fail("Only a quote can be declined", 400);
+        if (in_array($q["status"], ["void", "paid"], true)) fail("This quote is " . $q["status"], 409);
+        db_exec($db, "UPDATE ego_invoices SET status='declined' WHERE id=?", "i", $id);
+        log_activity($db, (int)$q["job_id"], (int)$actor["id"], "quote_declined", ["quote_id" => $id]);
+        send(["ok" => true]);
+    }
+
+    // Reverse a payment mistake (manager+): flip a paid invoice back to sent and reopen the
+    // job it closed. Payment records are kept (delete them separately if they were wrong).
+    case "POST /invoices/unpay": {
+        $actor = require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0);
+        $inv = db_one($db, "SELECT id,kind,status,job_id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$inv) fail("Not found", 404);
+        if ($inv["kind"] !== "invoice") fail("Only invoices take payment", 400);
+        if ($inv["status"] !== "paid") fail("Only a paid invoice can be reversed", 409);
+        $db->begin_transaction();
+        try {
+            // Remove the (mistaken) payment records, flip back to 'sent' — GET computes 'overdue'
+            // on the fly if past due — and reopen the job if this payment had closed it.
+            $reversed = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=?", "i", $id)["s"] ?? 0), 2);
+            db_exec($db, "DELETE FROM ego_payments WHERE invoice_id=?", "i", $id);
+            db_exec($db, "UPDATE ego_invoices SET status='sent', paid_at=NULL WHERE id=?", "i", $id);
+            $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
+            if ($job && $job["status"] === "closed") {
+                db_exec($db, "UPDATE ego_jobs SET status='invoiced' WHERE id=?", "i", (int)$inv["job_id"]);
+                log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "closed", "to" => "invoiced", "note" => "payment reversed"]);
+            }
+            log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "payment_reversed", ["invoice_id" => $id, "amount" => $reversed]);
+            $db->commit();
+            send(["ok" => true]);
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not reverse the payment"); }
     }
 
     case "POST /invoices/pay": {
@@ -1437,16 +1589,16 @@ switch ("$method $route") {
             } elseif ($m["channel"] === "enquiry") {
                 if (!$pref["enquiries"]) continue;
                 $items[] = ["type" => "message", "tone" => "success", "created_at" => $m["created_at"],
-                    "title" => "New website enquiry", "description" => $who . ": " . substr((string)$m["body"], 0, 48), "to" => "/apps/email"];
+                    "title" => "New website enquiry", "description" => $who . ": " . substr((string)$m["body"], 0, 48), "to" => "/ego/inbox"];
             } elseif ($m["channel"] === "portal") {
                 if (!$pref["portal"]) continue;
                 $items[] = ["type" => "message", "tone" => "info", "created_at" => $m["created_at"],
                     "title" => "Client message", "description" => $who . ": " . substr((string)$m["body"], 0, 48),
-                    "to" => $m["job_id"] ? "/ego/jobs/detail?id=" . (int)$m["job_id"] : "/apps/email"];
+                    "to" => $m["job_id"] ? "/ego/jobs/detail?id=" . (int)$m["job_id"] : "/ego/inbox"];
             } else {
                 if (!$pref["emails"]) continue;
                 $items[] = ["type" => "email", "tone" => "info", "created_at" => $m["created_at"],
-                    "title" => "New email", "description" => $who . ": " . ($m["subject"] ?: "(no subject)"), "to" => "/apps/email"];
+                    "title" => "New email", "description" => $who . ": " . ($m["subject"] ?: "(no subject)"), "to" => "/ego/inbox"];
             }
         }
 
@@ -1739,6 +1891,7 @@ switch ("$method $route") {
         } catch (Throwable $e) {
             client_error($e, "Email failed — check the SMTP settings", 400);
         }
+        ego_record_sent($db, (int)$inv["customer_id"], (int)$inv["job_id"], $to, $subject, $html); // → Sent folder
         log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "emailed", ["to" => $to, "doc" => $inv["number"] ?? $inv["payment_reference"]]);
         send(["ok" => true, "to" => $to, "number" => $inv["number"] ?? null]);
     }
@@ -1746,21 +1899,59 @@ switch ("$method $route") {
     /* ===================== Email any client + AI draft ===================== */
     case "POST /email/send": {
         $actor = require_role($db, "admin");
-        $b = body();
+        // Compose can send as JSON (no files) or multipart/form-data (with attachments).
+        $isMultipart = stripos((string)($_SERVER["CONTENT_TYPE"] ?? ""), "multipart/form-data") === 0;
+        $b = $isMultipart ? $_POST : body();
         $to = trim($b["to"] ?? "");
         $subject = trim($b["subject"] ?? "");
         $bodyText = trim($b["body"] ?? "");
         if (!filter_var($to, FILTER_VALIDATE_EMAIL)) fail("Valid recipient email required");
         if ($subject === "" || $bodyText === "") fail("Subject and body required");
+
+        // Read uploaded files into memory (to both send and store). Cap per-file + total.
+        $attachments = []; $total = 0;
+        if ($isMultipart && !empty($_FILES["files"])) {
+            $F = $_FILES["files"];
+            $names = (array)($F["name"] ?? []); $tmps = (array)($F["tmp_name"] ?? []);
+            $errs = (array)($F["error"] ?? []); $sizes = (array)($F["size"] ?? []);
+            for ($k = 0; $k < count($names); $k++) {
+                if (($errs[$k] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)$tmps[$k])) continue;
+                if ((int)($sizes[$k] ?? 0) > 20_000_000) fail("Attachment too large (max 20MB each)");
+                $total += (int)($sizes[$k] ?? 0);
+                if ($total > 25_000_000) fail("Attachments total too large (max 25MB)");
+                $data = file_get_contents((string)$tmps[$k]);
+                if ($data === false) continue;
+                $mime = @mime_content_type((string)$tmps[$k]) ?: "application/octet-stream";
+                $attachments[] = ["name" => basename((string)$names[$k]), "mime" => $mime, "data" => $data];
+            }
+        }
+
         require __DIR__ . "/lib/mailer.php";
         $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyText)));
-        try { ego_send_mail($db, $to, trim($b["to_name"] ?? "") ?: null, $subject, $html); }
+        try { ego_send_mail($db, $to, trim($b["to_name"] ?? "") ?: null, $subject, $html, $attachments); }
         catch (Throwable $e) { client_error($e, "Email failed — check the SMTP settings", 400); }
         $jobId = isset($b["job_id"]) && $b["job_id"] !== "" ? (int)$b["job_id"] : null;
         $cid = isset($b["customer_id"]) && $b["customer_id"] !== "" ? (int)$b["customer_id"] : null;
         db_exec($db, "INSERT INTO ego_messages (customer_id,job_id,direction,channel,to_email,subject,body,status) VALUES (?,?, 'outbound','email', ?,?,?, 'sent')",
             "iisss", $cid, $jobId, $to, $subject, $bodyText);
-        log_activity($db, $jobId, (int)$actor["id"], "emailed", ["to" => $to, "subject" => $subject]);
+        $mid = (int)$db->insert_id;
+
+        // Keep the sent copy's attachments (off web root) so Sent shows + can re-download them.
+        if ($attachments) {
+            ensure_message_attachments($db);
+            $dir = mail_attach_dir();
+            if (!is_dir($dir)) @mkdir($dir, 0700, true);
+            foreach ($attachments as $a) {
+                $safe = preg_replace('/[\r\n\x00\/\\\\]+/', "", (string)$a["name"]) ?: "attachment";
+                $ext = strtolower((string)preg_replace('/[^a-z0-9]+/i', "", pathinfo($safe, PATHINFO_EXTENSION)));
+                $stored = "att{$mid}_" . bin2hex(random_bytes(8)) . ($ext !== "" ? ".$ext" : "");
+                if (@file_put_contents("$dir/$stored", $a["data"]) !== false) {
+                    db_exec($db, "INSERT INTO ego_message_attachments (message_id,filename,mime,size,storage) VALUES (?,?,?,?,?)",
+                        "issis", $mid, $safe, $a["mime"], strlen((string)$a["data"]), $stored);
+                }
+            }
+        }
+        log_activity($db, $jobId, (int)$actor["id"], "emailed", ["to" => $to, "subject" => $subject, "attachments" => count($attachments)]);
         send(["ok" => true, "to" => $to]);
     }
 
@@ -1779,7 +1970,9 @@ switch ("$method $route") {
         require_once __DIR__ . "/lib/mailer.php";
         $html = render_invoice_email($inv, $co, track_link($db, (int)$inv["job_id"])); // amount + bank + ref + tracker
         try {
-            ego_send_mail($db, $to, $inv["customer_name"], "Payment reminder: " . ($inv["number"] ?? $inv["payment_reference"]), $html);
+            $remSubject = "Payment reminder: " . ($inv["number"] ?? $inv["payment_reference"]);
+            ego_send_mail($db, $to, $inv["customer_name"], $remSubject, $html);
+            ego_record_sent($db, (int)$inv["customer_id"], (int)$inv["job_id"], $to, $remSubject, $html); // → Sent folder
         } catch (Throwable $e) { client_error($e, "Email failed — check the SMTP settings", 400); }
         db_exec($db, "UPDATE ego_invoices SET reminded_at=NOW() WHERE id=?", "i", $id);
         log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "invoice_reminder", ["to" => $to, "number" => $inv["number"]]);
@@ -1868,8 +2061,10 @@ switch ("$method $route") {
         require_role($db, "admin");
         $b = body();
         $prompt = trim($b["prompt"] ?? ""); if ($prompt === "") fail("Describe the image");
-        $full = "A clean, professional marketing image for a UK property maintenance company (EGO LTD). "
-            . "Warm, grounded, premium, not stocky or cheesy. Landscape banner suitable for an email header. " . $prompt;
+        require_once __DIR__ . "/lib/brand.php";
+        // Prepend the brand image-style guide (palette, real UK settings, no-text rules)
+        // so every generated image is clean, precise and on-brand.
+        $full = ego_brand_image_style($db) . "\n\nSUBJECT / SCENE: " . $prompt;
         try { $url = ai_generate_image($db, $full); }
         catch (Throwable $e) { client_error($e, "Something went wrong"); }
         send(["url" => $url]);
@@ -1922,15 +2117,17 @@ switch ("$method $route") {
     case "GET /inbox": {
         require_role($db, "admin");
         ensure_message_cols($db);
+        ensure_message_attachments($db);
         $rows = db_all($db,
             "SELECT m.id,m.direction,m.channel,m.from_email,m.from_name,m.to_email,m.subject,m.status,m.acknowledged,m.archived,m.flagged,m.created_at,
-                    m.customer_id,m.job_id, c.name AS customer_name, j.reference AS job_reference
+                    m.customer_id,m.job_id, c.name AS customer_name, j.reference AS job_reference,
+                    (SELECT COUNT(*) FROM ego_message_attachments a WHERE a.message_id=m.id) AS attachment_count
              FROM ego_messages m
              LEFT JOIN ego_customers c ON c.id=m.customer_id
              LEFT JOIN ego_jobs j ON j.id=m.job_id
              WHERE (m.channel IS NULL OR m.channel <> 'portal')
              ORDER BY m.id DESC LIMIT 200");
-        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["acknowledged"] = (int)($r["acknowledged"] ?? 0); $r["archived"] = (int)($r["archived"] ?? 0); $r["flagged"] = (int)($r["flagged"] ?? 0); $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
+        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["acknowledged"] = (int)($r["acknowledged"] ?? 0); $r["archived"] = (int)($r["archived"] ?? 0); $r["flagged"] = (int)($r["flagged"] ?? 0); $r["attachment_count"] = (int)($r["attachment_count"] ?? 0); $r["customer_id"] = $r["customer_id"] !== null ? (int)$r["customer_id"] : null; $r["job_id"] = $r["job_id"] !== null ? (int)$r["job_id"] : null; }
         send(["messages" => $rows]);
     }
 
@@ -1944,7 +2141,36 @@ switch ("$method $route") {
              WHERE m.id=? AND (m.channel IS NULL OR m.channel <> 'portal')", "i", (int)($_GET["id"] ?? 0));
         if (!$m) fail("Not found", 404);
         $m["id"] = (int)$m["id"];
+        // Attachments (inbound: captured on sync; outbound: kept on send) with signed download URLs.
+        ensure_message_attachments($db);
+        $atts = db_all($db, "SELECT id,filename,mime,size FROM ego_message_attachments WHERE message_id=? ORDER BY id", "i", (int)$m["id"]);
+        foreach ($atts as &$a) { $a["id"] = (int)$a["id"]; $a["size"] = (int)$a["size"]; $a["url"] = attach_url((int)$a["id"]); }
+        $m["attachments"] = $atts;
         send(["message" => $m]);
+    }
+
+    case "GET /email/attachment-file": {
+        // Serve a stored email attachment by signed URL (no auth header, so it works in a link),
+        // streamed as a download. Files live outside the web root; basename() blocks traversal.
+        $id = (int)($_GET["id"] ?? 0);
+        $exp = (int)($_GET["exp"] ?? 0);
+        $sig = (string)($_GET["sig"] ?? "");
+        if ($id <= 0 || $exp < time()) fail("This link has expired", 403);
+        $expect = substr(hash_hmac("sha256", "att.$id.$exp", photo_secret()), 0, 32);
+        if (!hash_equals($expect, $sig)) fail("Forbidden", 403);
+        ensure_message_attachments($db);
+        $row = db_one($db, "SELECT filename,mime,storage FROM ego_message_attachments WHERE id=?", "i", $id);
+        if (!$row) fail("Not found", 404);
+        $file = mail_attach_dir() . "/" . basename((string)$row["storage"]);
+        if (!is_file($file)) fail("Not found", 404);
+        $dl = preg_replace('/[\r\n"]+/', "", (string)$row["filename"]) ?: "attachment";
+        header("Content-Type: " . (((string)$row["mime"]) ?: "application/octet-stream"));
+        header("Content-Disposition: attachment; filename=\"$dl\"");
+        header("Content-Length: " . (string) filesize($file));
+        header("Cache-Control: private, max-age=3600");
+        header("X-Content-Type-Options: nosniff");
+        readfile($file);
+        exit;
     }
 
     /* ===================== Messages: acknowledge + engineer visibility (admin) ===================== */
@@ -2296,15 +2522,26 @@ switch ("$method $route") {
     /* ===================== Task board (kanban) — any staff; workers assign to each other ===================== */
     case "GET /tasks": {
         require_user($db);
+        ensure_task_cols($db);
+        // Auto-archive housekeeping (also covered by cron; done here so it works even without cron):
+        //  1) any 'done' card missing a completed_at gets its clock started now, then
+        //  2) done cards completed > 3 days ago are archived (hidden from the board).
+        db_exec($db, "UPDATE ego_tasks SET completed_at=NOW() WHERE status IN ('done','complete') AND completed_at IS NULL AND archived_at IS NULL");
+        db_exec($db, "UPDATE ego_tasks SET archived_at=NOW() WHERE archived_at IS NULL AND status IN ('done','complete') AND completed_at IS NOT NULL AND completed_at < DATE_SUB(NOW(), INTERVAL 3 DAY)");
+
+        $wantArchived = ($_GET["archived"] ?? "") === "1";
+        $where = $wantArchived ? "t.archived_at IS NOT NULL" : "t.archived_at IS NULL";
         $rows = db_all($db,
-            "SELECT t.id,t.title,t.description,t.status,t.accent,t.sort,t.assignee_id,u.name AS assignee_name
+            "SELECT t.id,t.title,t.description,t.status,t.accent,t.sort,t.assignee_id,t.completed_at,t.archived_at,u.name AS assignee_name
              FROM ego_tasks t LEFT JOIN ego_users u ON u.id=t.assignee_id
-             ORDER BY t.status, t.sort, t.id");
+             WHERE $where
+             ORDER BY " . ($wantArchived ? "t.archived_at DESC" : "t.status, t.sort, t.id"));
         foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["sort"] = (int)$r["sort"]; $r["assignee_id"] = $r["assignee_id"] !== null ? (int)$r["assignee_id"] : null; }
         // Staff list so workers can pick an assignee (colour-coded on the board)
         $staff = db_all($db, "SELECT id,name,role FROM ego_users WHERE active=1 AND deleted_at IS NULL ORDER BY name");
         foreach ($staff as &$s) { $s["id"] = (int)$s["id"]; }
-        send(["tasks" => $rows, "staff" => $staff]);
+        $archivedCount = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_tasks WHERE archived_at IS NOT NULL")["c"] ?? 0);
+        send(["tasks" => $rows, "staff" => $staff, "archived_count" => $archivedCount]);
     }
     case "POST /tasks": {
         require_user($db);
@@ -2345,10 +2582,19 @@ switch ("$method $route") {
     }
     case "POST /tasks/move": {
         require_user($db);
+        ensure_task_cols($db);
         $b = body();
         $id = (int)($b["id"] ?? 0);
         if (!$id) fail("id required");
-        db_exec($db, "UPDATE ego_tasks SET status=?, sort=? WHERE id=?", "sii", trim($b["status"] ?? "backlog"), (int)($b["sort"] ?? 0), $id);
+        $status = trim($b["status"] ?? "backlog");
+        $sort = (int)($b["sort"] ?? 0);
+        if (in_array($status, ["done", "complete"], true)) {
+            // Entering Done: start the completed-at clock (keep an earlier one if present); un-archive if it was archived.
+            db_exec($db, "UPDATE ego_tasks SET status=?, sort=?, completed_at=COALESCE(completed_at, NOW()), archived_at=NULL WHERE id=?", "sii", $status, $sort, $id);
+        } else {
+            // Reopening / restoring: clear both timestamps so it lives on the active board again.
+            db_exec($db, "UPDATE ego_tasks SET status=?, sort=?, completed_at=NULL, archived_at=NULL WHERE id=?", "sii", $status, $sort, $id);
+        }
         send(["ok" => true]);
     }
     case "POST /tasks/delete": {
@@ -3237,6 +3483,7 @@ switch ("$method $route") {
         tombstone_uids($db, "id=?", "i", [$id]); // keep it deleted across re-syncs
         require_once __DIR__ . "/lib/inbox.php";
         try { inbox_delete_remote($db, [$id]); } catch (Throwable $e) { /* best-effort: also delete on the IMAP server */ }
+        delete_message_attachments($db, [$id]);
         db_exec($db, "DELETE FROM ego_messages WHERE id=? AND (channel IS NULL OR channel <> 'portal')", "i", $id);
         send(["ok" => true]);
     }
@@ -3277,6 +3524,7 @@ switch ("$method $route") {
                 tombstone_uids($db, "id IN ($place)", $types, $ids);
                 require_once __DIR__ . "/lib/inbox.php";
                 try { inbox_delete_remote($db, $ids); } catch (Throwable $e) { /* best-effort server-side delete */ }
+                delete_message_attachments($db, $ids);
                 $sql = "DELETE FROM ego_messages WHERE id IN ($place) AND (channel IS NULL OR channel <> 'portal')"; break;
             case "archive":   $sql = "UPDATE ego_messages SET archived=1 WHERE id IN ($place)"; break;
             case "unarchive": $sql = "UPDATE ego_messages SET archived=0 WHERE id IN ($place)"; break;
