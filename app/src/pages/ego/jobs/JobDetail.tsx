@@ -213,7 +213,7 @@ export default function JobDetail() {
         body: {
           job_id: job.id,
           kind,
-          vat_rate: 20,
+          vat_rate: 0,
           lines: [{ description: job.title, quantity: 1, unit_price: job.quoted_amount ? Number(job.quoted_amount) : 0 }],
         },
       })

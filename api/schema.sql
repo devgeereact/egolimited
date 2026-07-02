@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS ego_company_settings (
   phone               VARCHAR(40)  NULL,
   email               VARCHAR(190) NULL,
   vat_number          VARCHAR(40)  NULL,
-  default_vat_rate    DECIMAL(5,2) NOT NULL DEFAULT 20.00,
+  default_vat_rate    DECIMAL(5,2) NOT NULL DEFAULT 0,
   logo_url            VARCHAR(255) NULL,
   bank_account_name   VARCHAR(160) NULL,
   bank_sort_code      VARCHAR(12)  NULL,

@@ -41,7 +41,7 @@ export default function InvoiceDetail() {
   const navigate = useNavigate()
   const [inv, setInv] = useState<Invoice | null>(null)
   const [lines, setLines] = useState<Line[]>([])
-  const [vatRate, setVatRate] = useState(20)
+  const [vatRate, setVatRate] = useState(0)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
