@@ -6,7 +6,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { api } from "@/lib/api"
+import QRCode from "qrcode"
+import { api, apiForm } from "@/lib/api"
 import { useAuth } from "@/store/auth.store"
 import { atLeast } from "@/lib/roles"
 import { computeTotals, gbp } from "@/lib/invoicing"
@@ -27,6 +28,7 @@ interface Invoice {
   customer_name: string; customer_email: string | null; customer_phone: string | null
   customer_address: { line1?: string; city?: string; postcode?: string } | null
   job_reference: string; job_title: string
+  track_url?: string
   lines: Line[]
   payments?: { amount: number | string; paid_on?: string; reference?: string | null }[]
   company: {
@@ -105,8 +107,29 @@ export default function InvoiceDetail() {
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailTo.trim())) { toast.error("Enter a valid email, or use 'Issue without emailing'"); return }
     setEmailBusy(true)
     try {
-      await api("/invoices/email", { method: "POST", body: { id: inv.id, to: emailTo.trim() } })
-      toast.success(`Emailed to ${emailTo.trim()}`); setEmailOpen(false); await load()
+      // Invoice draft → finalise first so the ATTACHED PDF carries its real number.
+      let current = inv
+      let pdfObj: any = { ...inv, lines, vat_rate: vatRate }
+      if (inv.kind === "invoice" && isDraft) {
+        await api("/invoices/update", { method: "POST", body: { id: inv.id, vat_rate: vatRate, lines } })
+        await api("/invoices/send", { method: "POST", body: { id: inv.id } })
+        current = (await api<{ invoice: Invoice }>(`/invoices/get?id=${inv.id}`)).invoice
+        pdfObj = { ...current, vat_rate: Number(current.vat_rate) }
+      }
+      const fd = new FormData()
+      fd.append("id", String(current.id))
+      fd.append("to", emailTo.trim())
+      // Attach the document PDF (same builder as the download → byte-identical)
+      const doc = buildInvoicePdf(pdfObj)
+      if (doc) fd.append("files[]", doc.output("blob"), `${current.number ?? current.payment_reference}-${label}.pdf`)
+      // Attach the tracking QR image (the branded email also carries the tracking link)
+      if (current.track_url) {
+        const qrDataUrl = await QRCode.toDataURL(current.track_url, { width: 600, margin: 2, errorCorrectionLevel: "M" })
+        const qrBlob = await (await fetch(qrDataUrl)).blob()
+        fd.append("files[]", qrBlob, `${current.job_reference || "job"}-tracking-qr.png`)
+      }
+      await apiForm("/invoices/email", fd)
+      toast.success(`Emailed to ${emailTo.trim()} with the ${label.toLowerCase()} + tracking attached`); setEmailOpen(false); await load()
     } catch (e) { toast.error(e instanceof Error ? e.message : "Email failed") } finally { setEmailBusy(false) }
   }
   // No email / hand-over: finalise + mark sent WITHOUT emailing, so there's no bounce.
@@ -376,6 +399,7 @@ export default function InvoiceDetail() {
                   </p>
                 )}
                 <p>A live job-tracking link is included.</p>
+                <p className="text-foreground">📎 Attached: the {label.toLowerCase()} PDF + a tracking QR code.</p>
                 <p>Thank you, {co.company_name}</p>
               </div>
             </div>

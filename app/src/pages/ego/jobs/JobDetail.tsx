@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { StatusPill } from "@/components/ego/StatusPill"
 import ScheduleDialog from "@/components/ego/ScheduleDialog"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import TrackQr from "@/components/ego/QrCode"
 import QRCode from "qrcode"
 import { PRIORITY_CLASS, PRIORITY_LABEL, gbp, type JobPriority } from "@/lib/mock/jobs"
@@ -43,6 +44,7 @@ interface JobDetailData {
   customer_name: string
   customer_phone: string | null
   customer_email: string | null
+  engineer_id: number | null
   engineer_name: string | null
   address: { line1?: string; city?: string; postcode?: string } | null
   invoices: { id: number; kind: "quote" | "invoice"; number: string | null; status: string; total: string }[]
@@ -54,6 +56,7 @@ interface JobDetailData {
   messages: { id: number; direction: string; channel: string; from_name: string | null; from_email: string | null; subject: string | null; body: string | null; acknowledged: number; visible_to_engineer: number; created_at: string }[]
 }
 
+const UNASSIGNED_ENG = "__none__"
 const PROGRESS_STEPS: { key: JobStatus; label: string }[] = [
   { key: "new", label: "New" },
   { key: "scheduled", label: "Scheduled" },
@@ -68,7 +71,10 @@ const STEP_INDEX: Record<string, number> = {
   completed: 4, invoiced: 5, paid: 6, closed: 6,
 }
 
-function JobProgress({ status }: { status: JobStatus }) {
+const fmtStamp = (s: string | null | undefined) =>
+  s ? new Date(s.replace(" ", "T")).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""
+
+function JobProgress({ status, stamps }: { status: JobStatus; stamps: Record<string, string | null> }) {
   if (status === "cancelled") {
     return <div className="rounded-lg border border-red-500/30 bg-red-500/5 p-3 text-sm font-medium text-red-600 dark:text-red-400">This job was cancelled.</div>
   }
@@ -78,6 +84,7 @@ function JobProgress({ status }: { status: JobStatus }) {
       {PROGRESS_STEPS.map((s, i) => {
         const done = i < current
         const active = i === current
+        const at = fmtStamp(stamps[s.key])
         return (
           <div key={s.key} className="flex flex-1 flex-col items-center text-center">
             <div className="flex w-full items-center">
@@ -89,6 +96,7 @@ function JobProgress({ status }: { status: JobStatus }) {
               <span className={cn("h-0.5 flex-1", i === PROGRESS_STEPS.length - 1 ? "opacity-0" : done ? "bg-primary" : "bg-border")} />
             </div>
             <span className={cn("mt-1.5 text-[10px] leading-tight", active ? "font-medium text-foreground" : "text-muted-foreground")}>{s.label}</span>
+            <span className="mt-0.5 text-[10px] leading-tight tabular-nums text-muted-foreground">{at || "—"}</span>
           </div>
         )
       })}
@@ -124,6 +132,7 @@ export default function JobDetail() {
   const [replyTo, setReplyTo] = useState<number | null>(null)
   const [replyText, setReplyText] = useState("")
   const [replyBusy, setReplyBusy] = useState(false)
+  const [engineers, setEngineers] = useState<{ id: number; name: string; available: number }[]>([])
 
   function load() {
     if (!id) return
@@ -138,6 +147,16 @@ export default function JobDetail() {
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
+  useEffect(() => { api<{ engineers: { id: number; name: string; available: number }[] }>("/engineers").then((r) => setEngineers(r.engineers)).catch(() => {}) }, [])
+
+  // Swap the assigned engineer without deleting/unscheduling the job.
+  async function reassign(value: string) {
+    if (!job) return
+    try {
+      await api("/jobs/assign-engineer", { method: "POST", body: { id: job.id, engineer_id: value === UNASSIGNED_ENG ? "" : Number(value) } })
+      toast.success(value === UNASSIGNED_ENG ? "Engineer removed" : "Engineer reassigned"); await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't reassign") }
+  }
 
   async function aiBrief() {
     if (!job) return
@@ -231,9 +250,9 @@ export default function JobDetail() {
 
   const targets = user ? allowedTargets(job.status, user.role) : []
   const trackUrl = `${location.origin}${import.meta.env.BASE_URL}track/${job.track_token}`
-
-  const fmtStamp = (s: string | null) =>
-    s ? new Date(s.replace(" ", "T")).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : "—"
+  const stageStamps: Record<string, string | null> = {
+    scheduled: job.scheduled_start, en_route: job.en_route_at, on_site: job.on_site_at, completed: job.completed_at,
+  }
 
   // The single obvious "next step" for this job — a big primary button. Money steps included
   // so the office is nudged straight from a finished job into invoicing / taking payment.
@@ -314,28 +333,6 @@ export default function JobDetail() {
         </div>
       </div>
 
-      {/* Lifecycle timeline — when each stage actually happened */}
-      {(job.scheduled_start || job.en_route_at || job.on_site_at || job.completed_at) && (
-        <Card>
-          <CardContent className="flex flex-wrap items-center gap-x-8 gap-y-3 p-4">
-            {[
-              { label: "Scheduled", at: job.scheduled_start },
-              { label: "En route", at: job.en_route_at },
-              { label: "On site", at: job.on_site_at },
-              { label: "Completed", at: job.completed_at },
-            ].map((s) => (
-              <div key={s.label} className="flex items-center gap-2">
-                <span className={cn("size-2.5 rounded-full", s.at ? "bg-primary" : "bg-muted-foreground/30")} />
-                <div className="text-sm leading-tight">
-                  <p className={cn("font-medium", !s.at && "text-muted-foreground")}>{s.label}</p>
-                  <p className="text-xs tabular-nums text-muted-foreground">{fmtStamp(s.at)}</p>
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
       <ScheduleDialog
         jobId={job.id}
         open={schedOpen}
@@ -363,7 +360,7 @@ export default function JobDetail() {
         <div className="space-y-6 lg:col-span-2">
           <Card>
             <CardHeader><CardTitle className="text-base">Progress</CardTitle></CardHeader>
-            <CardContent><JobProgress status={job.status} /></CardContent>
+            <CardContent><JobProgress status={job.status} stamps={stageStamps} /></CardContent>
           </Card>
 
           <Card>
@@ -496,8 +493,18 @@ export default function JobDetail() {
                 {job.scheduled_start ? job.scheduled_start : <span className="text-muted-foreground">Not scheduled</span>}
               </div>
               <div className="flex items-center gap-2">
-                <CircleUserRound className="size-4 text-muted-foreground" />
-                {job.engineer_name ?? "Unassigned"}
+                <CircleUserRound className="size-4 shrink-0 text-muted-foreground" />
+                {isOffice(user?.role) && !["completed", "invoiced", "paid", "closed", "cancelled"].includes(job.status) ? (
+                  <Select value={job.engineer_id ? String(job.engineer_id) : UNASSIGNED_ENG} onValueChange={reassign}>
+                    <SelectTrigger className="h-8 w-[200px]"><SelectValue placeholder="Assign engineer…" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNASSIGNED_ENG}>Unassigned</SelectItem>
+                      {engineers.map((e) => <SelectItem key={e.id} value={String(e.id)}>{e.name}{e.available ? "" : " · away"}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <span>{job.engineer_name ?? "Unassigned"}</span>
+                )}
               </div>
             </CardContent>
           </Card>

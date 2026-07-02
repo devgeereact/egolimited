@@ -368,6 +368,42 @@ function ensure_job_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS on_site_at DATETIME NULL");
 }
 
+/** Read multipart-uploaded files (field name files[]) into [{name,mime,data}]. Caps size. */
+function read_uploaded_files(): array {
+    $out = []; $total = 0;
+    if (empty($_FILES["files"])) return $out;
+    $F = $_FILES["files"];
+    $names = (array)($F["name"] ?? []); $tmps = (array)($F["tmp_name"] ?? []);
+    $errs = (array)($F["error"] ?? []); $sizes = (array)($F["size"] ?? []);
+    for ($k = 0; $k < count($names); $k++) {
+        if (($errs[$k] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)$tmps[$k])) continue;
+        if ((int)($sizes[$k] ?? 0) > 20_000_000) fail("Attachment too large (max 20MB each)");
+        $total += (int)($sizes[$k] ?? 0);
+        if ($total > 25_000_000) fail("Attachments total too large (max 25MB)");
+        $data = file_get_contents((string)$tmps[$k]);
+        if ($data === false) continue;
+        $out[] = ["name" => basename((string)$names[$k]), "mime" => (@mime_content_type((string)$tmps[$k]) ?: "application/octet-stream"), "data" => $data];
+    }
+    return $out;
+}
+
+/** Persist sent-email attachments (off web root) + rows, linked to a message id. */
+function save_email_attachments(mysqli $db, int $mid, array $attachments): void {
+    if (!$mid || !$attachments) return;
+    ensure_message_attachments($db);
+    $dir = mail_attach_dir();
+    if (!is_dir($dir)) @mkdir($dir, 0700, true);
+    foreach ($attachments as $a) {
+        $safe = preg_replace('/[\r\n\x00\/\\\\]+/', "", (string)($a["name"] ?? "attachment")) ?: "attachment";
+        $ext = strtolower((string)preg_replace('/[^a-z0-9]+/i', "", pathinfo($safe, PATHINFO_EXTENSION)));
+        $stored = "att{$mid}_" . bin2hex(random_bytes(8)) . ($ext !== "" ? ".$ext" : "");
+        if (@file_put_contents("$dir/$stored", $a["data"]) !== false) {
+            db_exec($db, "INSERT INTO ego_message_attachments (message_id,filename,mime,size,storage) VALUES (?,?,?,?,?)",
+                "issis", $mid, $safe, (string)($a["mime"] ?? "application/octet-stream"), strlen((string)$a["data"]), $stored);
+        }
+    }
+}
+
 /** GDPR: when a message is deleted, remove its stored attachment files + rows so
  *  customer documents don't linger on disk. Best-effort on the file unlink. */
 function delete_message_attachments(mysqli $db, array $ids): void {
@@ -1036,6 +1072,24 @@ switch ("$method $route") {
         send(["ok" => true, "status" => in_array($from, ["new", "on_hold"], true) ? "scheduled" : $from]);
     }
 
+    // Reassign a job to a different engineer WITHOUT touching the schedule slot or status —
+    // so a mistaken/unavailable engineer can be swapped instead of deleting/unscheduling the job.
+    case "POST /jobs/assign-engineer": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $engineerId = isset($b["engineer_id"]) && $b["engineer_id"] !== "" ? (int)$b["engineer_id"] : null;
+        if (!$id) fail("id required");
+        $job = db_one($db, "SELECT id, engineer_id FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$job) fail("Job not found", 404);
+        if ($engineerId !== null && !db_one($db, "SELECT id FROM ego_users WHERE id=? AND role='engineer' AND active=1 AND deleted_at IS NULL", "i", $engineerId)) {
+            fail("Engineer not found", 400);
+        }
+        db_exec($db, "UPDATE ego_jobs SET engineer_id=? WHERE id=?", "ii", $engineerId, $id);
+        log_activity($db, $id, (int)$actor["id"], "reassigned", ["to_engineer" => $engineerId]);
+        send(["ok" => true]);
+    }
+
     // Remove a job from the calendar → back onto the waitlist (clears slot + engineer).
     case "POST /jobs/unschedule": {
         $actor = require_role($db, "admin");
@@ -1335,6 +1389,7 @@ switch ("$method $route") {
         $cust = db_one($db, "SELECT a.line1,a.line2,a.city,a.postcode FROM ego_addresses a WHERE a.customer_id=? AND a.is_primary=1", "i", (int)$inv["customer_id"]);
         $inv["customer_address"] = $cust;
         $inv["company"] = db_one($db, "SELECT company_name,address,phone,email,vat_number,logo_url,bank_account_name,bank_sort_code,bank_account_number,payment_terms_days FROM ego_company_settings ORDER BY id LIMIT 1");
+        $inv["track_url"] = track_link($db, (int)$inv["job_id"]); // for the emailed tracking QR
         if ($inv["kind"] === "invoice" && $inv["status"] === "sent" && $inv["due_date"] && $inv["due_date"] < date("Y-m-d")) $inv["status"] = "overdue";
         send(["invoice" => $inv]);
     }
@@ -1915,7 +1970,9 @@ switch ("$method $route") {
     /* ===================== M9: EMAIL an invoice/quote (SMTP) ===================== */
     case "POST /invoices/email": {
         $actor = require_role($db, "admin");
-        $b = body();
+        // Multipart when the client attaches the PDF + tracking QR; JSON otherwise.
+        $isMultipart = stripos((string)($_SERVER["CONTENT_TYPE"] ?? ""), "multipart/form-data") === 0;
+        $b = $isMultipart ? $_POST : body();
         $id = (int)($b["id"] ?? 0);
         $inv = db_one($db,
             "SELECT i.*, c.name AS customer_name, c.email AS customer_email, j.reference AS job_reference
@@ -1947,13 +2004,16 @@ switch ("$method $route") {
         $label = $inv["kind"] === "quote" ? "Quote" : "Invoice";
         $subject = "$label " . ($inv["number"] ?? $inv["payment_reference"]) . " from " . ($company["company_name"] ?? "EGO LIMITED");
         $html = render_invoice_email($inv, $company, track_link($db, (int)$inv["job_id"]));
+        // The client attaches the document PDF + the tracking QR image; include them on the email.
+        $attachments = $isMultipart ? read_uploaded_files() : [];
         try {
-            ego_send_mail($db, $to, $inv["customer_name"], $subject, $html);
+            ego_send_mail($db, $to, $inv["customer_name"], $subject, $html, $attachments);
         } catch (Throwable $e) {
             client_error($e, "Email failed — check the SMTP settings", 400);
         }
-        ego_record_sent($db, (int)$inv["customer_id"], (int)$inv["job_id"], $to, $subject, $html); // → Sent folder
-        log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "emailed", ["to" => $to, "doc" => $inv["number"] ?? $inv["payment_reference"]]);
+        $mid = ego_record_sent($db, (int)$inv["customer_id"], (int)$inv["job_id"], $to, $subject, $html); // → Sent folder
+        save_email_attachments($db, (int)$mid, $attachments); // keep the sent copy's attachments
+        log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "emailed", ["to" => $to, "doc" => $inv["number"] ?? $inv["payment_reference"], "attachments" => count($attachments)]);
         send(["ok" => true, "to" => $to, "number" => $inv["number"] ?? null]);
     }
 
@@ -2455,6 +2515,7 @@ switch ("$method $route") {
         $cust = db_one($db, "SELECT a.line1,a.line2,a.city,a.postcode FROM ego_addresses a WHERE a.customer_id=? AND a.is_primary=1", "i", (int)$inv["customer_id"]);
         $inv["customer_address"] = $cust;
         $inv["company"] = db_one($db, "SELECT company_name,address,phone,email,vat_number,logo_url,bank_account_name,bank_sort_code,bank_account_number,payment_terms_days FROM ego_company_settings ORDER BY id LIMIT 1");
+        $inv["track_url"] = track_link($db, (int)$inv["job_id"]); // for the emailed tracking QR
         if ($inv["kind"] === "invoice" && $inv["status"] === "sent" && $inv["due_date"] && $inv["due_date"] < date("Y-m-d")) $inv["status"] = "overdue";
         send(["invoice" => $inv]);
     }
