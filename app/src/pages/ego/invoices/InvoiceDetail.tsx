@@ -13,7 +13,9 @@ import { computeTotals, gbp } from "@/lib/invoicing"
 import { buildInvoicePdf, addressLines } from "@/lib/invoicePdf"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
 import PaymentDialog from "@/components/ego/PaymentDialog"
 
@@ -46,6 +48,9 @@ export default function InvoiceDetail() {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
+  const [emailOpen, setEmailOpen] = useState(false)
+  const [emailTo, setEmailTo] = useState("")
+  const [emailBusy, setEmailBusy] = useState(false)
 
   function load() {
     if (!id) return
@@ -62,6 +67,8 @@ export default function InvoiceDetail() {
 
   const totals = useMemo(() => computeTotals(lines, vatRate), [lines, vatRate])
   const isDraft = inv?.status === "draft"
+  // Quotes AND invoices stay editable until they're settled — a paid or void document is locked.
+  const isEditable = !!inv && !["paid", "void"].includes(inv.status)
   const label = inv?.kind === "quote" ? "Quote" : "Invoice"
 
   function setLine(i: number, patch: Partial<Line>) {
@@ -87,28 +94,31 @@ export default function InvoiceDetail() {
       toast.success(`${label} ${r.number} sent`); await load()
     } catch (e) { toast.error(e instanceof Error ? e.message : "Send failed") } finally { setBusy(false) }
   }
-  async function emailDoc() {
+  // Open the preview popup so the office sees exactly what goes out (and to whom) first.
+  function openEmail() {
     if (!inv) return
-    const to = prompt("Send to email (leave blank to issue without emailing):", inv.customer_email ?? "")
-    if (to === null) return // cancelled
-    // Admin override: no email address → issue/finalise the document WITHOUT sending, so
-    // a customer with no email doesn't produce a bounce/error. It's marked sent + numbered
-    // (job moves to invoiced for invoices) so you can print or hand it over.
-    if (!to.trim()) {
-      if (!confirm(`No email entered. Issue this ${label.toLowerCase()} without emailing it? It'll be numbered and marked as sent so you can print or hand it over.`)) return
-      setBusy(true)
-      try {
-        if (isDraft) await api("/invoices/update", { method: "POST", body: { id: inv.id, vat_rate: vatRate, lines } })
-        const r = await api<{ number: string }>("/invoices/send", { method: "POST", body: { id: inv.id } })
-        toast.success(`${label} ${r.number} issued (not emailed)`); await load()
-      } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't issue") } finally { setBusy(false) }
-      return
-    }
-    setBusy(true)
+    setEmailTo(inv.customer_email ?? "")
+    setEmailOpen(true)
+  }
+  async function sendEmail() {
+    if (!inv) return
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailTo.trim())) { toast.error("Enter a valid email, or use 'Issue without emailing'"); return }
+    setEmailBusy(true)
     try {
-      await api("/invoices/email", { method: "POST", body: { id: inv.id, to } })
-      toast.success(`Emailed to ${to}`); await load()
-    } catch (e) { toast.error(e instanceof Error ? e.message : "Email failed") } finally { setBusy(false) }
+      await api("/invoices/email", { method: "POST", body: { id: inv.id, to: emailTo.trim() } })
+      toast.success(`Emailed to ${emailTo.trim()}`); setEmailOpen(false); await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Email failed") } finally { setEmailBusy(false) }
+  }
+  // No email / hand-over: finalise + mark sent WITHOUT emailing, so there's no bounce.
+  async function issueNoEmail() {
+    if (!inv) return
+    if (!confirm(`Issue this ${label.toLowerCase()} without emailing it? It'll be numbered and marked as sent so you can print or hand it over.`)) return
+    setEmailBusy(true)
+    try {
+      if (isDraft) await api("/invoices/update", { method: "POST", body: { id: inv.id, vat_rate: vatRate, lines } })
+      const r = await api<{ number: string }>("/invoices/send", { method: "POST", body: { id: inv.id } })
+      toast.success(`${label} ${r.number} issued (not emailed)`); setEmailOpen(false); await load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't issue") } finally { setEmailBusy(false) }
   }
 
   async function remind() {
@@ -185,9 +195,9 @@ export default function InvoiceDetail() {
           <Link to={inv.kind === "quote" ? "/ego/quotes" : "/ego/invoices"}><ArrowLeft /> {label}s</Link>
         </Button>
         <div className="flex flex-wrap gap-2">
-          {isDraft && <Button variant="outline" onClick={save} disabled={busy}>Save draft</Button>}
-          {(isDraft || inv.status === "draft") && <Button onClick={send} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <Send />} Send</Button>}
-          {inv.kind === "quote" && !["void", "declined"].includes(inv.status) && (
+          {isEditable && <Button variant="outline" onClick={save} disabled={busy}>{isDraft ? "Save draft" : "Save changes"}</Button>}
+          {isDraft && <Button onClick={send} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <Send />} Send</Button>}
+          {inv.kind === "quote" && !["void", "declined", "accepted", "paid"].includes(inv.status) && (
             <Button onClick={accept} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Accept → invoice</Button>
           )}
           {inv.kind === "quote" && !["void", "declined", "accepted", "paid"].includes(inv.status) && (
@@ -195,7 +205,7 @@ export default function InvoiceDetail() {
           )}
           <Button variant="outline" onClick={previewPdf}><Eye /> Preview</Button>
           <Button variant="outline" onClick={downloadPdf}><Download /> PDF</Button>
-          <Button variant="outline" onClick={emailDoc} disabled={busy}><Mail /> Email</Button>
+          <Button variant="outline" onClick={openEmail} disabled={busy}><Mail /> Email</Button>
           {inv.kind === "invoice" && (inv.status === "sent" || inv.status === "overdue") && (
             <>
               <Button onClick={() => setPayOpen(true)}><BadgePoundSterling /> Mark paid</Button>
@@ -267,23 +277,23 @@ export default function InvoiceDetail() {
                   <th className="w-20 p-2 text-right">Qty</th>
                   <th className="w-28 p-2 text-right">Unit</th>
                   <th className="w-28 p-2 text-right">Total</th>
-                  {isDraft && <th className="w-10 p-2" />}
+                  {isEditable && <th className="w-10 p-2" />}
                 </tr>
               </thead>
               <tbody>
                 {lines.map((l, i) => (
                   <tr key={i} className="border-t">
                     <td className="p-2">
-                      {isDraft ? <Input value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} placeholder="Item" className="h-8" /> : l.description}
+                      {isEditable ? <Input value={l.description} onChange={(e) => setLine(i, { description: e.target.value })} placeholder="Item" className="h-8" /> : l.description}
                     </td>
                     <td className="p-2 text-right">
-                      {isDraft ? <Input type="number" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} className="h-8 text-right" /> : Number(l.quantity)}
+                      {isEditable ? <Input type="number" value={l.quantity} onChange={(e) => setLine(i, { quantity: e.target.value })} className="h-8 text-right" /> : Number(l.quantity)}
                     </td>
                     <td className="p-2 text-right">
-                      {isDraft ? <Input type="number" step="0.01" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: e.target.value })} className="h-8 text-right" /> : gbp(Number(l.unit_price))}
+                      {isEditable ? <Input type="number" step="0.01" value={l.unit_price} onChange={(e) => setLine(i, { unit_price: e.target.value })} className="h-8 text-right" /> : gbp(Number(l.unit_price))}
                     </td>
                     <td className="p-2 text-right font-mono">{gbp(totals.lines[i]?.line_total ?? 0)}</td>
-                    {isDraft && (
+                    {isEditable && (
                       <td className="p-2 text-right">
                         {lines.length > 1 && <button onClick={() => delLine(i)} className="text-muted-foreground hover:text-destructive"><Trash2 className="size-4" /></button>}
                       </td>
@@ -292,7 +302,7 @@ export default function InvoiceDetail() {
                 ))}
               </tbody>
             </table>
-            {isDraft && (
+            {isEditable && (
               <button onClick={addLine} className="flex w-full items-center justify-center gap-1 border-t p-2 text-sm text-muted-foreground hover:bg-muted/50">
                 <Plus className="size-4" /> Add line
               </button>
@@ -304,8 +314,8 @@ export default function InvoiceDetail() {
             <div className="w-full max-w-xs space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="font-mono">{gbp(totals.subtotal)}</span></div>
               <div className="flex items-center justify-between">
-                <span className="text-muted-foreground">VAT{isDraft ? "" : ` (${vatRate}%)`}</span>
-                {isDraft ? (
+                <span className="text-muted-foreground">VAT{isEditable ? "" : ` (${vatRate}%)`}</span>
+                {isEditable ? (
                   <div className="flex items-center gap-1">
                     <Input type="number" value={vatRate} onChange={(e) => setVatRate(Number(e.target.value))} className="h-7 w-16 text-right" />%
                   </div>
@@ -342,6 +352,44 @@ export default function InvoiceDetail() {
       </Card>
 
       <PaymentDialog invoiceId={inv.id} total={Number(inv.total)} outstanding={outstanding} open={payOpen} onOpenChange={setPayOpen} onDone={load} />
+
+      {/* Email preview — see exactly what goes out (and to whom) before sending */}
+      <Dialog open={emailOpen} onOpenChange={setEmailOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader><DialogTitle>Email {label.toLowerCase()}</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>To</Label>
+              <Input type="email" value={emailTo} onChange={(e) => setEmailTo(e.target.value)} placeholder="name@example.com" />
+              {!inv.customer_email && <p className="text-xs text-muted-foreground">This customer has no saved email — type one, or issue without emailing.</p>}
+            </div>
+            <div className="rounded-lg border bg-muted/30 p-4 text-sm">
+              <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">Preview — what gets sent</p>
+              <p className="font-medium">Subject: {label} {inv.number ?? "(number assigned on send)"} from {co.company_name}</p>
+              <div className="mt-3 space-y-2 text-muted-foreground">
+                <p>Hi {inv.customer_name},</p>
+                <p>Please find your <span className="font-medium text-foreground">{label} {inv.number ?? ""}</span> for <span className="font-medium text-foreground">{gbp(Number(inv.total))}</span>.</p>
+                {inv.kind === "invoice" && (co.bank_account_name || co.bank_sort_code || co.bank_account_number) && (
+                  <p className="rounded bg-background p-2 text-xs">
+                    Pay by bank transfer — {[co.bank_account_name, co.bank_sort_code && `Sort ${co.bank_sort_code}`, co.bank_account_number && `Acc ${co.bank_account_number}`].filter(Boolean).join(" · ")}<br />
+                    Payment reference: <span className="font-mono">{inv.payment_reference}</span>
+                  </p>
+                )}
+                <p>A live job-tracking link is included.</p>
+                <p>Thank you, {co.company_name}</p>
+              </div>
+            </div>
+            {inv.kind === "invoice" && isDraft && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">Sending will finalise this invoice and assign its number.</p>
+            )}
+            <p className="text-xs text-muted-foreground">Need to change amounts or lines? Close this and edit the {label.toLowerCase()} first — it's editable, then email.</p>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button variant="outline" onClick={issueNoEmail} disabled={emailBusy}>Issue without emailing</Button>
+            <Button onClick={sendEmail} disabled={emailBusy}>{emailBusy ? <Loader2 className="animate-spin" /> : <Mail />} Send</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

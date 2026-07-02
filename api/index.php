@@ -1380,7 +1380,8 @@ switch ("$method $route") {
         $id = (int)($b["id"] ?? 0);
         $inv = db_one($db, "SELECT id,status FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$inv) fail("Not found", 404);
-        if ($inv["status"] !== "draft") fail("Only drafts can be edited", 409);
+        // Quotes AND invoices stay editable until settled — a paid or void document is locked.
+        if (in_array($inv["status"], ["paid", "void"], true)) fail("A " . $inv["status"] . " document can't be edited", 409);
         $vatRate = (float)($b["vat_rate"] ?? 0);
         $t = compute_totals($b["lines"] ?? [], $vatRate);
         db_exec($db, "UPDATE ego_invoices SET vat_rate=?,subtotal=?,vat_amount=?,total=?,notes=? WHERE id=?",
