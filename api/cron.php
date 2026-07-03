@@ -10,6 +10,8 @@ $cfg = require __DIR__ . "/config.php";
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
 $db = new mysqli($cfg["db_host"], $cfg["db_user"], $cfg["db_pass"], $cfg["db_name"]);
 $db->set_charset("utf8mb4");
+date_default_timezone_set("Europe/London"); // server is US/Eastern — run on UK time
+@$db->query("SET time_zone = '" . date("P") . "'");
 
 function db_one(mysqli $db, string $sql, string $t = "", ...$a): ?array {
     $s = $db->prepare($sql); if ($t) $s->bind_param($t, ...$a); $s->execute();

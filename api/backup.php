@@ -15,6 +15,7 @@ declare(strict_types=1);
 // HARD CLI GUARD — this dumps the entire database; it must never be reachable over HTTP.
 if (PHP_SAPI !== "cli") { http_response_code(404); exit; }
 
+date_default_timezone_set("Europe/London"); // London-dated backup filenames (server is US/Eastern)
 $cfg  = require __DIR__ . "/config.php";
 $home = realpath(__DIR__ . "/../..");            // ~/egolimited.com/api  ->  ~
 $dir  = $home . "/ego_db_backups";

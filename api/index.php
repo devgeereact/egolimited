@@ -49,6 +49,11 @@ try {
     fail("Database connection failed", 500);
 }
 $db->set_charset("utf8mb4");
+// UK business: run PHP + MySQL on London wall-clock time (the server itself is US/Eastern),
+// so NOW()/CURRENT_TIMESTAMP and PHP date() all reflect UK time. Offset (not the named zone)
+// so it works even where MySQL's tz tables aren't loaded; PHP tracks BST/GMT automatically.
+date_default_timezone_set("Europe/London");
+@$db->query("SET time_zone = '" . date("P") . "'");
 
 function db_one(mysqli $db, string $sql, string $types = "", ...$args): ?array {
     $st = $db->prepare($sql);
@@ -494,24 +499,81 @@ function ensure_email_templates(mysqli $db): void {
         body MEDIUMTEXT NULL,
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
-    $has = (int) ($db->query("SELECT COUNT(*) c FROM ego_email_templates")->fetch_assoc()["c"] ?? 0);
-    if ($has > 0) return;
-    $sig = "\n\nCheers,\n{{sender_name}}\nEGO LTD — general maintenance, homes & commercial\n07539 705576 · hello@egolimited.com\nThe jobs that need doing, done properly.";
+    $db->query("ALTER TABLE ego_email_templates ADD COLUMN IF NOT EXISTS preset TINYINT NOT NULL DEFAULT 0");
+    // Already seeded the full company-voice sequence set? (self-marking — no separate version store.)
+    if ((int) ($db->query("SELECT COUNT(*) c FROM ego_email_templates WHERE name='Agents · 1 · Intro'")->fetch_assoc()["c"] ?? 0) > 0) return;
+    // Retire the original starter presets by name; keep any templates the office created.
+    foreach (["Quote follow-up (homeowner)", "B2B intro (agents)", "Review request", "Win-back (dormant)", "Winter prep (seasonal)", "Referral ask"] as $n) {
+        $s = $db->prepare("DELETE FROM ego_email_templates WHERE name=?"); $s->bind_param("s", $n); $s->execute();
+    }
+    // Company-voice sign-off (from docs/18-EMAIL-SEQUENCES-COMPANY.md). No personal name.
+    $sig = "\n\nThe EGO LTD team\n07539 705576 · hello@egolimited.com · egolimited.com\nGeneral maintenance for homes and commercial across South-East London";
+    $stop = "\n\nReply STOP and we won't email again."; // cold B2B opt-out line
     $seed = [
-        ["Quote follow-up (homeowner)", "marketing", "Quick one on your quote, {{first_name}}",
-         "Hi {{first_name}},\n\nJust checking the quote for {{job_summary}} landed alright.\n\nIf the price or the timing isn't quite right, tell me — I'd rather adjust it than leave you guessing. If you want to go ahead, reply here or call 07539 705576 and I'll book you in." . $sig],
-        ["B2B intro (agents)", "marketing", "A reliable maintenance contractor for {{agency_name}}",
-         "Hi {{first_name}},\n\nI run EGO LTD — general maintenance across South-East London, homes and commercial. Carpentry, decorating, minor plumbing, tiling: the day-to-day repairs that keep managed properties tidy and tenants quiet.\n\nOne number, fixed prices in writing, and a maintenance record kept per property so you're never starting from scratch. Worth a 10-minute call to take some pressure off {{agency_name}}? I'm on 07539 705576, or just reply." . $sig],
-        ["Review request", "marketing", "How did we do on {{job_summary}}?",
-         "Hi {{first_name}},\n\nHope you're happy with {{job_summary}} — it was good to get it sorted for you.\n\nIf you've got 30 seconds, a quick honest review helps other people round here find us: {{review_link}}. And if anything's not quite right, tell me first — I'd always rather put it right." . $sig],
-        ["Win-back (dormant)", "marketing", "Still here when you need us, {{first_name}}",
-         "Hi {{first_name}},\n\nIt's been a while since we last sorted something for you. No agenda here, just a hello.\n\nIf anything around {{property_or_premises}} has been on the 'I'll get to that' list, that's exactly what we're good at — the small jobs, the repairs, the bits that never reach the top of the pile. Reply or call 07539 705576 whenever something crops up." . $sig],
-        ["Winter prep (seasonal)", "marketing", "Get ahead of winter before it gets ahead of you",
-         "Hi {{first_name}},\n\nCold weather finds every weak spot — draughty doors, dodgy seals, gutters that should've been cleared.\n\nA pre-winter once-over sorts it cheaply now. We'll check the property, fix the small stuff on the spot, and flag anything bigger with a fixed price before we touch it. Reply or call 07539 705576 and I'll book you in for {{seasonal_slot}}." . $sig],
-        ["Referral ask", "marketing", "Know anyone who needs a job doing properly?",
-         "Hi {{first_name}},\n\nThanks again for having us out for {{job_summary}}.\n\nQuick favour: if a friend, neighbour or family member needs a reliable pair of hands, point them our way. A name from someone like you is worth more than any advert. Just forward this email or pass on 07539 705576." . $sig],
+        // ---- B2B cold: letting & managing agents (5 touches, 22 days) ----
+        ["Agents · 1 · Intro", "marketing", "A reliable maintenance contractor for {{agency_name}}",
+         "Hi {{first_name}},\n\nWe're EGO LTD, a general maintenance team working across South-East London, homes and commercial. Carpentry, painting and decorating, minor plumbing, walls and tiling: the day-to-day repairs that keep managed properties tidy and tenants quiet.\n\nMost agents we speak to are juggling a patchy list of contractors who don't always pick up. We work the other way round. One number, fixed prices in writing, and a maintenance record kept per property, so nobody's ever starting from scratch when the next call comes in.\n\nWe'd like ten minutes to see whether we could take some pressure off {{agency_name}}. No pitch, just a quick look at how your repairs get handled now and whether we'd be a fit.\n\nIf that's useful, reply here or call 07539 705576." . $sig . $stop],
+        ["Agents · 2 · How we work", "marketing", "Fewer chase calls: here's how we work",
+         "Hi {{first_name}},\n\nQuick follow-up. The thing agents tell us they actually want is fewer chase calls, from tenants, and from their contractors. So here's exactly how we work:\n\n- Fixed price in writing before any job starts. No \"it ran over\" invoices landing after the fact.\n- A live tracking link for every job. You, and the tenant if you want, can see progress without ringing anyone.\n- Itemised VAT invoices, paid by bank transfer, clean for your accounts and easy to pass to a landlord.\n\nThe simplest way to judge it is to let us run a couple of small jobs. Reply with an address, or call 07539 705576." . $sig . $stop],
+        ["Agents · 3 · Portfolio case", "marketing", "The case for one contractor across your portfolio",
+         "Hi {{first_name}},\n\nIf {{agency_name}} manages more than a handful of properties, the real saving isn't a cheaper day rate. It's not having to re-explain a property every time something breaks.\n\nFor every property we look after, we keep a maintenance record: what's been done, what was used, and what to keep an eye on. That means less back-and-forth, faster fixes, and a clean paper trail you can hand straight to a landlord at inspection, re-let or sale.\n\nCould we grab 15 minutes this week to walk through it? Reply here or call 07539 705576." . $sig . $stop],
+        ["Agents · 4 · Proof", "marketing", "What managing agents say about us",
+         "Hi {{first_name}},\n\nWe'll keep this one short. Rather than telling you we're reliable, the standard we hold on every job is simple: turn up when we said, fix it properly, invoice it cleanly. Fixed price agreed first, a tracking link while it's live, an itemised VAT invoice after.\n\nIf you've even one or two problem properties on your list right now, hand them to us. No contract and no tie-in on the first one: if we don't impress you, you've lost nothing.\n\nReply with the address, or call 07539 705576 and we'll get someone out." . $sig . $stop],
+        ["Agents · 5 · Breakup", "marketing", "Should we close your file, {{first_name}}?",
+         "Hi {{first_name}},\n\nWe've dropped you a few notes about handling maintenance for {{agency_name}} and not heard back, which is completely fine. Timing is everything, and this clearly isn't the moment.\n\nWe won't keep emailing. If you'd like us on standby for the next repair or void that lands on your desk, reply \"keep me in mind\" and we'll be ready when you need us. Fixed price in writing, a live tracking link, an itemised invoice, same every time.\n\nEither way, thanks for your time." . $sig . $stop],
+        // ---- B2B cold: landlords (4 touches, 18 days) ----
+        ["Landlords · 1 · Intro", "marketing", "A go-to for repairs on {{property_or_portfolio}}",
+         "Hi {{first_name}},\n\nOwning a rental is fine right up until something breaks at 6pm on a Friday and you're scrolling old numbers looking for someone reliable.\n\nWe're EGO LTD, a general maintenance team across South-East London. We cover the everyday stuff: carpentry, painting and decorating, minor plumbing, walls and tiling. And we work in a way built to save you the hassle:\n\n- A fixed price in writing before we start, so you can budget with no surprises.\n- A live tracking link on every job, so you're not waiting in or chasing.\n- A record kept per property, so repairs get sorted faster and you've a clean history when it's time to re-let or sell.\n\nIf you'd like us as your go-to for {{property_or_portfolio}}, reply here or call 07539 705576." . $sig . $stop],
+        ["Landlords · 2 · The record", "marketing", "The record that follows your property",
+         "Hi {{first_name}},\n\nOne thing landlords tend to underrate: a proper maintenance record.\n\nFor every property we look after, we keep a log: what was done, when, what materials, and what to keep an eye on. It pays off exactly when it matters: tenant disputes, inspections, re-lets, or selling up. You hand over a clean history instead of a shrug. And day to day, it means repairs get done faster, because we already know the property.\n\nWant us to start a record for {{property_address}}? Reply here or call 07539 705576 and we'll get the first job logged." . $sig . $stop],
+        ["Landlords · 3 · Planned upkeep", "marketing", "Catch the small stuff before it's a big bill",
+         "Hi {{first_name}},\n\nThe cheapest repair is the one you catch early. Most of the expensive jobs we're called to started as a five-minute fix someone left for a year.\n\nSo we offer planned upkeep: a scheduled visit, quarterly or twice a year, your call. We check the property over, sort the small stuff on the spot, and flag anything heading your way with a fixed price before any bigger work. Fewer emergency call-outs, happier tenants, and no nasty surprises at inspection.\n\nWant us to put together a simple plan for {{property_address}}? Reply here or call 07539 705576 and we'll price it up." . $sig . $stop],
+        ["Landlords · 4 · Breakup", "marketing", "Still here when you need us",
+         "Hi {{first_name}},\n\nWe've dropped you a couple of notes about looking after repairs on {{property_or_portfolio}} and not heard back, which is absolutely fine.\n\nWe won't keep emailing. Just know we're still a one-number team across South-East London whenever a repair, a bit of upkeep, or a between-tenancies turnaround lands. Same fixed-price-in-writing, tracked, documented way of working every time.\n\nIf you'd like us kept in mind for when something crops up, reply \"keep me in mind\" and we'll be ready. Either way, thanks for your time." . $sig . $stop],
+        // ---- B2B cold: commercial / facilities (4 touches, 18 days) ----
+        ["Commercial · 1 · Intro", "marketing", "Reactive + planned maintenance for {{business_name}}",
+         "Hi {{first_name}},\n\nQuick one. We're EGO LTD, a general maintenance team for commercial premises across South-East London: the reactive repairs and the planned upkeep that keep a site running and safe.\n\nHere's what you get:\n\n- A fixed price agreed in writing before any work, so there are no surprise bills.\n- An itemised VAT invoice after, paid by bank transfer and clean for your accounts.\n- A record kept per site, so there's an audit trail whenever you need one.\n\nOne point of contact for the lot: carpentry, decorating, minor plumbing, walls and tiling.\n\nIf keeping {{business_name}} maintained is currently more hassle than it should be, could we grab 15 minutes? Reply here or call 07539 705576." . $sig . $stop],
+        ["Commercial · 2 · Value", "marketing", "Repairs sorted, upkeep planned, one contact",
+         "Hi {{first_name}},\n\nQuick follow-up on keeping {{business_name}} running. There are really two jobs on any site, and we cover both:\n\n- Reactive: something breaks, you call one number, and it's fixed on a fixed price agreed in writing first. No open-ended day rates, no invoice shock.\n- Planned: a scheduled once-over that catches the small stuff before it becomes a shutdown: seals, doors, tiling, the bits that fail quietly until they don't.\n\nEvery visit is documented on the site record and invoiced cleanly. The easiest way to judge us is one job. Send us the next repair on site, reply here or call 07539 705576, and we'll show you rather than tell you." . $sig . $stop],
+        ["Commercial · 3 · Audit trail", "marketing", "An audit trail for every job on site",
+         "Hi {{first_name}},\n\nOn a commercial site, the awkward question is usually \"when was that last done, and by whom?\", and it tends to come up at the worst moment.\n\nWe keep a record per site: every job dated, itemised and logged, with photos where it helps. So when a landlord, an insurer, or an inspection asks, you've a clean, ready answer instead of a scramble through old emails.\n\nIf a proper audit trail for {{business_name}} would take a headache off your plate, could we grab 15 minutes this week? Reply here or call 07539 705576." . $sig . $stop],
+        ["Commercial · 4 · Breakup", "marketing", "Should we close your file, {{first_name}}?",
+         "Hi {{first_name}},\n\nWe've sent a few notes about handling maintenance at {{business_name}} and not heard back, which is completely fine. Sites are busy and timing matters.\n\nWe won't keep emailing. If you'd like us on standby for the next repair or planned once-over the site needs, reply \"keep me in mind\" and we'll be ready. One number, fixed prices in writing, documented work with an audit trail.\n\nEither way, thanks for your time." . $sig . $stop],
+        // ---- B2B account nurture & retention (warm) ----
+        ["Nurture · 1 · Monthly", "marketing", "{{month}}: one number for the jobs that crop up",
+         "Hi {{first_name}},\n\nQuick hello from the EGO team. Heading into the season, it's worth getting ahead of the small jobs before they turn into an emergency call-out. A short once-over now is almost always cheaper than the fix later.\n\nIf you've a property that could do with a look, or anything on the list we can take off your plate, reply here or call 07539 705576." . $sig],
+        ["Nurture · 2 · Quarterly review", "marketing", "Your properties last quarter: a quick summary",
+         "Hi {{first_name}},\n\nA quick quarterly wrap-up. Everything we handled across your properties was fixed-priced, invoiced, and logged on the per-property record, so you've a clean history to hand a landlord or pull up at inspection whenever you need it. Nothing to chase, nothing missing.\n\nIf it's working well, it might be worth looking at a simple planned-upkeep arrangement so the small stuff gets caught before it becomes a call-out. No lock-in. Reply here or call 07539 705576 and we'll set it out." . $sig],
+        ["Nurture · 3 · Preferred supplier", "marketing", "Make us your default for {{agency_name}}?",
+         "Hi {{first_name}},\n\nWe've done a good few jobs for you now and they've gone well. It might be worth making it official.\n\nThe idea is simple: we become your default maintenance firm across your properties. That means priority response, fixed prices in writing, one point of contact, and a record kept per property, so you stop having to find and vet a contractor every time something breaks.\n\nNo lock-in and no long contract. Happy to put a simple arrangement on paper. Reply here or call 07539 705576." . $sig],
+        ["Nurture · 4 · Win-back", "marketing", "Still here when you need us",
+         "Hi {{first_name}},\n\nIt's been a while since we last sorted something for {{agency_name}}. No agenda here, just a note to say we're still a one-number team across South-East London whenever a repair, a void, or a bit of upkeep lands.\n\nNothing's changed about how we work: fixed price in writing, a live tracking link, an itemised invoice, and everything logged on the property record. If something's been sitting on the \"we'll get to that\" list, that's exactly the kind of thing we're good at. Reply here or call 07539 705576 whenever it crops up." . $sig],
+        // ---- Homeowner: enquiry → quote → win ----
+        ["Homeowner · 1 · Thanks", "marketing", "Thanks {{first_name}}, we've got your enquiry",
+         "Hi {{first_name}},\n\nThanks for getting in touch about {{job_summary}}. It's logged with us and someone's already on it.\n\nHere's what happens next. Our team will have a proper look at what you've sent and come back with a fixed price in writing, usually within a couple of working days. A photo now often helps us price it right, so do send one over if you've got it handy.\n\nNo call centres and no chasing. One person owns your job from the first look to the final invoice.\n\nIf anything's urgent or has changed, just reply to this email or call us on 07539 705576." . $sig],
+        ["Homeowner · 2 · Quote", "marketing", "Your quote for {{job_summary}}",
+         "Hi {{first_name}},\n\nHere's your quote for {{job_summary}}, fixed in writing.\n\nIt's itemised, so you can see exactly what you're paying for, with VAT shown separately. That price is the price. If anything changes once we're on site, we agree it with you first, never after the fact.\n\nOnce the work's done you'll get an itemised invoice and a live tracking link so you can follow the job without waiting in all day.\n\nIf you're happy, reply \"yes\" or give us a ring on 07539 705576 and we'll get you booked in for the next slot that suits. Any questions on the quote at all, just ask." . $sig],
+        ["Homeowner · 3 · Nudge", "marketing", "Quick one on your quote, {{first_name}}",
+         "Hi {{first_name}},\n\nJust checking the quote for {{job_summary}} landed alright.\n\nIf the price or the timing isn't quite right, tell us. We'd far rather adjust it than leave you guessing. And if there's a bit you'd like explaining, we're happy to walk through it line by line, no obligation.\n\nWhenever you're ready to go ahead, reply here or call 07539 705576 and we'll book you in." . $sig],
+        ["Homeowner · 4 · Still thinking", "marketing", "Still thinking it over?",
+         "Hi {{first_name}},\n\nNo problem at all if {{job_summary}} is still on the back burner. Life gets busy and the job will keep.\n\nWhen you're ready, here's what you get with us:\n\n- A fixed price agreed in writing before we start.\n- A live tracking link, so you always know where your job's up to.\n- An itemised VAT invoice when it's done, nothing vague.\n\nThat's the whole point of EGO: the jobs that need doing, done properly. Reply or call 07539 705576 whenever suits." . $sig],
+        // ---- Post-job: review + referral ----
+        ["Review · 1 · How did we do", "marketing", "How did we do on {{job_summary}}?",
+         "Hi {{first_name}},\n\nWe hope you're happy with {{job_summary}}. It was good to get it sorted for you.\n\nIf you've got 30 seconds, a quick honest review would mean a lot. We're a small local outfit and word of mouth is most of how we grow: {{review_link}}\n\nAnd if anything's not quite right, please tell us first. We'd always rather put it right than have you stuck with it. Just reply to this email or call 07539 705576." . $sig],
+        ["Referral · 2 · Referral ask", "marketing", "Know anyone who needs a job doing properly?",
+         "Hi {{first_name}},\n\nThanks again for having us out for {{job_summary}}.\n\nQuick favour. If a friend, neighbour or family member needs a reliable pair of hands (carpentry, decorating, a bit of plumbing or tiling, or the small jobs other firms won't book), point them our way. A name from someone like you is worth more than any advert we could run.\n\nJust forward this email or pass on 07539 705576. We'll look after them the same way we looked after you." . $sig],
+        // ---- Seasonal ----
+        ["Seasonal · Winter once-over", "marketing", "Get ahead of winter before it gets ahead of you",
+         "Hi {{first_name}},\n\nCold weather finds every weak spot. Draughty doors, tired seals, gutters that should've been cleared, the small jobs that turn into big ones once the frost sets in.\n\nA pre-winter once-over sorts it cheaply now. Our team checks the property over, fixes the small stuff on the spot, and flags anything bigger with a fixed price before we touch it.\n\nBest to beat the rush. The closer to Christmas, the busier everyone gets. Fancy getting ahead of it? Reply with your address or call 07539 705576 and we'll book you in." . $sig],
+        ["Seasonal · Small jobs", "marketing", "Save up the small jobs: one visit sorts the lot",
+         "Hi {{first_name}},\n\nMost homes have a running list. The sticky door, the bit of tiling, the shelf that never went up, the patch that needs painting. Now's a good time to get on top of it.\n\nSave them up and we'll do the lot in one visit: fixed price agreed first, itemised invoice after, no fuss. It's usually cheaper and far less hassle than calling someone out one job at a time.\n\nFancy clearing the list? Reply with what's on it, or call 07539 705576 and we'll price it up." . $sig],
+        // ---- Homeowner win-back / dormant ----
+        ["Win-back · 1 · Hello", "marketing", "Still here when you need us, {{first_name}}",
+         "Hi {{first_name}},\n\nIt's been a while since we last sorted something for you.\n\nNo agenda here, just a hello. If anything around the house has drifted onto the \"I'll get to that\" list, that's exactly the kind of thing we're good at: the small jobs, the repairs, the bits that never quite reach the top of the pile.\n\nSame number, same fixed-price-in-writing way of working, same live tracking link and itemised invoice at the end. Reply or call 07539 705576 whenever something crops up." . $sig],
+        ["Win-back · 2 · One visit", "marketing", "Your to-do list, sorted in one visit",
+         "Hi {{first_name}},\n\nMost homes have a running list: the sticky door, the bit of tiling, the shelf that never went up, the patch that needs painting.\n\nSave them up and we'll do the lot in one visit: fixed price agreed first, itemised invoice after, no fuss. It's usually cheaper and far less hassle than calling someone out one job at a time, and you'll get a live tracking link so there's no waiting in all day.\n\nFancy clearing the list? Reply with what's on it, or call 07539 705576 and we'll price it up." . $sig],
     ];
-    $stmt = $db->prepare("INSERT INTO ego_email_templates (name,kind,subject,body) VALUES (?,?,?,?)");
+    $stmt = $db->prepare("INSERT INTO ego_email_templates (name,kind,subject,body,preset) VALUES (?,?,?,?,1)");
     foreach ($seed as $t) { $stmt->bind_param("ssss", $t[0], $t[1], $t[2], $t[3]); $stmt->execute(); }
 }
 
@@ -1974,36 +2036,63 @@ switch ("$method $route") {
         $m = $w["main"] ?? [];
         $t = $m["temp"] ?? null; $h = $m["humidity"] ?? null;
         $dew = ($t !== null && $h !== null) ? round($t - ((100 - $h) / 5), 1) : null; // Magnus approx
-        // 5-day / 3-hour forecast → one reading per day (~midday)
-        $forecast = [];
+        $lat = $w["coord"]["lat"] ?? null; $lon = $w["coord"]["lon"] ?? null;
+
+        // 3-hourly forecast → an hourly strip (next ~24h) + per-day min/max/rain for the weekly.
+        $hourly = []; $days = [];
         [$fc, $f] = $get("forecast");
         if ($fc === 200 && !empty($f["list"])) {
-            $seen = [];
             foreach ($f["list"] as $row) {
+                $pop = isset($row["pop"]) ? (int) round(((float) $row["pop"]) * 100) : 0;
+                if (count($hourly) < 8) {
+                    $hourly[] = [
+                        "dt" => (int) ($row["dt"] ?? 0),
+                        "temp" => $row["main"]["temp"] ?? null,
+                        "icon" => $row["weather"][0]["icon"] ?? "",
+                        "desc" => $row["weather"][0]["description"] ?? "",
+                        "pop" => $pop,
+                    ];
+                }
                 $day = substr($row["dt_txt"] ?? "", 0, 10);
-                $hour = substr($row["dt_txt"] ?? "", 11, 2);
-                if ($day === "" || isset($seen[$day])) continue;
-                if ($hour !== "12" && count($seen) > 0) continue; // prefer midday, but take first of each day
-                $seen[$day] = true;
-                $forecast[] = [
-                    "date" => $day,
-                    "temp" => $row["main"]["temp"] ?? null,
-                    "icon" => $row["weather"][0]["icon"] ?? "",
-                    "desc" => $row["weather"][0]["description"] ?? "",
-                ];
-                if (count($forecast) >= 6) break;
+                if ($day === "") continue;
+                if (!isset($days[$day])) $days[$day] = ["date" => $day, "min" => INF, "max" => -INF, "icon" => "", "pop" => 0, "set" => false];
+                $tmin = $row["main"]["temp_min"] ?? ($row["main"]["temp"] ?? null);
+                $tmax = $row["main"]["temp_max"] ?? ($row["main"]["temp"] ?? null);
+                if ($tmin !== null) $days[$day]["min"] = min($days[$day]["min"], (float) $tmin);
+                if ($tmax !== null) $days[$day]["max"] = max($days[$day]["max"], (float) $tmax);
+                $days[$day]["pop"] = max($days[$day]["pop"], $pop);
+                $hr = substr($row["dt_txt"] ?? "", 11, 2);
+                if ($days[$day]["icon"] === "") $days[$day]["icon"] = $row["weather"][0]["icon"] ?? "";
+                if (!$days[$day]["set"] && ($hr === "12" || $hr === "15")) { $days[$day]["icon"] = $row["weather"][0]["icon"] ?? ""; $days[$day]["set"] = true; }
             }
         }
+        $forecast = [];
+        foreach ($days as $d) {
+            $forecast[] = ["date" => $d["date"], "min" => is_finite($d["min"]) ? (int) round($d["min"]) : null,
+                "max" => is_finite($d["max"]) ? (int) round($d["max"]) : null, "icon" => $d["icon"], "pop" => $d["pop"]];
+            if (count($forecast) >= 7) break;
+        }
+
+        // UV index — best-effort via One Call 3.0 (only if the key has it enabled; otherwise null).
+        $uvi = null;
+        if ($lat !== null && $lon !== null) {
+            $ch = curl_init("https://api.openweathermap.org/data/3.0/onecall?lat=" . urlencode((string) $lat) . "&lon=" . urlencode((string) $lon) . "&exclude=minutely,hourly,daily,alerts&units=metric&appid=" . urlencode($key));
+            curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 8]);
+            $ocRaw = curl_exec($ch); $ocCode = curl_getinfo($ch, CURLINFO_HTTP_CODE); curl_close($ch);
+            if ($ocCode === 200) { $oc = json_decode($ocRaw ?: "null", true); $uvi = $oc["current"]["uvi"] ?? null; }
+        }
+
         send([
-            "city" => $w["name"] ?? $city,
-            "country" => $w["sys"]["country"] ?? "",
+            "city" => $w["name"] ?? $city, "country" => $w["sys"]["country"] ?? "",
             "temp" => $t, "feels_like" => $m["feels_like"] ?? null,
             "temp_min" => $m["temp_min"] ?? null, "temp_max" => $m["temp_max"] ?? null,
-            "pressure" => $m["pressure"] ?? null, "sea_level" => $m["sea_level"] ?? null, "grnd_level" => $m["grnd_level"] ?? null,
-            "humidity" => $h, "dew_point" => $dew,
-            "wind" => $w["wind"]["speed"] ?? null,
+            "pressure" => $m["pressure"] ?? null, "humidity" => $h, "dew_point" => $dew,
+            "visibility" => $w["visibility"] ?? null,
+            "wind" => $w["wind"]["speed"] ?? null, "wind_deg" => $w["wind"]["deg"] ?? null,
+            "uvi" => $uvi, "pop" => $hourly[0]["pop"] ?? 0,
+            "rain" => $w["rain"]["1h"] ?? ($w["rain"]["3h"] ?? 0), // mm in the last hour
             "desc" => $w["weather"][0]["description"] ?? "", "icon" => $w["weather"][0]["icon"] ?? "",
-            "forecast" => $forecast,
+            "hourly" => $hourly, "forecast" => $forecast,
         ]);
     }
 
@@ -3608,23 +3697,29 @@ switch ("$method $route") {
         $imgHtml = ($img !== "" && filter_var($img, FILTER_VALIDATE_URL))
             ? "<img src='" . htmlspecialchars($img) . "' alt='' style='display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:0 0 18px'>"
             : "";
-        $bodyHtml = $imgHtml . nl2br(htmlspecialchars($bodyTxt));
-        $coName = htmlspecialchars((db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED");
+        $coNamePlain = (db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED";
+        $coName = htmlspecialchars($coNamePlain);
         $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
         $unsubBase = "$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe";
         $sent = 0; $failed = 0;
         foreach ($rows as $email => $name) {
             // Throttle so a big send doesn't saturate the SMTP relay (~8/sec).
             if ($sent + $failed > 0) usleep(120000);
+            // Personalise per recipient: their first name (and details) filled into the tokens,
+            // so one bulk send addresses everyone individually rather than a generic blast.
+            $first = $name ? (preg_split('/\s+/', trim($name))[0] ?? "") : "";
+            $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => (string)$name, "sender_name" => $coNamePlain, "company_name" => $coNamePlain];
+            $subjR = ego_merge_tokens($subject, $ctx);
+            $bodyR = ego_merge_tokens($bodyTxt, $ctx);
             // Per-recipient unsubscribe link so every marketing email carries a real opt-out.
             $link = htmlspecialchars($unsubBase . "?e=" . rawurlencode($email) . "&t=" . ego_unsub_token($email));
             $foot = "<p style='margin:18px 0 0;color:#9ca3af;font-size:12px'>You're receiving this from $coName. "
                 . "<a href='$link' style='color:#9ca3af'>Unsubscribe</a>.</p>";
-            $html = ego_email_shell($db, "", $bodyHtml . $foot);
+            $html = ego_email_shell($db, "", $imgHtml . nl2br(htmlspecialchars($bodyR)) . $foot);
             try {
-                ego_send_mail($db, $email, $name ?: null, $subject, $html);
+                ego_send_mail($db, $email, $name ?: null, $subjR, $html);
                 $sent++;
-                db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subject, $bodyTxt);
+                db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subjR, $bodyR);
             } catch (Throwable $e) { $failed++; }
         }
         log_activity($db, null, (int)$actor["id"], "campaign_sent", ["audience" => $audience, "sent" => $sent, "failed" => $failed]);

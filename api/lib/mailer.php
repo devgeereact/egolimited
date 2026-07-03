@@ -32,6 +32,36 @@ function ego_email_shell(mysqli $db, string $heading, string $innerHtml): string
         . "</table></body></html>";
 }
 
+/**
+ * Fill personalisation tokens per recipient so a bulk send addresses each person by name
+ * with their own details. Known tokens use real data; common business tokens get a sensible
+ * generic fallback; anything unfilled is stripped so a raw {{token}} never ships.
+ * $ctx keys: first_name, name, sender_name, company_name.
+ */
+function ego_merge_tokens(string $text, array $ctx): string {
+    $known = [
+        "first_name" => $ctx["first_name"] ?? "", "name" => $ctx["first_name"] ?? "",
+        "firstname" => $ctx["first_name"] ?? "", "first name" => $ctx["first_name"] ?? "",
+        "full_name" => ($ctx["name"] ?? "") ?: ($ctx["first_name"] ?? ""),
+        "sender_name" => $ctx["sender_name"] ?? "", "company" => $ctx["company_name"] ?? "",
+        "company_name" => $ctx["company_name"] ?? "",
+    ];
+    $fallback = [
+        "agency_name" => "your business", "business_name" => "your business",
+        "property_or_premises" => "your property", "property_or_portfolio" => "your property",
+        "property_address" => "your property", "job_summary" => "your job",
+        "last_job_summary" => "your last job", "month" => date("F"), "season" => "the season",
+    ];
+    $out = (string) preg_replace_callback('/\{\{\s*([A-Za-z0-9_ ]+?)\s*\}\}/', function ($mm) use ($known, $fallback) {
+        $k = strtolower(trim($mm[1]));
+        if (($known[$k] ?? "") !== "") return $known[$k];
+        return $fallback[$k] ?? ""; // unknown/blank token → removed, never shown
+    }, $text);
+    $out = (string) preg_replace('/[ \t]{2,}/', " ", $out);        // tidy gaps a removed token left
+    $out = (string) preg_replace('/\s+([,.!?])/', '$1', $out);     // no space before punctuation
+    return $out;
+}
+
 /** Stable, non-trivial one-click unsubscribe token for a recipient (UK PECR opt-out). */
 function ego_unsub_token(string $email): string {
     return substr(hash_hmac("sha256", strtolower(trim($email)), "ego-unsub-v1"), 0, 24);
