@@ -33,7 +33,11 @@ export default function EngineerToday() {
   const [jobs, setJobs] = useState<FieldJob[]>([])
   const [loading, setLoading] = useState(true)
   const [weather, setWeather] = useState<Weather | null>(null)
-  const today = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => { const t = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(t) }, [])
+  // Always UK time regardless of the device's timezone.
+  const today = now.toLocaleDateString("en-GB", { timeZone: "Europe/London", weekday: "long", day: "numeric", month: "long" })
+  const clock = now.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" })
 
   const cacheKey = user ? `ego_today_${user.id}` : "ego_today"
   useEffect(() => {
@@ -52,9 +56,15 @@ export default function EngineerToday() {
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <div>
-        <p className="text-sm text-muted-foreground">{today}</p>
-        <h1 className="text-2xl font-semibold tracking-tight">Hi {user?.name.split(" ")[0] ?? "there"} 👋</h1>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm text-muted-foreground">{today}</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Hi {user?.name.split(" ")[0] ?? "there"} 👋</h1>
+        </div>
+        <div className="flex items-center gap-1.5 rounded-lg bg-muted px-3 py-2">
+          <Clock className="size-4 text-muted-foreground" />
+          <span className="text-lg font-semibold leading-none tabular-nums">{clock}</span>
+        </div>
       </div>
 
       {weather && (

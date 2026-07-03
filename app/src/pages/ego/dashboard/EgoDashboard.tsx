@@ -14,13 +14,7 @@ import { gbp } from "@/lib/invoicing"
 import { useAuth } from "@/store/auth.store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
-
-interface Wx {
-  city: string; country: string; temp: number | null; feels_like: number | null
-  temp_min: number | null; temp_max: number | null; humidity: number | null; dew_point: number | null
-  wind: number | null; desc: string; icon: string
-  forecast: { date: string; temp: number | null; icon: string; desc: string }[]
-}
+import WeatherPanel from "@/components/ego/WeatherPanel"
 
 interface Dash {
   today_jobs: number; to_schedule: number; awaiting_invoice: number; in_progress: number; completed_today: number; open_jobs: number
@@ -33,26 +27,6 @@ interface Dash {
   unread_messages: number
 }
 
-// Pick a live sky gradient from condition + day/night (icon code ends d/n).
-function skyClass(desc: string, icon: string): string {
-  const night = icon?.endsWith("n")
-  const d = (desc || "").toLowerCase()
-  if (d.includes("thunder")) return "gradient-purple"
-  if (d.includes("snow")) return "gradient-cyan"
-  if (d.includes("rain") || d.includes("drizzle")) return "gradient-blue"
-  if (d.includes("cloud") || d.includes("mist") || d.includes("fog") || d.includes("haze")) return night ? "gradient-violet" : "gradient-cyan"
-  if (d.includes("clear")) return night ? "gradient-violet" : "gradient-blue"
-  return night ? "gradient-violet" : "gradient-blue"
-}
-
-function Metric({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
-  return (
-    <div className="rounded-lg bg-white/10 px-3 py-2 backdrop-blur-sm">
-      <p className="flex items-center gap-1.5 text-[11px] text-white/75"><Icon className="size-3.5" /> {label}</p>
-      <p className="mt-0.5 text-sm font-semibold">{value}</p>
-    </div>
-  )
-}
 
 function recentText(action: string, detail: string | null): string {
   let d: Record<string, unknown> = {}
@@ -66,16 +40,19 @@ function recentText(action: string, detail: string | null): string {
 }
 
 const TODAY_LABEL = new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long" })
+// Morning / Afternoon / Evening by UK time — drives the greeting + briefing label.
+const dayPart = () => {
+  const h = Number(new Date().toLocaleString("en-GB", { timeZone: "Europe/London", hour: "2-digit", hour12: false }))
+  return h < 12 ? "Morning" : h < 18 ? "Afternoon" : "Evening"
+}
 
 export default function EgoDashboard() {
   const { user } = useAuth()
   const [d, setD] = useState<Dash | null>(null)
   const [ai, setAi] = useState<string | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
-  const [wx, setWx] = useState<Wx | null>(null)
   useEffect(() => {
     api<Dash>("/dashboard").then(setD)
-    api<Wx>("/weather").then(setWx).catch(() => {})
   }, [])
 
   async function digest() {
@@ -84,7 +61,7 @@ export default function EgoDashboard() {
     try {
       const lines = d.recent.slice(0, 10).map((a) => `- ${recentText(a.action, a.detail)}${a.job_reference ? ` (${a.job_reference})` : ""}`).join("\n")
       const prompt =
-        `You are the office assistant for EGO LIMITED, a maintenance company. Give a short morning briefing (3-4 bullets) and flag what needs attention. Be concise.\n\n` +
+        `You are the office assistant for EGO LIMITED, a maintenance company. Give a short ${dayPart().toLowerCase()} briefing (3-4 bullets) and flag what needs attention. Be concise.\n\n` +
         `Jobs today: ${d.today_jobs}. In progress now: ${d.in_progress}. Awaiting schedule: ${d.to_schedule}. Awaiting invoice: ${d.awaiting_invoice}. Open jobs: ${d.open_jobs}. Completed today: ${d.completed_today}.\n` +
         `Outstanding: £${d.unpaid_total}. Overdue: £${d.overdue_total}. Collected (30d): £${d.collected_30d}. Avg review: ${d.review_avg ?? "n/a"} (${d.review_count}).\n` +
         `Recent activity:\n${lines}`
@@ -99,6 +76,7 @@ export default function EgoDashboard() {
   const stats = [
     { label: "Today's jobs", value: String(d.today_jobs), icon: Briefcase, to: "/ego/schedule", tone: "text-blue-600 dark:text-blue-400 bg-blue-500/10" },
     { label: "In progress", value: String(d.in_progress), icon: Truck, to: "/ego/schedule", tone: "text-violet-600 dark:text-violet-400 bg-violet-500/10" },
+    { label: "Completed today", value: String(d.completed_today), icon: CheckCircle2, to: "/ego/jobs", tone: "text-sky-600 dark:text-sky-400 bg-sky-500/10" },
     { label: "To schedule", value: String(d.to_schedule), icon: CalendarPlus, to: "/ego/jobs", tone: "text-amber-600 dark:text-amber-400 bg-amber-500/10" },
     { label: "Awaiting invoice", value: String(d.awaiting_invoice), icon: FileText, to: "/ego/jobs", tone: "text-orange-600 dark:text-orange-400 bg-orange-500/10" },
     { label: "Outstanding", value: gbp(d.unpaid_total), icon: PoundSterling, to: "/ego/payments", tone: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10" },
@@ -110,13 +88,13 @@ export default function EgoDashboard() {
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          {user ? `Welcome back, ${user.name.split(" ")[0]}` : "Dashboard"}
+          {user ? `Good ${dayPart().toLowerCase()}, ${user.name.split(" ")[0]}` : "Dashboard"}
         </h1>
         <p className="mt-0.5 text-sm text-muted-foreground">{TODAY_LABEL}</p>
       </div>
 
       {/* Primary KPIs */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         {stats.map((s) => (
           <Link key={s.label} to={s.to}>
             <Card className="h-full transition-colors hover:bg-muted/30">
@@ -137,9 +115,6 @@ export default function EgoDashboard() {
         <Link to="/ego/jobs" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
           <Briefcase className="size-4" /> <span className="font-semibold text-foreground">{d.open_jobs}</span> open jobs
         </Link>
-        <span className="flex items-center gap-1.5 text-muted-foreground">
-          <CheckCircle2 className="size-4 text-emerald-600" /> <span className="font-semibold text-foreground">{d.completed_today}</span> completed today
-        </span>
         <Link to="/ego/reviews" className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground">
           <Star className="size-4 fill-amber-400 text-amber-400" />
           <span className="font-semibold text-foreground">{d.review_avg?.toFixed(1) ?? "—"}</span> avg · {d.review_count} review{d.review_count === 1 ? "" : "s"}
@@ -150,7 +125,7 @@ export default function EgoDashboard() {
       <Card className="border-primary/20 bg-gradient-to-br from-primary/5 to-transparent">
         <CardContent className="p-4">
           <div className="flex items-center justify-between gap-3">
-            <p className="flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4 text-primary" /> Morning briefing</p>
+            <p className="flex items-center gap-2 text-sm font-medium"><Sparkles className="size-4 text-primary" /> {dayPart()} briefing</p>
             <Button size="sm" variant="outline" onClick={digest} disabled={aiBusy}>
               {aiBusy ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />} {ai ? "Refresh" : "Generate"}
             </Button>
@@ -161,51 +136,8 @@ export default function EgoDashboard() {
         </CardContent>
       </Card>
 
-      {/* Weather — live sky-gradient hero, conditions for the day's jobs */}
-      {wx && (
-        <Card className={cn("overflow-hidden border-0 text-white shadow-lg", skyClass(wx.desc, wx.icon))}>
-          <CardContent className="relative bg-gradient-to-b from-white/10 to-black/20 p-5">
-            <div className="grid gap-5 md:grid-cols-[minmax(0,0.95fr)_minmax(0,1.4fr)] md:items-center">
-              <div>
-                <p className="mb-2 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-white/70">
-                  <CloudSun className="size-3.5" /> Conditions for today's jobs
-                </p>
-                <div className="flex items-center gap-4">
-                  {wx.icon && <img src={`https://openweathermap.org/img/wn/${wx.icon}@2x.png`} alt={wx.desc} className="size-24 shrink-0 drop-shadow-[0_4px_12px_rgba(0,0,0,0.35)]" />}
-                  <div className="min-w-0">
-                    <div className="flex items-baseline gap-1">
-                      <p className="text-6xl font-semibold leading-none tracking-tight">{wx.temp != null ? Math.round(wx.temp) : "—"}</p>
-                      <span className="text-2xl text-white/70">°C</span>
-                    </div>
-                    <p className="mt-1.5 text-sm font-medium capitalize">{wx.desc}</p>
-                    <p className="flex items-center gap-1 text-xs text-white/75"><MapPin className="size-3" /> {wx.city}{wx.country ? `, ${wx.country}` : ""}</p>
-                  </div>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  {wx.feels_like != null && <Metric icon={Thermometer} label="Feels like" value={`${Math.round(wx.feels_like)}°`} />}
-                  {(wx.temp_max != null || wx.temp_min != null) && <Metric icon={CloudSun} label="High · Low" value={`${wx.temp_max != null ? Math.round(wx.temp_max) : "—"}° / ${wx.temp_min != null ? Math.round(wx.temp_min) : "—"}°`} />}
-                  {wx.humidity != null && <Metric icon={Droplets} label="Humidity" value={`${wx.humidity}%`} />}
-                  {wx.wind != null && <Metric icon={Wind} label="Wind" value={`${Math.round(wx.wind)} m/s`} />}
-                </div>
-                {wx.forecast.length > 0 && (
-                  <div className="flex items-stretch justify-between gap-1.5 rounded-xl bg-white/10 p-2 backdrop-blur-sm">
-                    {wx.forecast.slice(0, 5).map((f, i) => (
-                      <div key={f.date} title={f.desc}
-                        className={cn("flex flex-1 flex-col items-center gap-0.5 rounded-lg py-1.5 text-center transition-colors hover:bg-white/15", i === 0 && "bg-white/15 ring-1 ring-white/25")}>
-                        <span className="text-[11px] font-medium text-white/80">{i === 0 ? "Today" : new Date(`${f.date}T12:00:00`).toLocaleDateString("en-GB", { weekday: "short" })}</span>
-                        {f.icon && <img src={`https://openweathermap.org/img/wn/${f.icon}.png`} alt={f.desc} className="size-9" />}
-                        <span className="text-sm font-semibold">{f.temp != null ? `${Math.round(f.temp)}°` : "—"}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      {/* Weather — hero + hourly + metrics + weekly (live OpenWeather) */}
+      <WeatherPanel />
 
       {/* Today's schedule + Waitlist — operational, side by side */}
       <div className="grid gap-6 lg:grid-cols-2">
