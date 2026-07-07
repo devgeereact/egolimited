@@ -20,6 +20,7 @@ interface Analytics {
     collected_12m: number; invoiced_12m: number; outstanding: number; overdue: number
     collected_30d: number; jobs_completed_30d: number; jobs_open: number
     new_customers_30d: number; avg_invoice: number; paid_count: number
+    sla_compliance: number | null; sla_breached_open: number
   }
   revenue_series: MonthPoint[]
   jobs_by_status: { status: string; count: number }[]
@@ -109,6 +110,29 @@ export default function AnalyticsPage() {
           </Card>
         ))}
       </div>
+
+      {/* SLA compliance */}
+      <Card>
+        <CardContent className="flex flex-wrap items-center justify-between gap-6 p-5">
+          <div className="flex items-center gap-4">
+            <div className={`flex size-14 flex-col items-center justify-center rounded-2xl ${
+              k.sla_compliance == null ? "bg-muted text-muted-foreground"
+                : k.sla_compliance >= 90 ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                : k.sla_compliance >= 75 ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                : "bg-red-500/15 text-red-600 dark:text-red-400"}`}>
+              <span className="text-xl font-bold leading-none tabular-nums">{k.sla_compliance == null ? "—" : `${k.sla_compliance}%`}</span>
+            </div>
+            <div>
+              <p className="text-sm font-semibold">SLA compliance · 90 days</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Share of resolved jobs finished within their priority's target.</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className={`text-2xl font-semibold leading-none tabular-nums ${k.sla_breached_open > 0 ? "text-red-600 dark:text-red-400" : ""}`}>{k.sla_breached_open}</p>
+            <p className="mt-1 text-xs text-muted-foreground">open jobs past target</p>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Revenue trend */}
       <Card>

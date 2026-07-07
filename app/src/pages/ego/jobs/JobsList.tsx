@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
+import { SlaBadge } from "@/components/ego/SlaBadge"
 import { TableRowsSkeleton } from "@/components/ego/Skeletons"
 import { PRIORITY_CLASS, PRIORITY_LABEL, gbp, type JobPriority } from "@/lib/mock/jobs"
 
@@ -26,6 +27,7 @@ interface JobRow {
   scheduled_start: string | null
   customer_name: string
   engineer_name: string | null
+  sla?: string | null
 }
 
 const FILTERS: { value: string; label: string; match: EgoStatus[] }[] = [
@@ -129,7 +131,12 @@ export default function JobsList() {
                       {PRIORITY_LABEL[j.priority]}
                     </span>
                   </TableCell>
-                  <TableCell><StatusPill status={j.status} /></TableCell>
+                  <TableCell>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <StatusPill status={j.status} />
+                      <SlaBadge sla={j.sla} />
+                    </span>
+                  </TableCell>
                   <TableCell className="text-muted-foreground">{j.engineer_name ?? "—"}</TableCell>
                   <TableCell className="text-right font-mono">{j.quoted_amount ? gbp(Number(j.quoted_amount)) : "—"}</TableCell>
                 </TableRow>

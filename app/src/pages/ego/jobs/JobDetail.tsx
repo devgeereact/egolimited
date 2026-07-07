@@ -18,6 +18,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { StatusPill } from "@/components/ego/StatusPill"
+import { SlaBadge } from "@/components/ego/SlaBadge"
 import ScheduleDialog from "@/components/ego/ScheduleDialog"
 import { DetailSkeleton } from "@/components/ego/Skeletons"
 import { confirmDialog } from "@/components/ego/confirm"
@@ -53,6 +54,8 @@ interface JobDetailData {
   track_token: string
   track_short: string
   hold_reason: string | null
+  sla?: string | null
+  sla_due?: string | null
   parts_required: number
   parts_note: string | null
   messages: { id: number; direction: string; channel: string; from_name: string | null; from_email: string | null; subject: string | null; body: string | null; acknowledged: number; visible_to_engineer: number; created_at: string }[]
@@ -293,6 +296,7 @@ export default function JobDetail() {
             <span className={cn("inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset", PRIORITY_CLASS[job.priority])}>
               {PRIORITY_LABEL[job.priority]} priority
             </span>
+            <SlaBadge sla={job.sla} />
           </div>
           <p className="text-base">{job.title}</p>
         </div>

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   Loader2, Users, Bell, Palette, UserRound, Building2, ShieldCheck, Mail, Phone,
-  MapPin, Receipt, Landmark, Pencil, Lock, Hash,
+  MapPin, Receipt, Landmark, Pencil, Lock, Hash, Timer,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -37,9 +37,12 @@ const FIELDS: { key: string; label: string; group: string; type?: string }[] = [
   { key: "invoice_prefix", label: "Invoice prefix", group: "Numbering" },
   { key: "quote_prefix", label: "Quote prefix", group: "Numbering" },
   { key: "payment_terms_days", label: "Payment terms (days)", group: "Numbering", type: "number" },
+  { key: "sla_urgent_hours", label: "Urgent — resolve within (hours)", group: "SLA", type: "number" },
+  { key: "sla_normal_hours", label: "Normal — resolve within (hours)", group: "SLA", type: "number" },
+  { key: "sla_low_hours", label: "Low — resolve within (hours)", group: "SLA", type: "number" },
 ]
-const GROUPS = ["Company", "Tax", "Bank", "Numbering"] as const
-const GROUP_ICON: Record<string, typeof Building2> = { Company: Building2, Tax: Receipt, Bank: Landmark, Numbering: Hash }
+const GROUPS = ["Company", "Tax", "Bank", "Numbering", "SLA"] as const
+const GROUP_ICON: Record<string, typeof Building2> = { Company: Building2, Tax: Receipt, Bank: Landmark, Numbering: Hash, SLA: Timer }
 
 const NOTIFY: { key: string; label: string; hint: string }[] = [
   { key: "emails", label: "New emails", hint: "When a new email lands in the shared inbox." },

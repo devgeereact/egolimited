@@ -770,6 +770,42 @@ function load_owned_job(mysqli $db, array $actor, int $id): array {
     return $job;
 }
 
+/* ---------- SLA (response/resolution targets + escalation) ---------- */
+/** Ensure the founder-configurable SLA target columns exist (hours from job creation). */
+function ensure_sla_cols(mysqli $db): void {
+    static $done = false; if ($done) return; $done = true;
+    @$db->query("ALTER TABLE ego_company_settings ADD COLUMN IF NOT EXISTS sla_urgent_hours INT NOT NULL DEFAULT 24");
+    @$db->query("ALTER TABLE ego_company_settings ADD COLUMN IF NOT EXISTS sla_normal_hours INT NOT NULL DEFAULT 72");
+    @$db->query("ALTER TABLE ego_company_settings ADD COLUMN IF NOT EXISTS sla_low_hours    INT NOT NULL DEFAULT 168");
+}
+/** Resolution target hours per priority (founder-configurable, sane defaults). */
+function sla_targets(mysqli $db): array {
+    ensure_sla_cols($db);
+    $s = db_one($db, "SELECT sla_urgent_hours,sla_normal_hours,sla_low_hours FROM ego_company_settings ORDER BY id LIMIT 1") ?: [];
+    return [
+        "urgent" => (int) ($s["sla_urgent_hours"] ?? 24) ?: 24,
+        "normal" => (int) ($s["sla_normal_hours"] ?? 72) ?: 72,
+        "low"    => (int) ($s["sla_low_hours"] ?? 168) ?: 168,
+    ];
+}
+/** SLA state for one job. Pure — caller passes the targets map.
+ *  met/breached for resolved jobs; on_track/at_risk/breached for open; na for cancelled/no-date. */
+function sla_for(array $targets, string $priority, ?string $created, ?string $completed, string $status): array {
+    $h = $targets[$priority] ?? $targets["normal"];
+    if (!$created) return ["state" => "na", "due" => null, "hours" => $h];
+    $dueTs = strtotime($created) + $h * 3600;
+    $due = date("Y-m-d H:i:s", $dueTs);
+    if ($status === "cancelled") return ["state" => "na", "due" => $due, "hours" => $h];
+    if (in_array($status, ["completed", "invoiced", "paid", "closed"], true)) {
+        $end = $completed ? strtotime($completed) : time();
+        return ["state" => $end <= $dueTs ? "met" : "breached", "due" => $due, "hours" => $h];
+    }
+    $now = time();
+    if ($now > $dueTs) return ["state" => "breached", "due" => $due, "hours" => $h];
+    if ($now > $dueTs - ($h * 3600 * 0.25)) return ["state" => "at_risk", "due" => $due, "hours" => $h]; // last 25% of window
+    return ["state" => "on_track", "due" => $due, "hours" => $h];
+}
+
 /* ---------- route ---------- */
 $base = rtrim(str_replace("\\", "/", dirname($_SERVER["SCRIPT_NAME"])), "/");
 $path = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH) ?? "/";
@@ -1088,6 +1124,7 @@ switch ("$method $route") {
         $status = trim($_GET["status"] ?? "");
         $q = "%" . trim($_GET["q"] ?? "") . "%";
         $sql = "SELECT j.id,j.reference,j.title,j.priority,j.status,j.quoted_amount,j.scheduled_start,
+                       j.created_at,j.completed_at,
                        c.name AS customer_name, u.name AS engineer_name
                 FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id
                 LEFT JOIN ego_users u ON u.id=j.engineer_id
@@ -1098,7 +1135,12 @@ switch ("$method $route") {
             $rows = db_all($db, $sql . " ORDER BY j.created_at DESC LIMIT 501", "sss", $q, $q, $q);
         }
         $capped = count($rows) > 500; if ($capped) $rows = array_slice($rows, 0, 500);
-        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; }
+        $slaT = sla_targets($db);
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"];
+            $sla = sla_for($slaT, $r["priority"], $r["created_at"] ?? null, $r["completed_at"] ?? null, $r["status"]);
+            $r["sla"] = $sla["state"]; $r["sla_due"] = $sla["due"];
+        }
         send(["jobs" => $rows, "capped" => $capped]);
     }
 
@@ -1121,6 +1163,8 @@ switch ("$method $route") {
              FROM ego_activity_log a LEFT JOIN ego_users u ON u.id=a.actor_id
              WHERE a.job_id=? ORDER BY a.created_at DESC, a.id DESC", "i", $id);
         $j["allowed_targets"] = JOB_TRANSITIONS[$j["status"]] ?? [];
+        $sla = sla_for(sla_targets($db), $j["priority"], $j["created_at"] ?? null, $j["completed_at"] ?? null, $j["status"]);
+        $j["sla"] = $sla["state"]; $j["sla_due"] = $sla["due"]; $j["sla_hours"] = $sla["hours"];
         $j["checklist"] = db_all($db, "SELECT id,label,done FROM ego_job_checklist WHERE job_id=? ORDER BY sort,id", "i", $id);
         foreach ($j["checklist"] as &$ck) { $ck["id"] = (int)$ck["id"]; $ck["done"] = (int)$ck["done"]; }
         $j["invoices"] = db_all($db, "SELECT id,kind,number,status,total FROM ego_invoices WHERE job_id=? AND deleted_at IS NULL ORDER BY id DESC", "i", $id);
@@ -1992,8 +2036,24 @@ switch ("$method $route") {
                          FROM ego_customers c WHERE c.deleted_at IS NULL
                          HAVING revenue > 0 ORDER BY revenue DESC LIMIT 8"));
 
+        // SLA: compliance over resolved jobs (90d) + currently-breached open jobs.
+        $slaT = sla_targets($db);
+        $slaMet = 0; $slaTot = 0;
+        foreach (db_all($db, "SELECT priority, created_at, completed_at, status FROM ego_jobs
+                              WHERE deleted_at IS NULL AND completed_at IS NOT NULL AND completed_at >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)") as $r) {
+            $st = sla_for($slaT, $r["priority"], $r["created_at"], $r["completed_at"], $r["status"])["state"];
+            if ($st === "met" || $st === "breached") { $slaTot++; if ($st === "met") $slaMet++; }
+        }
+        $breachedOpen = 0;
+        foreach (db_all($db, "SELECT priority, created_at, status FROM ego_jobs
+                              WHERE deleted_at IS NULL AND status NOT IN ('completed','invoiced','paid','closed','cancelled')") as $r) {
+            if (sla_for($slaT, $r["priority"], $r["created_at"], null, $r["status"])["state"] === "breached") $breachedOpen++;
+        }
+
         $one = fn(string $sql) => (float) (db_one($db, $sql)["s"] ?? 0);
         $kpi = [
+            "sla_compliance"     => $slaTot > 0 ? (int) round($slaMet / $slaTot * 100) : null,
+            "sla_breached_open"  => $breachedOpen,
             "collected_12m"      => round(array_sum(array_column($series, "collected")), 2),
             "invoiced_12m"       => round(array_sum(array_column($series, "invoiced")), 2),
             "outstanding"        => round($one("SELECT COALESCE(SUM(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='sent'"), 2),
@@ -2228,6 +2288,7 @@ switch ("$method $route") {
     /* ===================== M8: SETTINGS (admin) ===================== */
     case "GET /settings": {
         require_min($db, "manager"); // company config visible to managers (read-only) + founder
+        ensure_sla_cols($db);
         $s = db_one($db, "SELECT * FROM ego_company_settings ORDER BY id LIMIT 1");
         send(["settings" => $s]);
     }
@@ -2237,14 +2298,16 @@ switch ("$method $route") {
         $b = body();
         $s = db_one($db, "SELECT id FROM ego_company_settings ORDER BY id LIMIT 1");
         if (!$s) fail("Settings missing", 500);
+        ensure_sla_cols($db);
         $fields = ["company_name","address","phone","email","vat_number","companies_house_no","default_vat_rate","logo_url",
                    "bank_account_name","bank_sort_code","bank_account_number","invoice_prefix","job_prefix","quote_prefix","payment_terms_days",
-                   "notify_on_complete","notify_email"];
+                   "notify_on_complete","notify_email","sla_urgent_hours","sla_normal_hours","sla_low_hours"];
         $set = []; $types = ""; $args = [];
         foreach ($fields as $f) {
             if (array_key_exists($f, $b)) {
                 $set[] = "$f=?";
                 if (in_array($f, ["default_vat_rate","payment_terms_days","notify_on_complete"], true)) { $types .= "d"; $args[] = (float)$b[$f]; }
+                elseif (in_array($f, ["sla_urgent_hours","sla_normal_hours","sla_low_hours"], true)) { $types .= "i"; $args[] = max(1, (int)$b[$f]); }
                 else { $types .= "s"; $args[] = (string)$b[$f]; }
             }
         }
