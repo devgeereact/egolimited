@@ -38,8 +38,12 @@ jobs:
           npx tsc -b
           npx vite build --base=/
 
-      # ---- upload each surface to its cPanel dir (paths are relative to the FTP home) ----
-      - name: Deploy landing → egolimited.com/
+      # ---- upload each surface to its cPanel dir ----
+      # IMPORTANT: the deploy FTP account is chrooted to the egolimited.com docroot,
+      # so every server-dir below is relative to THAT dir — not to /home. An earlier
+      # "egolimited.com/" prefix created a phantom ~/egolimited.com/egolimited.com/
+      # and the live site never updated. Root of the FTP home === the landing docroot.
+      - name: Deploy landing → docroot root
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
@@ -47,14 +51,20 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           local-dir: ./landing/dist/
-          server-dir: egolimited.com/
-          # Never touch the app or api subtrees from the landing sync.
+          server-dir: ./
+          # The landing sync owns the docroot ROOT, which also holds the app/ and api/
+          # subtrees + a stale phantom egolimited.com/ dir. Protect all three (both the
+          # dir entry and its contents) so a root sync never uploads into or deletes them.
           exclude: |
             **/.git*
             **/.git*/**
             **/node_modules/**
+            app/
             app/**
+            api/
             api/**
+            egolimited.com/
+            egolimited.com/**
 
       - name: Deploy app → egolimited.com/app/
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
@@ -64,7 +74,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           local-dir: ./app/dist/
-          server-dir: egolimited.com/app/
+          server-dir: app/
           exclude: |
             **/.git*
             **/.git*/**
@@ -78,7 +88,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           local-dir: ./api/
-          server-dir: egolimited.com/api/
+          server-dir: api/
           # Never upload or delete server-side secrets/state.
           exclude: |
             **/.git*
