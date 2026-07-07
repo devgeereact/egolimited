@@ -62,7 +62,7 @@ export default function ScheduleDialog({ open, onOpenChange, onDone, jobId, pick
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA" && !busy) { e.preventDefault(); void submit() } }}>
         <DialogHeader><DialogTitle>Schedule &amp; assign</DialogTitle></DialogHeader>
         <div className="space-y-4">
           {!jobId && (

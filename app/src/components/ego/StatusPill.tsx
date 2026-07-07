@@ -1,3 +1,7 @@
+import {
+  Circle, CalendarClock, Truck, MapPin, PauseCircle, CheckCircle2, FileText, Send,
+  BadgePoundSterling, AlertTriangle, XCircle, Lock, Pencil, ThumbsUp, Ban, type LucideIcon,
+} from "lucide-react"
 import { cn } from "@/lib/utils"
 
 /**
@@ -26,23 +30,23 @@ export type EgoStatus =
   | "declined"
   | "void"
 
-const STATUS: Record<EgoStatus, { label: string; className: string }> = {
-  new:        { label: "New",        className: "bg-muted text-muted-foreground ring-border" },
-  scheduled:  { label: "Scheduled",  className: "bg-blue-500/10 text-blue-600 dark:text-blue-400 ring-blue-500/20" },
-  en_route:   { label: "En route",   className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/20" },
-  on_site:    { label: "On site",    className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/20" },
-  on_hold:    { label: "On hold",    className: "bg-muted text-muted-foreground ring-border" },
-  completed:  { label: "Completed",  className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20" },
-  invoiced:   { label: "Invoiced",   className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/20" },
-  sent:       { label: "Sent",       className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/20" },
-  paid:       { label: "Paid",       className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20" },
-  overdue:    { label: "Overdue",    className: "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/20" },
-  cancelled:  { label: "Cancelled",  className: "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/20" },
-  closed:     { label: "Closed",     className: "bg-muted text-muted-foreground ring-border" },
-  draft:      { label: "Draft",      className: "bg-muted text-muted-foreground ring-border" },
-  accepted:   { label: "Accepted",   className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20" },
-  declined:   { label: "Declined",   className: "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/20" },
-  void:       { label: "Void",       className: "bg-muted text-muted-foreground ring-border line-through" },
+const STATUS: Record<EgoStatus, { label: string; className: string; icon: LucideIcon }> = {
+  new:        { label: "New",        icon: Circle,             className: "bg-muted text-muted-foreground ring-border" },
+  scheduled:  { label: "Scheduled",  icon: CalendarClock,      className: "bg-blue-500/10 text-blue-600 dark:text-blue-400 ring-blue-500/20" },
+  en_route:   { label: "En route",   icon: Truck,              className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/20" },
+  on_site:    { label: "On site",    icon: MapPin,             className: "bg-amber-500/10 text-amber-600 dark:text-amber-400 ring-amber-500/20" },
+  on_hold:    { label: "On hold",    icon: PauseCircle,        className: "bg-muted text-muted-foreground ring-border" },
+  completed:  { label: "Completed",  icon: CheckCircle2,       className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20" },
+  invoiced:   { label: "Invoiced",   icon: FileText,           className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/20" },
+  sent:       { label: "Sent",       icon: Send,               className: "bg-violet-500/10 text-violet-600 dark:text-violet-400 ring-violet-500/20" },
+  paid:       { label: "Paid",       icon: BadgePoundSterling, className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20" },
+  overdue:    { label: "Overdue",    icon: AlertTriangle,      className: "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/20" },
+  cancelled:  { label: "Cancelled",  icon: XCircle,            className: "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/20" },
+  closed:     { label: "Closed",     icon: Lock,               className: "bg-muted text-muted-foreground ring-border" },
+  draft:      { label: "Draft",      icon: Pencil,             className: "bg-muted text-muted-foreground ring-border" },
+  accepted:   { label: "Accepted",   icon: ThumbsUp,           className: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 ring-emerald-500/20" },
+  declined:   { label: "Declined",   icon: XCircle,            className: "bg-red-500/10 text-red-600 dark:text-red-400 ring-red-500/20" },
+  void:       { label: "Void",       icon: Ban,                className: "bg-muted text-muted-foreground ring-border line-through" },
 }
 
 export interface StatusPillProps {
@@ -60,7 +64,7 @@ export function StatusPill({ status, className }: StatusPillProps) {
         className
       )}
     >
-      <span className="size-1.5 rounded-full bg-current" />
+      <s.icon className="size-3" aria-hidden />
       {s.label}
     </span>
   )

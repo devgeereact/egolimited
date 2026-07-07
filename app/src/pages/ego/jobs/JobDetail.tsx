@@ -19,6 +19,7 @@ import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { StatusPill } from "@/components/ego/StatusPill"
 import ScheduleDialog from "@/components/ego/ScheduleDialog"
+import { DetailSkeleton } from "@/components/ego/Skeletons"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import TrackQr from "@/components/ego/QrCode"
 import QRCode from "qrcode"
@@ -245,7 +246,7 @@ export default function JobDetail() {
     }
   }
 
-  if (loading) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
+  if (loading) return <DetailSkeleton />
   if (!job) return <div className="p-6 text-muted-foreground">Job not found.</div>
 
   const targets = user ? allowedTargets(job.status, user.role) : []

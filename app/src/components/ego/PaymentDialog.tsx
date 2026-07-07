@@ -49,7 +49,7 @@ export default function PaymentDialog({ invoiceId, total, outstanding, open, onO
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent onKeyDown={(e) => { if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA" && !busy && amt > 0 && !over) { e.preventDefault(); void submit() } }}>
         <DialogHeader><DialogTitle>Record payment</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2 text-sm">

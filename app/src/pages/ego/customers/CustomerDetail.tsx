@@ -12,6 +12,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
+import { DetailSkeleton } from "@/components/ego/Skeletons"
 import { gbp } from "@/lib/mock/jobs"
 
 interface Detail {
@@ -49,7 +50,7 @@ export default function CustomerDetail() {
     navigate("/ego/customers")
   }
 
-  if (loading) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
+  if (loading) return <DetailSkeleton />
   if (!c) return <div className="p-6 text-muted-foreground">Customer not found.</div>
 
   const addr = c.addresses?.[0]

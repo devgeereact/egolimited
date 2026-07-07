@@ -19,6 +19,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
 import PaymentDialog from "@/components/ego/PaymentDialog"
+import { DetailSkeleton } from "@/components/ego/Skeletons"
 
 interface Line { description: string; quantity: number | string; unit_price: number | string; line_total?: number }
 interface Invoice {
@@ -204,7 +205,7 @@ export default function InvoiceDetail() {
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }
 
-  if (loading) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
+  if (loading) return <DetailSkeleton />
   if (!inv) return <div className="p-6 text-muted-foreground">Not found.</div>
   const co = inv.company
   const paidSoFar = (inv.payments ?? []).reduce((s, p) => s + Number(p.amount || 0), 0)
