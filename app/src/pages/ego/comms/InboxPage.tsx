@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Checkbox } from "@/components/ui/checkbox"
 import { AiButton } from "@/components/ego/AiButton"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Card, CardContent } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -112,7 +113,7 @@ export default function InboxPage() {
   async function bulk(action: "delete" | "archive" | "unarchive" | "flag" | "unflag") {
     const ids = [...sel]
     if (!ids.length) return
-    if (action === "delete" && !confirm(`Delete ${ids.length} item${ids.length > 1 ? "s" : ""}? This can't be undone.`)) return
+    if (action === "delete" && !(await confirmDialog({ title: `Delete ${ids.length} item${ids.length > 1 ? "s" : ""}?`, body: "This can't be undone.", confirmText: "Delete", danger: true }))) return
     setBulkBusy(true)
     try {
       await api("/messages/bulk", { method: "POST", body: { action, ids } })
@@ -173,7 +174,7 @@ export default function InboxPage() {
     catch (e) { toast.error(e instanceof Error ? e.message : "Reply failed") } finally { setSendingReply(false) }
   }
   async function deleteMsg(id: number) {
-    if (!confirm("Delete this item?")) return
+    if (!(await confirmDialog({ title: "Delete this item?", confirmText: "Delete", danger: true }))) return
     try { await api("/messages/delete", { method: "POST", body: { id } }); toast.success("Deleted"); setReadOpen(false); load() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }

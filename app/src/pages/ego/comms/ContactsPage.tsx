@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/store/auth.store"
 import { atLeast, ROLE_LABEL, ROLE_RANK, type Role } from "@/lib/roles"
@@ -143,7 +144,7 @@ export default function ContactsPage() {
     finally { setCustBusy(false) }
   }
   async function deleteCustomer(c: Customer) {
-    if (!confirm(`Delete ${c.name}? This archives the customer and their history.`)) return
+    if (!(await confirmDialog({ title: `Delete ${c.name}?`, body: "This archives the customer and their history.", confirmText: "Delete", danger: true }))) return
     try { await api("/customers/delete", { method: "POST", body: { id: c.id } }); await loadCustomers(); toast.success("Customer deleted") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
@@ -170,7 +171,7 @@ export default function ContactsPage() {
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function removeMember(m: Member) {
-    if (!confirm(`Remove ${m.name}? They'll lose access immediately.`)) return
+    if (!(await confirmDialog({ title: `Remove ${m.name}?`, body: "They'll lose access immediately.", confirmText: "Remove", danger: true }))) return
     try { await api("/team/delete", { method: "POST", body: { id: m.id } }); await loadTeam() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }

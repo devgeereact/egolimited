@@ -15,6 +15,7 @@ import Footer from "@/layouts/Footer"
 import { useEffect, useState } from "react"
 import { cn } from "@/lib/utils"
 import { UserDropdown } from "@/components/UserDropdown"
+import { ConfirmHost } from "@/components/ego/confirm"
 import { useAuth } from "@/store/auth.store"
 
 export default function AppLayout() {
@@ -90,6 +91,7 @@ export default function AppLayout() {
 
         <Footer />
       </SidebarInset>
+      <ConfirmHost />
     </SidebarProvider>
   )
 }

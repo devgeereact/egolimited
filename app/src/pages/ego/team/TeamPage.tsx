@@ -6,6 +6,7 @@ import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/store/auth.store"
 import { ROLE_LABEL, type Role } from "@/lib/roles"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -74,7 +75,7 @@ export default function TeamPage() {
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function remove(m: Member) {
-    if (!confirm(`Remove ${m.name}? They'll lose access immediately.`)) return
+    if (!(await confirmDialog({ title: `Remove ${m.name}?`, body: "They'll lose access immediately.", confirmText: "Remove", danger: true }))) return
     try { await api("/team/delete", { method: "POST", body: { id: m.id } }); load() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }

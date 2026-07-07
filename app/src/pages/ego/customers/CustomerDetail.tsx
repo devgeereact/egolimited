@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
 import { DetailSkeleton } from "@/components/ego/Skeletons"
+import { confirmDialog } from "@/components/ego/confirm"
 import { gbp } from "@/lib/mock/jobs"
 
 interface Detail {
@@ -44,7 +45,7 @@ export default function CustomerDetail() {
   }, [id])
 
   async function onDelete() {
-    if (!c || !confirm(`Delete ${c.name}? (soft-delete — recoverable)`)) return
+    if (!c || !(await confirmDialog({ title: `Delete ${c.name}?`, body: "Soft-delete — the customer and their history can be recovered.", confirmText: "Delete", danger: true }))) return
     await api("/customers/delete", { method: "POST", body: { id: c.id } })
     toast.success("Customer deleted")
     navigate("/ego/customers")

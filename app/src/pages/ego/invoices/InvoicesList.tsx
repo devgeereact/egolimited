@@ -14,6 +14,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
+import { TableRowsSkeleton } from "@/components/ego/Skeletons"
 
 interface Row {
   id: number; kind: "quote" | "invoice"; number: string | null; payment_reference: string
@@ -101,7 +102,7 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
+                <TableRowsSkeleton cols={7} />
               ) : rows.length === 0 ? (
                 <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground">No {kind === "quote" ? "quotes" : "invoices"} here. Raise one from a job.</TableCell></TableRow>
               ) : pager.slice.map((r) => (

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BadgeCheck, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -62,7 +63,7 @@ export default function CertificateForm() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") }
   }
   async function onDelete() {
-    if (!id || !confirm("Delete this certificate?")) return
+    if (!id || !(await confirmDialog({ title: "Delete this certificate?", danger: true, confirmText: "Delete" }))) return
     try { await api("/certificates/delete", { method: "POST", body: { id: Number(id) } }); toast.success("Deleted"); navigate("/ego/certificates") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }

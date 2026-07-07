@@ -1,5 +1,23 @@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Card, CardContent } from "@/components/ui/card"
+import { TableCell, TableRow } from "@/components/ui/table"
+
+/** Shimmer rows that drop straight into an existing <TableBody> — keeps the real header/toolbar. */
+export function TableRowsSkeleton({ cols, rows = 8 }: { cols: number; rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, r) => (
+        <TableRow key={r}>
+          {Array.from({ length: cols }).map((_, c) => (
+            <TableCell key={c} className={c === cols - 1 ? "text-right" : undefined}>
+              <Skeleton className={c === 0 ? "h-4 w-24" : "h-4 w-16"} />
+            </TableCell>
+          ))}
+        </TableRow>
+      ))}
+    </>
+  )
+}
 
 /** Shimmer rows for a list/table while it loads — hints at content shape. */
 export function TableSkeleton({ rows = 8 }: { rows?: number }) {

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Boxes, Trash2, Loader2, Wrench, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -117,7 +118,7 @@ export default function AssetForm() {
   }
 
   async function onDelete() {
-    if (!id || !confirm("Delete this asset? (soft-delete — recoverable)")) return
+    if (!id || !(await confirmDialog({ title: "Delete this asset? (soft-delete — recoverable)", danger: true, confirmText: "Delete" }))) return
     try {
       await api("/assets/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Asset deleted")

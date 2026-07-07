@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Truck, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -80,7 +81,7 @@ export default function SupplierForm() {
   }
 
   async function onDelete() {
-    if (!id || !confirm("Delete this supplier? (soft-delete — recoverable)")) return
+    if (!id || !(await confirmDialog({ title: "Delete this supplier? (soft-delete — recoverable)", danger: true, confirmText: "Delete" }))) return
     try {
       await api("/suppliers/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Supplier deleted")

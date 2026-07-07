@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, ClipboardList, Plus, Trash2, Loader2, PackageCheck, Ban } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -140,7 +141,7 @@ export default function PurchaseOrderForm() {
   }
 
   async function onReceive() {
-    if (!id || !confirm("Mark received? This adds the ordered quantities to stock.")) return
+    if (!id || !(await confirmDialog({ title: "Mark received?", body: "This adds the ordered quantities to stock.", confirmText: "Mark received", danger: false }))) return
     try {
       await api("/purchase-orders/receive", { method: "POST", body: { id: Number(id) } })
       toast.success("Received — stock updated")
@@ -151,7 +152,7 @@ export default function PurchaseOrderForm() {
   }
 
   async function onCancel() {
-    if (!id || !confirm("Cancel this purchase order?")) return
+    if (!id || !(await confirmDialog({ title: "Cancel this purchase order?", danger: true, confirmText: "Cancel order" }))) return
     try {
       await api("/purchase-orders/cancel", { method: "POST", body: { id: Number(id) } })
       toast.success("Purchase order cancelled")

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Megaphone, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -73,7 +74,7 @@ export default function AnnouncementForm() {
   }
 
   async function onDelete() {
-    if (!id || !confirm("Delete this announcement?")) return
+    if (!id || !(await confirmDialog({ title: "Delete this announcement?", danger: true, confirmText: "Delete" }))) return
     try {
       await api("/announcements/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Announcement deleted")

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
-import { Briefcase, Plus, Search, Loader2 } from "lucide-react"
+import { Briefcase, Plus, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/table"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
+import { TableRowsSkeleton } from "@/components/ego/Skeletons"
 import { PRIORITY_CLASS, PRIORITY_LABEL, gbp, type JobPriority } from "@/lib/mock/jobs"
 
 interface JobRow {
@@ -109,7 +110,7 @@ export default function JobsList() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow><TableCell colSpan={7} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto size-5 animate-spin" /></TableCell></TableRow>
+                <TableRowsSkeleton cols={7} />
               ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Package, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -100,7 +101,7 @@ export default function PartForm() {
   }
 
   async function onDelete() {
-    if (!id || !confirm("Delete this part? (soft-delete — recoverable)")) return
+    if (!id || !(await confirmDialog({ title: "Delete this part? (soft-delete — recoverable)", danger: true, confirmText: "Delete" }))) return
     try {
       await api("/parts/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Part deleted")

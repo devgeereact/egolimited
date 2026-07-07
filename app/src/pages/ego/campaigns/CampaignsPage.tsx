@@ -4,6 +4,7 @@ import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -118,7 +119,7 @@ export default function CampaignsPage() {
 
   async function send() {
     if (!subject.trim() || !bodyText.trim()) { toast.error("Add a subject and a message"); return }
-    if (!confirm(`Send this to ${audienceCount} recipient${audienceCount === 1 ? "" : "s"} (${audience})?`)) return
+    if (!(await confirmDialog({ title: `Send to ${audienceCount} recipient${audienceCount === 1 ? "" : "s"}?`, body: `Audience: ${audience}.`, confirmText: "Send" }))) return
     setSending(true)
     try {
       const r = await api<{ sent: number; failed: number; recipients: number }>("/campaigns/send", {

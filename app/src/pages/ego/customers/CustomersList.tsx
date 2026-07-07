@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
-import { Users, Plus, Search, Loader2, Phone, Mail, Briefcase } from "lucide-react"
+import { Users, Plus, Search, Phone, Mail, Briefcase } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
 import { usePager, Pager } from "@/components/ego/Pager"
+import { TableRowsSkeleton } from "@/components/ego/Skeletons"
 import {
   Table,
   TableBody,
@@ -90,11 +91,7 @@ export default function CustomersList() {
             </TableHeader>
             <TableBody>
               {loading ? (
-                <TableRow>
-                  <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">
-                    <Loader2 className="mx-auto size-5 animate-spin" />
-                  </TableCell>
-                </TableRow>
+                <TableRowsSkeleton cols={6} />
               ) : rows.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-10 text-center text-muted-foreground">

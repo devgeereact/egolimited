@@ -20,6 +20,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
 import PaymentDialog from "@/components/ego/PaymentDialog"
 import { DetailSkeleton } from "@/components/ego/Skeletons"
+import { confirmDialog } from "@/components/ego/confirm"
 
 interface Line { description: string; quantity: number | string; unit_price: number | string; line_total?: number }
 interface Invoice {
@@ -136,7 +137,11 @@ export default function InvoiceDetail() {
   // No email / hand-over: finalise + mark sent WITHOUT emailing, so there's no bounce.
   async function issueNoEmail() {
     if (!inv) return
-    if (!confirm(`Issue this ${label.toLowerCase()} without emailing it? It'll be numbered and marked as sent so you can print or hand it over.`)) return
+    if (!(await confirmDialog({
+      title: `Issue this ${label.toLowerCase()} without emailing?`,
+      body: "It'll be numbered and marked as sent so you can print or hand it over.",
+      confirmText: "Issue",
+    }))) return
     setEmailBusy(true)
     try {
       if (isDraft) await api("/invoices/update", { method: "POST", body: { id: inv.id, vat_rate: vatRate, lines } })
@@ -155,7 +160,7 @@ export default function InvoiceDetail() {
   }
 
   async function voidDoc() {
-    if (!inv || !confirm(`Void this ${label.toLowerCase()}?`)) return
+    if (!inv || !(await confirmDialog({ title: `Void this ${label.toLowerCase()}?`, confirmText: "Void", danger: true }))) return
     await api("/invoices/void", { method: "POST", body: { id: inv.id } })
     toast.success("Voided"); load()
   }
@@ -164,7 +169,11 @@ export default function InvoiceDetail() {
   // DRAFT invoice; jump to it. For phone/in-person deals or customers with no email.
   async function accept() {
     if (!inv) return
-    if (!confirm("Mark this quote as accepted? Use this when the customer has agreed — in person, by phone, or when they have no email. The quote is numbered and recorded (no need to email it first), and a draft invoice is started for any extra work or price changes.")) return
+    if (!(await confirmDialog({
+      title: "Mark this quote as accepted?",
+      body: "Use this when the customer has agreed — in person, by phone, or when they have no email. The quote is numbered and recorded (no need to email it first), and a draft invoice is started for any extra work or price changes.",
+      confirmText: "Mark accepted",
+    }))) return
     setBusy(true)
     try {
       const r = await api<{ invoice_id: number; quote_number: string }>("/invoices/accept", { method: "POST", body: { id: inv.id } })
@@ -173,13 +182,18 @@ export default function InvoiceDetail() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") } finally { setBusy(false) }
   }
   async function decline() {
-    if (!inv || !confirm("Mark this quote as declined? No invoice will be created.")) return
+    if (!inv || !(await confirmDialog({ title: "Mark this quote as declined?", body: "No invoice will be created.", confirmText: "Decline", danger: true }))) return
     setBusy(true)
     try { await api("/invoices/decline", { method: "POST", body: { id: inv.id } }); toast.success("Quote declined"); await load() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") } finally { setBusy(false) }
   }
   async function unpay() {
-    if (!inv || !confirm("Undo the payment? This removes the recorded payment(s), returns the invoice to unpaid, and reopens the job if this had closed it.")) return
+    if (!inv || !(await confirmDialog({
+      title: "Undo the payment?",
+      body: "This removes the recorded payment(s), returns the invoice to unpaid, and reopens the job if this had closed it.",
+      confirmText: "Undo payment",
+      danger: true,
+    }))) return
     setBusy(true)
     try { await api("/invoices/unpay", { method: "POST", body: { id: inv.id } }); toast.success("Payment reversed"); await load() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") } finally { setBusy(false) }
@@ -200,7 +214,7 @@ export default function InvoiceDetail() {
     window.open(doc.output("bloburl"), "_blank") // open in a new tab — preview, no download
   }
   async function deleteDoc() {
-    if (!inv || !confirm(`Delete this ${label.toLowerCase()}? This can be recovered.`)) return
+    if (!inv || !(await confirmDialog({ title: `Delete this ${label.toLowerCase()}?`, body: "This can be recovered.", confirmText: "Delete", danger: true }))) return
     try { await api("/invoices/delete", { method: "POST", body: { id: inv.id } }); toast.success(`${label} deleted`); window.history.back() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, HardHat, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -89,7 +90,7 @@ export default function SubcontractorForm() {
   }
 
   async function onDelete() {
-    if (!id || !confirm("Delete this subcontractor? (soft-delete — recoverable)")) return
+    if (!id || !(await confirmDialog({ title: "Delete this subcontractor? (soft-delete — recoverable)", danger: true, confirmText: "Delete" }))) return
     try {
       await api("/subcontractors/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Subcontractor deleted")

@@ -20,6 +20,7 @@ import { Switch } from "@/components/ui/switch"
 import { StatusPill } from "@/components/ego/StatusPill"
 import ScheduleDialog from "@/components/ego/ScheduleDialog"
 import { DetailSkeleton } from "@/components/ego/Skeletons"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import TrackQr from "@/components/ego/QrCode"
 import QRCode from "qrcode"
@@ -208,7 +209,11 @@ export default function JobDetail() {
   // Manager+ mistake-correction: pull a finished/cancelled job back to active. Reversing a
   // recorded payment is a separate action on the invoice (Undo payment).
   async function reopen() {
-    if (!job || !confirm("Reopen this job back to an active status? If a payment was recorded, reverse it separately with Undo payment on the invoice.")) return
+    if (!job || !(await confirmDialog({
+      title: "Reopen this job to an active status?",
+      body: "If a payment was recorded, reverse it separately with Undo payment on the invoice.",
+      confirmText: "Reopen",
+    }))) return
     setBusy(true)
     try { await api("/jobs/reopen", { method: "POST", body: { id: job.id } }); toast.success("Job reopened"); await load() }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't reopen") } finally { setBusy(false) }
@@ -324,7 +329,7 @@ export default function JobDetail() {
           {atLeast(user?.role, "manager") && (
             <Button variant="outline" className="text-destructive hover:text-destructive" disabled={busy}
               onClick={async () => {
-                if (!confirm(`Delete job ${job.reference}? This can be recovered.`)) return
+                if (!(await confirmDialog({ title: `Delete job ${job.reference}?`, body: "This can be recovered.", confirmText: "Delete", danger: true }))) return
                 try { await api("/jobs/delete", { method: "POST", body: { id: job.id } }); toast.success("Job deleted"); navigate("/ego/jobs") }
                 catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
               }}>

@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, FileSignature, Trash2, Loader2, Plus, ReceiptText, CalendarCheck } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -121,7 +122,7 @@ export default function ContractForm() {
   }
 
   async function onDelete() {
-    if (!id || !confirm("Delete this contract? (soft-delete — recoverable)")) return
+    if (!id || !(await confirmDialog({ title: "Delete this contract? (soft-delete — recoverable)", danger: true, confirmText: "Delete" }))) return
     await action("/contracts/delete", "Contract deleted")
   }
 
