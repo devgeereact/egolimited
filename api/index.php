@@ -327,30 +327,46 @@ function ai_web_search(mysqli $db, string $prompt, int $maxTokens = 1200): strin
     if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
     ai_rate_guard($db, "text");
     if (mb_strlen($prompt) > 4000) $prompt = mb_substr($prompt, 0, 4000);
-    $model = ai_models($db)[0]; // web search needs one deliberate call, not the full backup chain
-    $payload = json_encode([
-        "model" => $model, "max_tokens" => max(1, min($maxTokens, 1500)),
-        "plugins" => [["id" => "web"]],
-        "messages" => [["role" => "user", "content" => $prompt]],
-    ]);
-    $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 60,
-        CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_HTTPHEADER => [
-            "Authorization: Bearer $key", "Content-Type: application/json",
-            "HTTP-Referer: https://egolimited.com", "X-Title: EGO LIMITED",
-        ],
-    ]);
-    $resp = curl_exec($ch);
-    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-    if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key in Settings → Integrations.");
-    if ($code !== 200) throw new RuntimeException("Search is unavailable right now ($code) — try again shortly.");
-    $j = json_decode($resp, true);
-    $text = trim((string) ($j["choices"][0]["message"]["content"] ?? ""));
-    if ($text === "") throw new RuntimeException("No results came back — try a different search.");
-    return $text;
+    $maxTokens = max(1, min($maxTokens, 1500));
+    $messages = [["role" => "user", "content" => $prompt]];
+
+    // Grounded via OpenRouter's "web" plugin. FREE models get throttled hard (429) with
+    // the plugin attached, so roll through the whole model chain on any non-200 — exactly
+    // like ai_draft(). The deliberate, 6/hour-capped web call lands on the paid backstop
+    // (gpt-4o-mini) if the free tiers are busy, for a negligible cost. A 429 returns fast,
+    // so falling through the free models to a working one is quick.
+    $lastErr = "no model available";
+    foreach (ai_models($db) as $model) {
+        $payload = json_encode([
+            "model" => $model, "max_tokens" => $maxTokens,
+            "plugins" => [["id" => "web"]],
+            "messages" => $messages,
+        ]);
+        $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 60,
+            CURLOPT_POSTFIELDS => $payload,
+            CURLOPT_HTTPHEADER => [
+                "Authorization: Bearer $key", "Content-Type: application/json",
+                "HTTP-Referer: https://egolimited.com", "X-Title: EGO LIMITED",
+            ],
+        ]);
+        $resp = curl_exec($ch);
+        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        // A rejected key won't be fixed by another model — stop immediately.
+        if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key in Settings → Integrations.");
+        if ($code === 200) {
+            $j = json_decode($resp, true);
+            $text = trim((string) ($j["choices"][0]["message"]["content"] ?? ""));
+            if ($text !== "") return $text;
+            $lastErr = "model $model returned no text";
+        } else {
+            $lastErr = "model $model unavailable ($code)";
+        }
+        // otherwise fall through to the next backup model
+    }
+    throw new RuntimeException("Search is unavailable right now ($lastErr) — try again shortly.");
 }
 
 /** Generate a marketing image via an OpenRouter image model, save it under
