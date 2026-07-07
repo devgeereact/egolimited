@@ -17,6 +17,9 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog"
 import ScheduleDialog from "@/components/ego/ScheduleDialog"
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger,
+} from "@/components/ui/sheet"
 import "./schedule.css"
 
 interface SchedJob {
@@ -49,6 +52,7 @@ export default function ScheduleBoard() {
   const [slot, setSlot] = useState<{ date: string; start: string; end: string }>()
   const [picked, setPicked] = useState<{ id: number; title: string } | null>(null)
   const [removing, setRemoving] = useState(false)
+  const [waitOpen, setWaitOpen] = useState(false)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t) }, [])
 
@@ -110,6 +114,32 @@ export default function ScheduleBoard() {
   const todayKey = now.toISOString().slice(0, 10)
   const todayCount = jobs.filter((j) => (j.scheduled_start ?? "").slice(0, 10) === todayKey).length
 
+  // Same list on the desktop sidebar and inside the mobile sheet — tapping an item
+  // opens the schedule dialog (and closes the sheet if it was open).
+  const waitlistBody =
+    !loading && waitlist.length === 0 ? (
+      <p className="py-6 text-center text-xs text-muted-foreground">Everything scheduled &amp; assigned 🎉</p>
+    ) : (
+      <div className="space-y-2">
+        {waitlist.map((j) => (
+          <button key={j.id} onClick={() => { setFixedJob(j.id); setSlot(undefined); setWaitOpen(false); setDialogOpen(true) }}
+            className="flex w-full items-start gap-2 rounded-lg border p-2.5 text-left hover:bg-muted/40">
+            <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md",
+              j.reason === "schedule" ? "bg-amber-500/15 text-amber-600" : "bg-blue-500/15 text-blue-600")}>
+              {j.reason === "schedule" ? <Clock className="size-3.5" /> : <UserPlus className="size-3.5" />}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{j.title}</p>
+              <p className="truncate text-xs text-muted-foreground">{j.reference} · {j.customer_name}</p>
+              <span className={cn("text-[11px] font-medium", j.reason === "schedule" ? "text-amber-600" : "text-blue-600")}>
+                {j.reason === "schedule" ? "Needs scheduling" : "Needs engineer"}{j.priority === "urgent" ? " · ⚠ urgent" : ""}
+              </span>
+            </div>
+          </button>
+        ))}
+      </div>
+    )
+
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">
       {/* Live date + time hero — at-a-glance for scheduling */}
@@ -156,6 +186,25 @@ export default function ScheduleBoard() {
         ))}
       </div>
 
+      {/* Mobile: the waitlist sidebar is hidden below lg, so surface it in a sheet
+          instead of burying it under the tall calendar. */}
+      {waitlist.length > 0 && (
+        <Sheet open={waitOpen} onOpenChange={setWaitOpen}>
+          <SheetTrigger asChild>
+            <Button variant="outline" className="justify-between lg:hidden">
+              <span className="flex items-center gap-2"><Clock className="size-4 text-amber-600" /> Waitlist</span>
+              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600">{waitlist.length}</span>
+            </Button>
+          </SheetTrigger>
+          <SheetContent side="right" className="w-[88vw] overflow-y-auto sm:w-96">
+            <SheetHeader>
+              <SheetTitle className="flex items-center gap-2"><Clock className="size-4 text-amber-600" /> Waitlist · {waitlist.length}</SheetTitle>
+            </SheetHeader>
+            <div className="mt-4">{waitlistBody}</div>
+          </SheetContent>
+        </Sheet>
+      )}
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <Card>
           <CardContent className="p-4">
@@ -201,32 +250,15 @@ export default function ScheduleBoard() {
           </CardContent>
         </Card>
 
-        {/* Waitlist — awaiting schedule / assign */}
-        <Card className="h-fit">
+        {/* Waitlist sidebar — desktop only; mobile uses the sheet above */}
+        <Card className="hidden h-fit lg:block">
           <CardContent className="space-y-2 p-4">
             <div className="flex items-center gap-2">
               <Clock className="size-4 text-amber-600" />
               <h3 className="text-sm font-semibold">Waitlist</h3>
               <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600">{waitlist.length}</span>
             </div>
-            {!loading && waitlist.length === 0 ? (
-              <p className="py-6 text-center text-xs text-muted-foreground">Everything scheduled & assigned 🎉</p>
-            ) : waitlist.map((j) => (
-              <button key={j.id} onClick={() => { setFixedJob(j.id); setSlot(undefined); setDialogOpen(true) }}
-                className="flex w-full items-start gap-2 rounded-lg border p-2.5 text-left hover:bg-muted/40">
-                <span className={cn("mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-md",
-                  j.reason === "schedule" ? "bg-amber-500/15 text-amber-600" : "bg-blue-500/15 text-blue-600")}>
-                  {j.reason === "schedule" ? <Clock className="size-3.5" /> : <UserPlus className="size-3.5" />}
-                </span>
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-medium">{j.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">{j.reference} · {j.customer_name}</p>
-                  <span className={cn("text-[11px] font-medium", j.reason === "schedule" ? "text-amber-600" : "text-blue-600")}>
-                    {j.reason === "schedule" ? "Needs scheduling" : "Needs engineer"}{j.priority === "urgent" ? " · ⚠ urgent" : ""}
-                  </span>
-                </div>
-              </button>
-            ))}
+            {waitlistBody}
           </CardContent>
         </Card>
       </div>
