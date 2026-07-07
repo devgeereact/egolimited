@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { Loader2, Send, Wand2 } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import { Loader2, Send, Wand2, Eye, Pencil } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
@@ -29,15 +29,43 @@ interface Props {
   onSent: () => void
 }
 
+/** Client-side mirror of the server merge — fills the recipient tokens so the office
+ *  sees exactly what this lead will receive. Sender tokens fill on send. */
+function mergePreview(text: string, lead: Lead | null): string {
+  if (!lead) return text
+  const first = (lead.name || lead.company || "").trim().split(/\s+/)[0] || "there"
+  const company = (lead.company || "your business").trim()
+  const map: Record<string, string> = {
+    first_name: first, firstname: first, name: first, "first name": first,
+    full_name: lead.name || first,
+    company, company_name: company, agency_name: company, business_name: company,
+    organisation: company, organization: company,
+    website: lead.website || "",
+  }
+  return text
+    .replace(/\{\{\s*([a-z0-9_ ]+?)\s*\}\}/gi, (_m, k: string) => {
+      const key = k.toLowerCase().trim()
+      if (key in map) return map[key]
+      if (["sender_name", "sender_company", "from_company", "our_company"].includes(key)) return "EGO LTD"
+      return ""
+    })
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([,.!?])/g, "$1")
+}
+
 export default function LeadOutreachDialog({ lead, templates, open, onOpenChange, onSent }: Props) {
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
   const [brief, setBrief] = useState("")
   const [drafting, setDrafting] = useState(false)
   const [sending, setSending] = useState(false)
+  const [preview, setPreview] = useState(false)
+
+  const mergedSubject = useMemo(() => mergePreview(subject, lead), [subject, lead])
+  const mergedBody = useMemo(() => mergePreview(body, lead), [body, lead])
 
   // Fresh slate each time the dialog opens for a lead.
-  useEffect(() => { if (open) { setSubject(""); setBody(""); setBrief("") } }, [open, lead?.id])
+  useEffect(() => { if (open) { setSubject(""); setBody(""); setBrief(""); setPreview(false) } }, [open, lead?.id])
 
   function usePreset(id: string) {
     const t = templates.find((x) => String(x.id) === id)
@@ -105,14 +133,29 @@ export default function LeadOutreachDialog({ lead, templates, open, onOpenChange
             </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Subject</Label>
-            <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject line" />
+          <div className="flex items-center justify-between">
+            <Label>{preview ? "Preview — as this lead receives it" : "Compose"}</Label>
+            <Button type="button" variant="ghost" size="sm" className="h-7 text-muted-foreground" onClick={() => setPreview((p) => !p)} disabled={!subject && !body}>
+              {preview ? <><Pencil className="size-3.5" /> Edit</> : <><Eye className="size-3.5" /> Preview merge</>}
+            </Button>
           </div>
-          <div className="space-y-1.5">
-            <Label>Message</Label>
-            <Textarea rows={10} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write, load a preset, or use AI. {{first_name}} and {{company}} fill from this lead." />
-          </div>
+          {preview ? (
+            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+              <p className="text-sm font-semibold">{mergedSubject || <span className="text-muted-foreground">(no subject)</span>}</p>
+              <p className="whitespace-pre-wrap text-sm text-muted-foreground">{mergedBody || "(empty)"}</p>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Subject</Label>
+                <Input value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Subject line" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">Message</Label>
+                <Textarea rows={10} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write, load a preset, or use AI. {{first_name}} and {{company}} fill from this lead." />
+              </div>
+            </>
+          )}
         </div>
 
         <DialogFooter>
