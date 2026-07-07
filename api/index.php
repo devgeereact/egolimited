@@ -1947,6 +1947,113 @@ switch ("$method $route") {
         ]);
     }
 
+    /* ===================== ANALYTICS + REPORTING (office+) ===================== */
+    case "GET /analytics": {
+        require_role($db, "admin");
+
+        // 12-month spine (oldest → newest), zero-filled, in the server's London tz.
+        $months = [];
+        for ($i = 11; $i >= 0; $i--) $months[] = date("Y-m", strtotime("first day of -$i month"));
+        $since = $months[0] . "-01";
+
+        $colMap = [];
+        foreach (db_all($db, "SELECT DATE_FORMAT(paid_on,'%Y-%m') m, COALESCE(SUM(amount),0) s
+                              FROM ego_payments WHERE paid_on >= ? GROUP BY m", "s", $since) as $r) $colMap[$r["m"]] = (float) $r["s"];
+        $invMap = [];
+        foreach (db_all($db, "SELECT DATE_FORMAT(issue_date,'%Y-%m') m, COALESCE(SUM(total),0) s
+                              FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND issue_date IS NOT NULL AND issue_date >= ? GROUP BY m", "s", $since) as $r) $invMap[$r["m"]] = (float) $r["s"];
+        $jobMap = [];
+        foreach (db_all($db, "SELECT DATE_FORMAT(completed_at,'%Y-%m') m, COUNT(*) c
+                              FROM ego_jobs WHERE deleted_at IS NULL AND completed_at IS NOT NULL AND completed_at >= ? GROUP BY m", "s", $since) as $r) $jobMap[$r["m"]] = (int) $r["c"];
+
+        $series = array_map(fn($m) => [
+            "month"     => $m,
+            "label"     => date("M y", strtotime($m . "-01")),
+            "collected" => round($colMap[$m] ?? 0, 2),
+            "invoiced"  => round($invMap[$m] ?? 0, 2),
+            "jobs"      => $jobMap[$m] ?? 0,
+        ], $months);
+
+        $byStatus = array_map(fn($r) => ["status" => $r["status"], "count" => (int) $r["c"]],
+            db_all($db, "SELECT status, COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL GROUP BY status ORDER BY c DESC"));
+
+        $topEng = array_map(fn($r) => ["name" => $r["name"], "completed" => (int) $r["completed"], "revenue" => round((float) $r["revenue"], 2)],
+            db_all($db, "SELECT u.name, COUNT(*) completed, COALESCE(SUM(j.quoted_amount),0) revenue
+                         FROM ego_jobs j JOIN ego_users u ON u.id=j.engineer_id
+                         WHERE j.deleted_at IS NULL AND j.completed_at IS NOT NULL AND j.completed_at >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
+                         GROUP BY j.engineer_id, u.name ORDER BY completed DESC LIMIT 8"));
+
+        // Correlated subqueries (not joins) so payments/jobs don't multiply each other.
+        $topCust = array_map(fn($r) => ["name" => $r["name"], "revenue" => round((float) $r["revenue"], 2), "jobs" => (int) $r["jobs"]],
+            db_all($db, "SELECT c.name,
+                            (SELECT COALESCE(SUM(p.amount),0) FROM ego_payments p JOIN ego_invoices i ON i.id=p.invoice_id
+                             WHERE i.customer_id=c.id AND i.deleted_at IS NULL) revenue,
+                            (SELECT COUNT(*) FROM ego_jobs j WHERE j.customer_id=c.id AND j.deleted_at IS NULL) jobs
+                         FROM ego_customers c WHERE c.deleted_at IS NULL
+                         HAVING revenue > 0 ORDER BY revenue DESC LIMIT 8"));
+
+        $one = fn(string $sql) => (float) (db_one($db, $sql)["s"] ?? 0);
+        $kpi = [
+            "collected_12m"      => round(array_sum(array_column($series, "collected")), 2),
+            "invoiced_12m"       => round(array_sum(array_column($series, "invoiced")), 2),
+            "outstanding"        => round($one("SELECT COALESCE(SUM(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='sent'"), 2),
+            "overdue"            => round($one("SELECT COALESCE(SUM(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='sent' AND due_date < CURDATE()"), 2),
+            "collected_30d"      => round($one("SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE paid_on >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"), 2),
+            "jobs_completed_30d" => (int) (db_one($db, "SELECT COUNT(*) s FROM ego_jobs WHERE deleted_at IS NULL AND completed_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")["s"] ?? 0),
+            "jobs_open"          => (int) (db_one($db, "SELECT COUNT(*) s FROM ego_jobs WHERE deleted_at IS NULL AND status NOT IN ('closed','cancelled','paid')")["s"] ?? 0),
+            "new_customers_30d"  => (int) (db_one($db, "SELECT COUNT(*) s FROM ego_customers WHERE deleted_at IS NULL AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")["s"] ?? 0),
+            "avg_invoice"        => round((float) (db_one($db, "SELECT COALESCE(AVG(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status IN ('sent','paid','overdue')")["s"] ?? 0), 2),
+            "paid_count"         => (int) (db_one($db, "SELECT COUNT(*) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='paid'")["s"] ?? 0),
+        ];
+
+        send([
+            "kpi" => $kpi, "revenue_series" => $series, "jobs_by_status" => $byStatus,
+            "top_engineers" => $topEng, "top_customers" => $topCust,
+        ]);
+    }
+
+    // CSV export of a chosen report. Streams text/csv as an attachment (authed fetch → blob).
+    case "GET /analytics/export": {
+        require_role($db, "admin");
+        $report = preg_replace('/[^a-z]/', '', strtolower((string) ($_GET["report"] ?? "invoices")));
+        $reports = [
+            "invoices" => [
+                ["Number", "Kind", "Status", "Customer", "Issued", "Due", "Total"],
+                "SELECT COALESCE(i.number, i.payment_reference) n, i.kind k, i.status s, c.name cust, i.issue_date iss, i.due_date due, i.total t
+                 FROM ego_invoices i LEFT JOIN ego_customers c ON c.id=i.customer_id WHERE i.deleted_at IS NULL ORDER BY i.id DESC",
+            ],
+            "payments" => [
+                ["Date", "Amount", "Reference", "Invoice", "Customer"],
+                "SELECT p.paid_on d, p.amount a, p.reference r, COALESCE(i.number, i.payment_reference) inv, c.name cust
+                 FROM ego_payments p LEFT JOIN ego_invoices i ON i.id=p.invoice_id LEFT JOIN ego_customers c ON c.id=i.customer_id ORDER BY p.id DESC",
+            ],
+            "jobs" => [
+                ["Reference", "Title", "Status", "Priority", "Customer", "Engineer", "Quoted", "Created"],
+                "SELECT j.reference ref, j.title t, j.status s, j.priority p, c.name cust, u.name eng, j.quoted_amount q, j.created_at cr
+                 FROM ego_jobs j LEFT JOIN ego_customers c ON c.id=j.customer_id LEFT JOIN ego_users u ON u.id=j.engineer_id
+                 WHERE j.deleted_at IS NULL ORDER BY j.id DESC",
+            ],
+            "customers" => [
+                ["Name", "Email", "Phone", "Created", "Jobs"],
+                "SELECT c.name n, c.email e, c.phone p, c.created_at cr,
+                    (SELECT COUNT(*) FROM ego_jobs j WHERE j.customer_id=c.id AND j.deleted_at IS NULL) jobs
+                 FROM ego_customers c WHERE c.deleted_at IS NULL ORDER BY c.name",
+            ],
+        ];
+        if (!isset($reports[$report])) fail("Unknown report");
+        [$headerRow, $sql] = $reports[$report];
+        $rows = db_all($db, $sql);
+        header("Content-Type: text/csv; charset=utf-8");
+        header("Content-Disposition: attachment; filename=\"ego-$report-" . date("Y-m-d") . ".csv\"");
+        header("X-Content-Type-Options: nosniff");
+        header("Cache-Control: private, no-store");
+        $out = fopen("php://output", "w");
+        fputcsv($out, $headerRow);
+        foreach ($rows as $r) fputcsv($out, array_values($r));
+        fclose($out);
+        exit;
+    }
+
     /* ===================== TOP-NAV NOTIFICATIONS (recent events) ===================== */
     // Recent things that happened: new emails, client messages, completed jobs, reviews.
     // The badge counts only items NEWER than the last time this user opened the bell.

@@ -2,6 +2,7 @@
 
 import {
   Gauge,
+  BarChart3,
   Settings2,
   Briefcase,
   CalendarDays,
@@ -51,7 +52,10 @@ type EgoSection = { label?: string; min?: Role; items: EgoItem[] }
 const NAV: EgoSection[] = [
   {
     label: "Overview",
-    items: [{ title: "Dashboard", url: "ego/dashboard", icon: Gauge }],
+    items: [
+      { title: "Dashboard", url: "ego/dashboard", icon: Gauge },
+      { title: "Analytics", url: "ego/analytics", icon: BarChart3 },
+    ],
   },
   {
     label: "Operations",

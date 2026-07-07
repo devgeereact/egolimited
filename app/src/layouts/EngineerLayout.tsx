@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
 import { NavLink, Outlet } from "react-router-dom"
-import { CalendarClock, ListChecks, CircleUserRound, Wrench, WifiOff } from "lucide-react"
+import { CalendarClock, ListChecks, CircleUserRound, Wrench, WifiOff, Loader2 } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
@@ -39,7 +39,9 @@ export default function EngineerLayout() {
 
       {/* Content */}
       <main className="flex-1 pb-20">
-        <Outlet />
+        <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>}>
+          <Outlet />
+        </Suspense>
       </main>
 
       {/* Bottom tab bar */}

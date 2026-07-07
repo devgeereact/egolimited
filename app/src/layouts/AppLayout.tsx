@@ -12,7 +12,8 @@ import { GlobalSearch } from "@/components/global-search"
 
 import Footer from "@/layouts/Footer"
 
-import { useEffect, useState } from "react"
+import { Suspense, useEffect, useState } from "react"
+import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { UserDropdown } from "@/components/UserDropdown"
 import { ConfirmHost } from "@/components/ego/confirm"
@@ -86,7 +87,9 @@ export default function AppLayout() {
 
         {/* PAGE CONTENT */}
         <main className="flex-1 p-6">
-          <Outlet />
+          <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>}>
+            <Outlet />
+          </Suspense>
         </main>
 
         <Footer />

@@ -1,15 +1,23 @@
+import { lazy, Suspense, type ReactNode } from "react"
 import { createBrowserRouter, Navigate } from "react-router-dom"
+import { Loader2 } from "lucide-react"
 
 import AppLayout from "@/layouts/AppLayout"
 import AuthLayout from "@/layouts/AuthLayout"
 import EngineerLayout from "@/layouts/EngineerLayout"
 
+// Eager — guards + entry/auth screens: small, and needed on first paint.
+import RequireRole from "@/components/ego/RequireRole"
+import NotFound from "@/pages/NotFound"
+import ErrorPage from "@/pages/ErrorPage"
+import EgoLogin from "@/pages/ego/auth/EgoLogin"
+import EgoLanding from "@/pages/ego/auth/EgoLanding"
+import HomeRedirect from "@/pages/ego/auth/HomeRedirect"
+import InviteAccept from "@/pages/ego/auth/InviteAccept"
+
 import LoginPage from "@/auth/basic/LoginPage"
 import RegisterPage from "@/auth/basic/RegisterPage"
 import ForgotPasswordPage from "@/auth/basic/ForgotPasswordPage"
-
-import NotFound from "@/pages/NotFound"
-import ErrorPage from "@/pages/ErrorPage"
 import { ResetPasswordForm } from "@/auth/basic/ResetPasswordForm"
 import { VerifyEmailForm } from "@/auth/basic/VerifyEmailForm"
 import { PasswordResetSuccess } from "@/auth/basic/PasswordResetSuccess"
@@ -20,72 +28,68 @@ import CoverResetPasswordPage from "@/auth/cover/CoverResetPasswordPage"
 import CoverVerifyEmailPage from "@/auth/cover/CoverVerifyEmailPage"
 import CoverPasswordResetSuccessPage from "@/auth/cover/CoverPasswordResetSuccessPage"
 
-// 🏗️ EGO LIMITED — auth + guards
-import RequireRole from "@/components/ego/RequireRole"
-import TeamPage from "@/pages/ego/team/TeamPage"
-import EgoLogin from "@/pages/ego/auth/EgoLogin"
-import EgoLanding from "@/pages/ego/auth/EgoLanding"
-import HomeRedirect from "@/pages/ego/auth/HomeRedirect"
-import InviteAccept from "@/pages/ego/auth/InviteAccept"
-// 🏗️ EGO LIMITED — Phase 2 (integrations)
-import EgoIntegrations from "@/pages/ego/integrations/IntegrationsPage"
-// 🏗️ EGO LIMITED — invoicing (M6/M7) + dashboard
-import EgoInvoicesList from "@/pages/ego/invoices/InvoicesList"
-import EgoInvoiceDetail from "@/pages/ego/invoices/InvoiceDetail"
-import EgoPayments from "@/pages/ego/finance/PaymentsPage"
-import EgoContacts from "@/pages/ego/comms/ContactsPage"
-import EgoInbox from "@/pages/ego/comms/InboxPage"
-// 🏗️ EGO LIMITED — account security + lock (M-A)
-import AccountSecurity from "@/pages/ego/account/AccountSecurity"
-import LockScreen from "@/pages/ego/account/LockScreen"
-import EgoActivity from "@/pages/ego/workspace/ActivityPage"
-import EgoReviews from "@/pages/ego/workspace/ReviewsPage"
-import EgoDashboard from "@/pages/ego/dashboard/EgoDashboard"
-// 🏗️ EGO LIMITED — schedule (M4)
-import EgoScheduleBoard from "@/pages/ego/schedule/ScheduleBoard"
-// 🏗️ EGO LIMITED — customers (M2)
-import EgoCustomersList from "@/pages/ego/customers/CustomersList"
-import EgoCustomerDetail from "@/pages/ego/customers/CustomerDetail"
-import EgoCustomerForm from "@/pages/ego/customers/CustomerForm"
-// 🏗️ EGO LIMITED — procurement (M-B): suppliers + subcontractors
-import SuppliersList from "@/pages/ego/procurement/SuppliersList"
-import SupplierForm from "@/pages/ego/procurement/SupplierForm"
-import SubcontractorsList from "@/pages/ego/procurement/SubcontractorsList"
-import SubcontractorForm from "@/pages/ego/procurement/SubcontractorForm"
-import PartsList from "@/pages/ego/procurement/PartsList"
-import PartForm from "@/pages/ego/procurement/PartForm"
-import PurchaseOrdersList from "@/pages/ego/procurement/PurchaseOrdersList"
-import PurchaseOrderForm from "@/pages/ego/procurement/PurchaseOrderForm"
-// 🏗️ EGO LIMITED — asset management (M-C)
-import AssetsList from "@/pages/ego/assets/AssetsList"
-import AssetForm from "@/pages/ego/assets/AssetForm"
-// 🏗️ EGO LIMITED — announcements (M-A)
-import AnnouncementsList from "@/pages/ego/announcements/AnnouncementsList"
-import AnnouncementForm from "@/pages/ego/announcements/AnnouncementForm"
-import CampaignsPage from "@/pages/ego/campaigns/CampaignsPage"
-// 🏗️ EGO LIMITED — contracts / PPM (M-D)
-import ContractsList from "@/pages/ego/contracts/ContractsList"
-import ContractForm from "@/pages/ego/contracts/ContractForm"
-// 🏗️ EGO LIMITED — compliance suite (M-E)
-import IncidentsList from "@/pages/ego/compliance/IncidentsList"
-import IncidentForm from "@/pages/ego/compliance/IncidentForm"
-import RamsList from "@/pages/ego/compliance/RamsList"
-import RamsForm from "@/pages/ego/compliance/RamsForm"
-import CertificatesList from "@/pages/ego/compliance/CertificatesList"
-import CertificateForm from "@/pages/ego/compliance/CertificateForm"
-// 🏗️ EGO LIMITED — jobs + engineer field app
-import JobsList from "@/pages/ego/jobs/JobsList"
-import JobDetail from "@/pages/ego/jobs/JobDetail"
-import JobForm from "@/pages/ego/jobs/JobForm"
-import EngineerToday from "@/pages/ego/engineer/EngineerToday"
-import EngineerMyJobs from "@/pages/ego/engineer/EngineerMyJobs"
-import EngineerJobField from "@/pages/ego/engineer/EngineerJobField"
-import EngineerProfile from "@/pages/ego/engineer/EngineerProfile"
-import TrackJob from "@/pages/ego/portal/TrackJob"
-import PortalContact from "@/pages/ego/portal/PortalContact"
-import SettingsPage from "@/pages/ego/settings/SettingsPage"
-// 🏗️ EGO LIMITED — task board (kanban)
-import TaskBoard from "@/pages/kanban/TaskBoard"
+// Lazy — EGO feature pages. Each becomes its own chunk, pulling heavy deps
+// (FullCalendar, jsPDF, dnd-kit, qrcode, recharts) out of the initial bundle.
+const TeamPage = lazy(() => import("@/pages/ego/team/TeamPage"))
+const EgoIntegrations = lazy(() => import("@/pages/ego/integrations/IntegrationsPage"))
+const EgoInvoicesList = lazy(() => import("@/pages/ego/invoices/InvoicesList"))
+const EgoInvoiceDetail = lazy(() => import("@/pages/ego/invoices/InvoiceDetail"))
+const EgoPayments = lazy(() => import("@/pages/ego/finance/PaymentsPage"))
+const EgoContacts = lazy(() => import("@/pages/ego/comms/ContactsPage"))
+const EgoInbox = lazy(() => import("@/pages/ego/comms/InboxPage"))
+const AccountSecurity = lazy(() => import("@/pages/ego/account/AccountSecurity"))
+const LockScreen = lazy(() => import("@/pages/ego/account/LockScreen"))
+const EgoActivity = lazy(() => import("@/pages/ego/workspace/ActivityPage"))
+const EgoReviews = lazy(() => import("@/pages/ego/workspace/ReviewsPage"))
+const EgoDashboard = lazy(() => import("@/pages/ego/dashboard/EgoDashboard"))
+const EgoAnalytics = lazy(() => import("@/pages/ego/analytics/AnalyticsPage"))
+const EgoScheduleBoard = lazy(() => import("@/pages/ego/schedule/ScheduleBoard"))
+const EgoCustomersList = lazy(() => import("@/pages/ego/customers/CustomersList"))
+const EgoCustomerDetail = lazy(() => import("@/pages/ego/customers/CustomerDetail"))
+const EgoCustomerForm = lazy(() => import("@/pages/ego/customers/CustomerForm"))
+const SuppliersList = lazy(() => import("@/pages/ego/procurement/SuppliersList"))
+const SupplierForm = lazy(() => import("@/pages/ego/procurement/SupplierForm"))
+const SubcontractorsList = lazy(() => import("@/pages/ego/procurement/SubcontractorsList"))
+const SubcontractorForm = lazy(() => import("@/pages/ego/procurement/SubcontractorForm"))
+const PartsList = lazy(() => import("@/pages/ego/procurement/PartsList"))
+const PartForm = lazy(() => import("@/pages/ego/procurement/PartForm"))
+const PurchaseOrdersList = lazy(() => import("@/pages/ego/procurement/PurchaseOrdersList"))
+const PurchaseOrderForm = lazy(() => import("@/pages/ego/procurement/PurchaseOrderForm"))
+const AssetsList = lazy(() => import("@/pages/ego/assets/AssetsList"))
+const AssetForm = lazy(() => import("@/pages/ego/assets/AssetForm"))
+const AnnouncementsList = lazy(() => import("@/pages/ego/announcements/AnnouncementsList"))
+const AnnouncementForm = lazy(() => import("@/pages/ego/announcements/AnnouncementForm"))
+const CampaignsPage = lazy(() => import("@/pages/ego/campaigns/CampaignsPage"))
+const ContractsList = lazy(() => import("@/pages/ego/contracts/ContractsList"))
+const ContractForm = lazy(() => import("@/pages/ego/contracts/ContractForm"))
+const IncidentsList = lazy(() => import("@/pages/ego/compliance/IncidentsList"))
+const IncidentForm = lazy(() => import("@/pages/ego/compliance/IncidentForm"))
+const RamsList = lazy(() => import("@/pages/ego/compliance/RamsList"))
+const RamsForm = lazy(() => import("@/pages/ego/compliance/RamsForm"))
+const CertificatesList = lazy(() => import("@/pages/ego/compliance/CertificatesList"))
+const CertificateForm = lazy(() => import("@/pages/ego/compliance/CertificateForm"))
+const JobsList = lazy(() => import("@/pages/ego/jobs/JobsList"))
+const JobDetail = lazy(() => import("@/pages/ego/jobs/JobDetail"))
+const JobForm = lazy(() => import("@/pages/ego/jobs/JobForm"))
+const EngineerToday = lazy(() => import("@/pages/ego/engineer/EngineerToday"))
+const EngineerMyJobs = lazy(() => import("@/pages/ego/engineer/EngineerMyJobs"))
+const EngineerJobField = lazy(() => import("@/pages/ego/engineer/EngineerJobField"))
+const EngineerProfile = lazy(() => import("@/pages/ego/engineer/EngineerProfile"))
+const TrackJob = lazy(() => import("@/pages/ego/portal/TrackJob"))
+const PortalContact = lazy(() => import("@/pages/ego/portal/PortalContact"))
+const SettingsPage = lazy(() => import("@/pages/ego/settings/SettingsPage"))
+const TaskBoard = lazy(() => import("@/pages/kanban/TaskBoard"))
+
+/** Brief centred spinner while a lazy route chunk loads. */
+function PageFallback() {
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center text-muted-foreground">
+      <Loader2 className="size-5 animate-spin" />
+    </div>
+  )
+}
+/** Wrap a standalone lazy route (no layout Outlet above it) in its own Suspense. */
+const s = (node: ReactNode) => <Suspense fallback={<PageFallback />}>{node}</Suspense>
 
 export const router = createBrowserRouter (
   [
@@ -158,6 +162,7 @@ export const router = createBrowserRouter (
             {path: "ego/certificates/new", element: <CertificateForm /> },
             {path: "ego/certificates/edit", element: <CertificateForm /> },
             {path: "ego/dashboard", element: <EgoDashboard /> },
+            {path: "ego/analytics", element: <EgoAnalytics /> },
             {path: "ego/invoices", element: <EgoInvoicesList key="invoices" /> },
             {path: "ego/quotes", element: <EgoInvoicesList key="quotes" defaultKind="quote" /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },
@@ -207,9 +212,9 @@ export const router = createBrowserRouter (
     { path: "welcome", element: <EgoLanding /> },
     { path: "ego/login", element: <EgoLogin /> },
     { path: "ego/invite/:token", element: <InviteAccept /> },
-    { path: "track/:token", element: <TrackJob /> },
-    { path: "ego/account/security", element: <div className="mx-auto w-full max-w-3xl p-4 md:p-6"><AccountSecurity /></div> },
-    { path: "ego/lock", element: <LockScreen /> },
+    { path: "track/:token", element: s(<TrackJob />) },
+    { path: "ego/account/security", element: s(<div className="mx-auto w-full max-w-3xl p-4 md:p-6"><AccountSecurity /></div>) },
+    { path: "ego/lock", element: s(<LockScreen />) },
 
     // 🏗️ EGO LIMITED — engineer PWA (mobile shell, role-guarded)
     {

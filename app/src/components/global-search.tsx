@@ -10,7 +10,7 @@ import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator,
 } from "@/components/ui/command"
 import {
-  Search, ChevronRight, Gauge, Briefcase, CalendarDays, Contact, KanbanSquare, FileText, ScrollText,
+  Search, ChevronRight, Gauge, BarChart3, Briefcase, CalendarDays, Contact, KanbanSquare, FileText, ScrollText,
   CreditCard, Inbox, Send, Quote, Megaphone, Package, ClipboardList, Truck, HardHat, Boxes, FileSignature,
   ShieldAlert, FileCheck2, BadgeCheck, Users, Settings2, KeyRound, type LucideIcon,
 } from "lucide-react"
@@ -20,7 +20,10 @@ type Section = { heading: string; items: Item[] }
 
 // Real EGO destinations (mirrors the sidebar). Each carries the minimum role that may see it.
 const SECTIONS: Section[] = [
-  { heading: "Overview", items: [{ label: "Dashboard", to: "/ego/dashboard", icon: Gauge }] },
+  { heading: "Overview", items: [
+    { label: "Dashboard", to: "/ego/dashboard", icon: Gauge },
+    { label: "Analytics", to: "/ego/analytics", icon: BarChart3, keywords: "reports export revenue charts" },
+  ]},
   { heading: "Operations", items: [
     { label: "Jobs", to: "/ego/jobs", icon: Briefcase },
     { label: "Schedule", to: "/ego/schedule", icon: CalendarDays },
@@ -58,6 +61,14 @@ const SECTIONS: Section[] = [
   ]},
 ]
 
+// Quick create/jump actions — surfaced at the top of the palette.
+const ACTIONS: Item[] = [
+  { label: "New job", to: "/ego/jobs/new", icon: Briefcase, keywords: "create add raise" },
+  { label: "New customer", to: "/ego/customers/new", icon: Contact, keywords: "create add" },
+  { label: "Schedule a job", to: "/ego/schedule", icon: CalendarDays, keywords: "book slot assign" },
+  { label: "Export reports", to: "/ego/analytics", icon: BarChart3, keywords: "csv download analytics" },
+]
+
 export function GlobalSearch() {
   const [open, setOpen] = React.useState(false)
   const navigate = useNavigate()
@@ -90,6 +101,16 @@ export function GlobalSearch() {
           <CommandEmpty>
             <div className="py-10 text-center text-sm text-muted-foreground">No results found.</div>
           </CommandEmpty>
+          <CommandGroup heading="Quick actions">
+            {ACTIONS.map((a) => (
+              <CommandItem key={`act-${a.to}-${a.label}`} value={`${a.label} ${a.keywords ?? ""}`} onSelect={() => runCommand(a.to)} className="group cursor-pointer">
+                <a.icon className="mr-3 h-4 w-4 text-primary" />
+                <span>{a.label}</span>
+                <ChevronRight className="ml-auto h-4 w-4 opacity-0 transition-opacity group-data-[selected=true]:opacity-100" />
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          <CommandSeparator />
           {visible.map((s, si) => (
             <React.Fragment key={s.heading}>
               {si > 0 && <CommandSeparator />}

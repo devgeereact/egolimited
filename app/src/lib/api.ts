@@ -55,6 +55,28 @@ export async function apiForm<T = unknown>(path: string, form: FormData): Promis
   return handle<T>(res)
 }
 
+/**
+ * Fetch a file endpoint with auth and trigger a browser download. Used for
+ * server-generated CSV/report exports (a plain <a href> can't send the Bearer token).
+ */
+export async function apiDownload(path: string, filename: string): Promise<void> {
+  const headers: Record<string, string> = {}
+  const token = getToken()
+  if (token) headers["Authorization"] = `Bearer ${token}`
+  const res = await fetch(`${API_BASE}${path}`, { headers })
+  if (!res.ok) {
+    const d = await res.json().catch(() => ({}))
+    throw new ApiError(res.status, (d as { error?: string }).error || `Download failed (${res.status})`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 async function handle<T>(res: Response): Promise<T> {
   const data = await res.json().catch(() => ({}))
   if (!res.ok) {
