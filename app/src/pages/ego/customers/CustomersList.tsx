@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { Users, Plus, Search, Loader2, Phone, Mail, Briefcase } from "lucide-react"
+import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -32,12 +33,14 @@ export default function CustomersList() {
   const [rows, setRows] = useState<CustomerRow[]>([])
   const [q, setQ] = useState("")
   const [loading, setLoading] = useState(true)
+  const [capped, setCapped] = useState(false)
 
   useEffect(() => {
     const t = setTimeout(() => {
       setLoading(true)
-      api<{ customers: CustomerRow[] }>(`/customers?q=${encodeURIComponent(q)}`)
-        .then((r) => setRows(r.customers))
+      api<{ customers: CustomerRow[]; capped?: boolean }>(`/customers?q=${encodeURIComponent(q)}`)
+        .then((r) => { setRows(r.customers); setCapped(!!r.capped) })
+        .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load customers"))
         .finally(() => setLoading(false))
     }, 250)
     return () => clearTimeout(t)
@@ -129,6 +132,7 @@ export default function CustomersList() {
               )}
             </TableBody>
           </Table>
+          {capped && <p className="mb-2 text-xs text-muted-foreground">Showing the first 500 customers — search to narrow the list.</p>}
           <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="customers" />
         </CardContent>
       </Card>

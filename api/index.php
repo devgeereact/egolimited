@@ -925,10 +925,11 @@ switch ("$method $route") {
                 (SELECT COALESCE(SUM(i.total),0) FROM ego_invoices i WHERE i.customer_id=c.id AND i.kind='invoice' AND i.status='sent' AND i.deleted_at IS NULL) AS balance
              FROM ego_customers c
              WHERE c.deleted_at IS NULL AND (c.name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)
-             ORDER BY c.name",
+             ORDER BY c.name LIMIT 501",
             "sss", $q, $q, $q);
+        $capped = count($rows) > 500; if ($capped) $rows = array_slice($rows, 0, 500);
         foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["job_count"] = (int)$r["job_count"]; $r["balance"] = (float)$r["balance"]; }
-        send(["customers" => $rows]);
+        send(["customers" => $rows, "capped" => $capped]);
     }
 
     case "GET /customers/get": {
@@ -992,11 +993,16 @@ switch ("$method $route") {
     }
 
     case "POST /customers/delete": {
-        require_role($db, "admin");
+        $actor = require_role($db, "admin");
         $b = body();
         $id = (int)($b["id"] ?? 0);
         if (!$id) fail("id required");
-        db_exec($db, "UPDATE ego_customers SET deleted_at=NOW() WHERE id=?", "i", $id); // soft-delete
+        // Cascade the soft-delete so a removed customer never leaves orphaned jobs/invoices
+        // hanging around in lists and totals. Reversible (all soft).
+        db_exec($db, "UPDATE ego_customers SET deleted_at=NOW() WHERE id=?", "i", $id);
+        db_exec($db, "UPDATE ego_jobs SET deleted_at=NOW() WHERE customer_id=? AND deleted_at IS NULL", "i", $id);
+        db_exec($db, "UPDATE ego_invoices SET deleted_at=NOW() WHERE customer_id=? AND deleted_at IS NULL", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "customer_deleted", ["customer_id" => $id]);
         send(["ok" => true]);
     }
 
@@ -1011,12 +1017,13 @@ switch ("$method $route") {
                 LEFT JOIN ego_users u ON u.id=j.engineer_id
                 WHERE j.deleted_at IS NULL AND (j.reference LIKE ? OR j.title LIKE ? OR c.name LIKE ?)";
         if ($status !== "" && job_status_exists($status)) {
-            $rows = db_all($db, $sql . " AND j.status=? ORDER BY j.created_at DESC", "ssss", $q, $q, $q, $status);
+            $rows = db_all($db, $sql . " AND j.status=? ORDER BY j.created_at DESC LIMIT 501", "ssss", $q, $q, $q, $status);
         } else {
-            $rows = db_all($db, $sql . " ORDER BY j.created_at DESC", "sss", $q, $q, $q);
+            $rows = db_all($db, $sql . " ORDER BY j.created_at DESC LIMIT 501", "sss", $q, $q, $q);
         }
+        $capped = count($rows) > 500; if ($capped) $rows = array_slice($rows, 0, 500);
         foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; }
-        send(["jobs" => $rows]);
+        send(["jobs" => $rows, "capped" => $capped]);
     }
 
     case "GET /jobs/get": {
@@ -1547,12 +1554,13 @@ switch ("$method $route") {
             "SELECT i.id,i.kind,i.number,i.payment_reference,i.status,i.issue_date,i.due_date,i.total,
                     c.name AS customer_name, j.reference AS job_reference
              FROM ego_invoices i JOIN ego_customers c ON c.id=i.customer_id JOIN ego_jobs j ON j.id=i.job_id
-             WHERE $where ORDER BY i.created_at DESC", $types, ...$args);
+             WHERE $where ORDER BY i.created_at DESC LIMIT 501", $types, ...$args);
+        $capped = count($rows) > 500; if ($capped) $rows = array_slice($rows, 0, 500);
         foreach ($rows as &$r) {
             $r["id"] = (int)$r["id"];
             if ($r["kind"] === "invoice" && $r["status"] === "sent" && $r["due_date"] && $r["due_date"] < date("Y-m-d")) $r["status"] = "overdue";
         }
-        send(["invoices" => $rows]);
+        send(["invoices" => $rows, "capped" => $capped]);
     }
 
     case "GET /invoices/get": {
@@ -3687,6 +3695,20 @@ switch ("$method $route") {
         $p = db_one($db, "SELECT id, invoice_id FROM ego_payments WHERE id=?", "i", $id);
         if (!$p) fail("Payment not found", 404);
         db_exec($db, "DELETE FROM ego_payments WHERE id=?", "i", $id);
+        // Recalc: if removing this payment drops the invoice below its total, un-mark it paid
+        // and reopen the job it closed — otherwise a deleted payment leaves a false 'paid'.
+        $inv = db_one($db, "SELECT id,total,status,job_id FROM ego_invoices WHERE id=?", "i", (int)$p["invoice_id"]);
+        if ($inv && $inv["status"] === "paid") {
+            $paid = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=?", "i", (int)$inv["id"])["s"] ?? 0), 2);
+            if ($paid < round((float)$inv["total"], 2) - 0.01) {
+                db_exec($db, "UPDATE ego_invoices SET status='sent', paid_at=NULL WHERE id=?", "i", (int)$inv["id"]);
+                $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
+                if ($job && $job["status"] === "closed") {
+                    db_exec($db, "UPDATE ego_jobs SET status='invoiced' WHERE id=?", "i", (int)$inv["job_id"]);
+                    log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "closed", "to" => "invoiced", "note" => "payment deleted"]);
+                }
+            }
+        }
         log_activity($db, null, (int)$actor["id"], "payment_deleted", ["id" => $id, "invoice_id" => (int)$p["invoice_id"]]);
         send(["ok" => true]);
     }

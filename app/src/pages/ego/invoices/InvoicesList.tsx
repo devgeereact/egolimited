@@ -31,6 +31,7 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
   const [status, setStatus] = useState("all")
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
+  const [capped, setCapped] = useState(false)
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
   const [previewingId, setPreviewingId] = useState<number | null>(null)
 
@@ -60,7 +61,7 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
     setLoading(true)
     const qs = new URLSearchParams({ kind })
     if (status !== "all") qs.set("status", status)
-    api<{ invoices: Row[] }>(`/invoices?${qs}`).then((r) => setRows(r.invoices)).finally(() => setLoading(false))
+    api<{ invoices: Row[]; capped?: boolean }>(`/invoices?${qs}`).then((r) => { setRows(r.invoices); setCapped(!!r.capped) }).finally(() => setLoading(false))
   }, [kind, status])
 
   const pager = usePager(rows)
@@ -129,6 +130,7 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
               ))}
             </TableBody>
           </Table>
+          {capped && <p className="mb-2 text-xs text-muted-foreground">Showing the first 500 — narrow with the filters above.</p>}
           <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="records" />
         </CardContent>
       </Card>

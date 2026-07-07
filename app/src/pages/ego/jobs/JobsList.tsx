@@ -39,11 +39,12 @@ const FILTERS: { value: string; label: string; match: EgoStatus[] }[] = [
 export default function JobsList() {
   const [all, setAll] = useState<JobRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [capped, setCapped] = useState(false)
   const [tab, setTab] = useState("all")
   const [q, setQ] = useState("")
 
   useEffect(() => {
-    api<{ jobs: JobRow[] }>("/jobs").then((r) => setAll(r.jobs)).finally(() => setLoading(false))
+    api<{ jobs: JobRow[]; capped?: boolean }>("/jobs").then((r) => { setAll(r.jobs); setCapped(!!r.capped) }).finally(() => setLoading(false))
   }, [])
 
   const rows = useMemo(() => {
@@ -134,6 +135,7 @@ export default function JobsList() {
               ))}
             </TableBody>
           </Table>
+          {capped && <p className="mb-2 text-xs text-muted-foreground">Showing the first 500 jobs — search to narrow the list.</p>}
           <Pager page={pager.page} pages={pager.pages} total={pager.total} onPage={pager.setPage} noun="jobs" />
         </CardContent>
       </Card>
