@@ -135,6 +135,27 @@ function rate_hit(mysqli $db, string $key): void {
     db_exec($db, "INSERT INTO ego_rate_hits (k) VALUES (?)", "s", $key);
     if (random_int(1, 50) === 1) $db->query("DELETE FROM ego_rate_hits WHERE created_at < (NOW() - INTERVAL 1 DAY)");
 }
+/** Guard a write endpoint: count this call, 429 if over the per-window cap. */
+function rate_write(mysqli $db, string $key, int $max = 60, int $windowSec = 60): void {
+    if (!rate_check($db, $key, $max, $windowSec)) fail("Too many requests — give it a moment", 429);
+    rate_hit($db, $key);
+}
+
+/* ---------- tiny key/value cache (e.g. weather) ---------- */
+function ensure_cache(mysqli $db): void {
+    static $done = false; if ($done) return;
+    $db->query("CREATE TABLE IF NOT EXISTS ego_cache (k VARCHAR(190) PRIMARY KEY, v MEDIUMTEXT NULL, expires_at DATETIME NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $done = true;
+}
+function cache_get(mysqli $db, string $k): ?string {
+    ensure_cache($db);
+    $r = db_one($db, "SELECT v FROM ego_cache WHERE k=? AND expires_at > NOW()", "s", $k);
+    return $r["v"] ?? null;
+}
+function cache_put(mysqli $db, string $k, string $v, int $ttlSec): void {
+    ensure_cache($db);
+    db_exec($db, "INSERT INTO ego_cache (k,v,expires_at) VALUES (?,?, NOW() + INTERVAL ? SECOND) ON DUPLICATE KEY UPDATE v=VALUES(v), expires_at=VALUES(expires_at)", "ssi", $k, $v, $ttlSec);
+}
 /** Return a user-safe error. DB internals (mysqli_sql_exception) are logged, never echoed;
  *  our own RuntimeExceptions carry deliberate, safe messages and pass through. */
 function client_error(Throwable $e, string $fallback = "Something went wrong", int $code = 400): never {
@@ -690,8 +711,12 @@ if (!in_array("$method $route", $MCP_ALLOW, true)) {
 switch ("$method $route") {
 
     case "GET /":
-    case "GET /health":
-        send(["ok" => true, "service" => "ego-api"]);
+    case "GET /health": {
+        $dbOk = false;
+        try { $dbOk = (bool) @$db->query("SELECT 1"); } catch (Throwable $e) { $dbOk = false; }
+        if (!$dbOk) send(["ok" => false, "service" => "ego-api", "db" => false], 503);
+        send(["ok" => true, "service" => "ego-api", "db" => true]);
+    }
 
     case "POST /auth/login": {
         $b = body();
@@ -1092,6 +1117,7 @@ switch ("$method $route") {
 
     case "POST /jobs": {
         $actor = require_role($db, "admin");
+        rate_write($db, "w:jobs:" . $actor["id"], 60, 60);
         $b = body();
         $title = trim($b["title"] ?? "");
         if ($title === "") fail("Title is required");
@@ -1551,6 +1577,7 @@ switch ("$method $route") {
 
     case "POST /invoices": {
         $actor = require_role($db, "admin");
+        rate_write($db, "w:inv:" . $actor["id"], 60, 60);
         $b = body();
         $jobId = (int)($b["job_id"] ?? 0);
         $kind = ($b["kind"] ?? "invoice") === "quote" ? "quote" : "invoice";
@@ -2081,6 +2108,8 @@ switch ("$method $route") {
         if (!$key) fail("OpenWeather key not set (Settings → Integrations)", 400);
         $city = $_GET["city"] ?? (integ($db, "weather_city") ?? "Birmingham,GB");
         $city = preg_replace('/\s+([A-Za-z]{2})$/', ',$1', trim($city)); // "London GB" -> "London,GB"
+        // Serve from cache (20 min) — OpenWeather makes 2-3 sequential calls per fetch.
+        if (($cached = cache_get($db, "wx:" . $city)) !== null) { $cd = json_decode($cached, true); if (is_array($cd)) send($cd); }
         $get = function (string $path) use ($city, $key) {
             $ch = curl_init("https://api.openweathermap.org/data/2.5/$path?q=" . urlencode($city) . "&units=metric&appid=" . urlencode($key));
             curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 12]);
@@ -2138,7 +2167,7 @@ switch ("$method $route") {
             if ($ocCode === 200) { $oc = json_decode($ocRaw ?: "null", true); $uvi = $oc["current"]["uvi"] ?? null; }
         }
 
-        send([
+        $resp = [
             "city" => $w["name"] ?? $city, "country" => $w["sys"]["country"] ?? "",
             "temp" => $t, "feels_like" => $m["feels_like"] ?? null,
             "temp_min" => $m["temp_min"] ?? null, "temp_max" => $m["temp_max"] ?? null,
@@ -2149,7 +2178,9 @@ switch ("$method $route") {
             "rain" => $w["rain"]["1h"] ?? ($w["rain"]["3h"] ?? 0), // mm in the last hour
             "desc" => $w["weather"][0]["description"] ?? "", "icon" => $w["weather"][0]["icon"] ?? "",
             "hourly" => $hourly, "forecast" => $forecast,
-        ]);
+        ];
+        cache_put($db, "wx:" . $city, json_encode($resp), 1200); // 20-min cache
+        send($resp);
     }
 
     /* ===================== M9: EMAIL an invoice/quote (SMTP) ===================== */
@@ -2205,6 +2236,7 @@ switch ("$method $route") {
     /* ===================== Email any client + AI draft ===================== */
     case "POST /email/send": {
         $actor = require_role($db, "admin");
+        rate_write($db, "w:mail:" . $actor["id"], 30, 60); // email is costly — tighter cap
         // Compose can send as JSON (no files) or multipart/form-data (with attachments).
         $isMultipart = stripos((string)($_SERVER["CONTENT_TYPE"] ?? ""), "multipart/form-data") === 0;
         $b = $isMultipart ? $_POST : body();
@@ -2411,7 +2443,8 @@ switch ("$method $route") {
 
     /* ===================== M15: INBOUND EMAIL (IMAP) ===================== */
     case "POST /inbox/sync": {
-        require_role($db, "admin");
+        $actor = require_role($db, "admin");
+        rate_write($db, "w:sync:" . $actor["id"], 10, 60); // IMAP pull — cap the refresh rate
         require __DIR__ . "/lib/inbox.php";
         ensure_deleted_uids($db); // tombstone table must exist before sync reads it
         ensure_message_cols($db); // archived/flagged columns — bounces arrive pre-archived
@@ -3725,6 +3758,7 @@ switch ("$method $route") {
     }
     case "POST /campaigns/send": {
         $actor = require_role($db, "admin");
+        rate_write($db, "w:camp:" . $actor["id"], 5, 60); // bulk send — hard cap
         ensure_subscribers_table($db);
         $b = body();
         $subject = trim($b["subject"] ?? ""); $bodyTxt = trim($b["body"] ?? "");
