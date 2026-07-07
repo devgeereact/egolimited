@@ -15,6 +15,7 @@ import { useAuth } from "@/store/auth.store"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
 import WeatherPanel from "@/components/ego/WeatherPanel"
+import { DashboardSkeleton } from "@/components/ego/Skeletons"
 
 interface Dash {
   today_jobs: number; to_schedule: number; awaiting_invoice: number; in_progress: number; completed_today: number; open_jobs: number
@@ -71,7 +72,7 @@ export default function EgoDashboard() {
     finally { setAiBusy(false) }
   }
 
-  if (!d) return <div className="flex min-h-[50vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
+  if (!d) return <DashboardSkeleton />
 
   const stats = [
     { label: "Today's jobs", value: String(d.today_jobs), icon: Briefcase, to: "/ego/schedule", tone: "text-blue-600 dark:text-blue-400 bg-blue-500/10" },
