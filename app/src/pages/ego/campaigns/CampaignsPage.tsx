@@ -58,7 +58,7 @@ export default function CampaignsPage() {
   }
   useEffect(() => {
     load()
-    api<{ templates: Template[] }>("/email-templates").then((r) => setTemplates(r.templates)).catch(() => {})
+    api<{ templates: Template[] }>("/email-templates").then((r) => setTemplates(r.templates)).catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load templates"))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

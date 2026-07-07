@@ -47,6 +47,7 @@ export default function ReviewsPage() {
     setLoading(true)
     return api<Resp>(`/reviews?page=${page}`)
       .then((r) => { setReviews(r.reviews); setAverage(r.average); setCount(r.count); setPages(r.pages) })
+      .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load reviews"))
       .finally(() => setLoading(false))
   }
   useEffect(() => { load() /* eslint-disable-next-line */ }, [page])

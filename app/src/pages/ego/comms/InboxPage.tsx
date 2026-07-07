@@ -88,7 +88,7 @@ export default function InboxPage() {
 
   function load(silent = false) {
     if (!silent) setLoading(true)
-    api<{ messages: MsgRow[] }>("/inbox").then((r) => setRows(r.messages)).finally(() => { if (!silent) setLoading(false) })
+    api<{ messages: MsgRow[] }>("/inbox").then((r) => setRows(r.messages)).catch((e) => { if (!silent) toast.error(e instanceof Error ? e.message : "Couldn't load mail") }).finally(() => { if (!silent) setLoading(false) })
   }
   useEffect(() => {
     load()

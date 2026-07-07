@@ -31,7 +31,13 @@ header("Cache-Control: no-store");
 /* ---------- helpers ---------- */
 function send($data, int $code = 200): never { http_response_code($code); echo json_encode($data); exit; }
 function fail(string $msg, int $code = 400): never { send(["error" => $msg], $code); }
-function body(): array { $j = json_decode(file_get_contents("php://input") ?: "[]", true); return is_array($j) ? $j : []; }
+function body(): array {
+    $raw = file_get_contents("php://input");
+    if ($raw === false || trim($raw) === "") return [];   // no body (GET, multipart, or empty POST)
+    $j = json_decode($raw, true);
+    if (!is_array($j)) fail("Invalid request body");        // malformed JSON → clear 400, not a silent []
+    return $j;
+}
 function bearer(): ?string {
     $h = $_SERVER["HTTP_AUTHORIZATION"] ?? $_SERVER["REDIRECT_HTTP_AUTHORIZATION"] ?? "";
     return preg_match('/Bearer\s+(\S+)/i', $h, $m) ? $m[1] : null;
@@ -614,6 +620,51 @@ function notify_job_completed(mysqli $db, int $jobId): void {
     try { ego_send_mail($db, $to, $cs["company_name"] ?? null, "Ready to invoice: {$job['reference']}", $html); } catch (Throwable $e) { /* best-effort */ }
 }
 
+/** Tell the CUSTOMER their job is done (separate from the office alert above). Best-effort. */
+function notify_customer_completed(mysqli $db, int $jobId): void {
+    $job = db_one($db, "SELECT j.reference,j.title,c.name AS customer_name,c.email AS customer_email FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id WHERE j.id=?", "i", $jobId);
+    if (!$job || !filter_var((string)($job["customer_email"] ?? ""), FILTER_VALIDATE_EMAIL)) return;
+    require_once __DIR__ . "/lib/mailer.php";
+    $first = trim((string)(preg_split('/\s+/', trim((string)$job["customer_name"]))[0] ?? "")) ?: "there";
+    $track = track_link($db, $jobId);
+    $inner = "<p>Hi " . htmlspecialchars($first) . ",</p>"
+        . "<p>Good news — we've finished <strong>" . htmlspecialchars($job["title"]) . "</strong> (" . htmlspecialchars($job["reference"]) . "). Thanks for having us out.</p>"
+        . ($track ? "<p>You can see the job and your documents here: <a href='" . htmlspecialchars($track) . "'>track your job</a>.</p>" : "")
+        . "<p>If you've a spare minute, a quick honest review really helps a small local firm. And if anything isn't quite right, just reply and we'll put it right.</p>";
+    try { ego_send_mail($db, $job["customer_email"], $job["customer_name"], "Your job's done — " . $job["reference"], ego_email_shell($db, "", $inner)); } catch (Throwable $e) { /* best-effort */ }
+}
+
+/** Email the customer a receipt when a payment is recorded. Best-effort. */
+function notify_payment_received(mysqli $db, int $invId, float $amount, bool $full, float $balance): void {
+    $inv = db_one($db, "SELECT i.number,i.payment_reference,c.name AS customer_name,c.email AS customer_email FROM ego_invoices i JOIN ego_customers c ON c.id=i.customer_id WHERE i.id=?", "i", $invId);
+    if (!$inv || !filter_var((string)($inv["customer_email"] ?? ""), FILTER_VALIDATE_EMAIL)) return;
+    require_once __DIR__ . "/lib/mailer.php";
+    $first = trim((string)(preg_split('/\s+/', trim((string)$inv["customer_name"]))[0] ?? "")) ?: "there";
+    $num = $inv["number"] ?: $inv["payment_reference"];
+    $inner = "<p>Hi " . htmlspecialchars($first) . ",</p>"
+        . "<p>Thanks — we've received your payment of <strong>&pound;" . number_format($amount, 2) . "</strong> for invoice " . htmlspecialchars((string)$num) . ".</p>"
+        . ($full ? "<p>That settles the invoice in full. Nothing more to do.</p>"
+                 : "<p>That's a part-payment. The remaining balance is <strong>&pound;" . number_format(max(0, $balance), 2) . "</strong>.</p>")
+        . "<p>Thanks for your custom.</p>";
+    try { ego_send_mail($db, $inv["customer_email"], $inv["customer_name"], "Payment received — " . $num, ego_email_shell($db, "Payment received", $inner)); } catch (Throwable $e) { /* best-effort */ }
+}
+
+/** Email a new team member their invite link (instead of the office copy-pasting it). Best-effort. */
+function notify_team_invite(mysqli $db, string $email, string $name, string $inviteToken): void {
+    if (!filter_var($email, FILTER_VALIDATE_EMAIL)) return;
+    require_once __DIR__ . "/lib/mailer.php";
+    $co = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
+    $coName = ($co["company_name"] ?? "") ?: "EGO LTD";
+    $host = $_SERVER["HTTP_HOST"] ?? "egolimited.com";
+    $link = "https://" . $host . "/app/ego/invite/" . rawurlencode($inviteToken);
+    $first = trim((string)(preg_split('/\s+/', trim($name))[0] ?? "")) ?: "there";
+    $inner = "<p>Hi " . htmlspecialchars($first) . ",</p>"
+        . "<p>You've been added to the " . htmlspecialchars($coName) . " team app. Set your password to get started:</p>"
+        . "<p><a href='" . htmlspecialchars($link) . "' style='display:inline-block;padding:11px 20px;background:#EF9F27;color:#171816;border-radius:8px;text-decoration:none;font-weight:700'>Set your password</a></p>"
+        . "<p style='color:#64748b;font-size:13px;word-break:break-all'>Or paste this link: " . htmlspecialchars($link) . "</p>";
+    try { ego_send_mail($db, $email, $name, "Set up your " . $coName . " account", ego_email_shell($db, "Welcome to " . $coName, $inner)); } catch (Throwable $e) { /* best-effort */ }
+}
+
 /** Load a job the actor may touch: admin = any, engineer = only their own. */
 function load_owned_job(mysqli $db, array $actor, int $id): array {
     $job = db_one($db, "SELECT * FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $id);
@@ -790,6 +841,7 @@ switch ("$method $route") {
         $invite = bin2hex(random_bytes(24));
         db_exec($db, "INSERT INTO ego_users (name,email,phone,role,active,invite_token) VALUES (?,?,?,?,1,?)",
             "sssss", $name, $email, ($phone ?: null), $role, $invite);
+        notify_team_invite($db, $email, $name, $invite); // email the invite link to the new member
         send(["id" => (int)$db->insert_id, "invite_token" => $invite], 201);
     }
 
@@ -875,6 +927,7 @@ switch ("$method $route") {
         if ($name === "") fail("Name is required");
         $phone = trim($b["phone"] ?? "") ?: null;
         $email = trim($b["email"] ?? "") ?: null;
+        if ($email !== null && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Enter a valid email, or leave it blank");
         $notes = trim($b["notes"] ?? "") ?: null;
         db_exec($db, "INSERT INTO ego_customers (name,phone,email,notes) VALUES (?,?,?,?)", "ssss", $name, $phone, $email, $notes);
         $cid = (int)$db->insert_id;
@@ -895,6 +948,7 @@ switch ("$method $route") {
         if (!$id || $name === "") fail("id and name required");
         $phone = trim($b["phone"] ?? "") ?: null;
         $email = trim($b["email"] ?? "") ?: null;
+        if ($email !== null && !filter_var($email, FILTER_VALIDATE_EMAIL)) fail("Enter a valid email, or leave it blank");
         $notes = trim($b["notes"] ?? "") ?: null;
         db_exec($db, "UPDATE ego_customers SET name=?,phone=?,email=?,notes=? WHERE id=? AND deleted_at IS NULL",
             "ssssi", $name, $phone, $email, $notes, $id);
@@ -1243,7 +1297,8 @@ switch ("$method $route") {
         log_activity($db, $id, (int)$actor["id"], "status_changed", ["from" => $from, "to" => $to, "note" => $note]);
         if ($to === "completed") {
             log_activity($db, $id, null, "ready_to_invoice", []);
-            notify_job_completed($db, $id); // M12: alert the office
+            notify_job_completed($db, $id);        // alert the office
+            notify_customer_completed($db, $id);   // tell the customer their job's done
             maybe_mark_invoiced($db, $id, (int)$actor["id"]); // invoice already exists → straight to invoiced
         }
         $final = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", $id);
@@ -1716,6 +1771,7 @@ switch ("$method $route") {
             }
             log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "payment_recorded", ["amount" => $amount, "reference" => $ref, "balance" => round(max(0, $total - $paidNow), 2)]);
             $db->commit();
+            notify_payment_received($db, $id, $amount, $fullyPaid, round(max(0, $total - $paidNow), 2)); // receipt to customer
             send(["ok" => true, "paid_in_full" => $fullyPaid, "balance" => round(max(0, $total - $paidNow), 2)]);
         } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not record the payment"); }
     }

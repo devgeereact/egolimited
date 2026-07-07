@@ -12,6 +12,7 @@ function compute_totals(array $lines, float $vatRate): array {
     foreach ($lines as $l) {
         $qty = round((float)($l["quantity"] ?? 0), 2);
         $price = round((float)($l["unit_price"] ?? 0), 2);
+        if ($qty < 0 || $price < 0) fail("Line quantities and prices can't be negative"); // protect the ledger
         $lineTotal = round($qty * $price, 2);
         $subtotal += $lineTotal;
         $out[] = [

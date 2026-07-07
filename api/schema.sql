@@ -301,6 +301,14 @@ CREATE TABLE IF NOT EXISTS ego_job_checklist (
 -- Invoicing: link an auto-created invoice back to the quote it was converted from
 ALTER TABLE ego_invoices ADD COLUMN IF NOT EXISTS converted_from_quote_id INT NULL;
 
+-- Performance: indexes on hot filter/sort columns (list + dashboard queries were full-scanning)
+ALTER TABLE ego_jobs      ADD INDEX IF NOT EXISTS idx_ego_jobs_status_sched (status, scheduled_start);
+ALTER TABLE ego_jobs      ADD INDEX IF NOT EXISTS idx_ego_jobs_customer (customer_id);
+ALTER TABLE ego_invoices  ADD INDEX IF NOT EXISTS idx_ego_inv_status_due (status, due_date);
+ALTER TABLE ego_customers ADD INDEX IF NOT EXISTS idx_ego_cust_deleted (deleted_at);
+ALTER TABLE ego_messages  ADD INDEX IF NOT EXISTS idx_ego_msg_created (created_at);
+ALTER TABLE ego_sessions  ADD INDEX IF NOT EXISTS idx_ego_sess_expires (expires_at);
+
 -- Jobs: per-stage timestamps for the lifecycle timeline + SLA visibility
 ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS en_route_at DATETIME NULL;
 ALTER TABLE ego_jobs ADD COLUMN IF NOT EXISTS on_site_at DATETIME NULL;
