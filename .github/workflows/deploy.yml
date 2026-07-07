@@ -1,0 +1,92 @@
+name: Deploy to cPanel (FTP)
+
+# Builds the landing + app and uploads landing, app and the PHP API to the
+# egolimited.com cPanel host over FTP on every push to main (or run manually).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-egolimited
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # ---- build the two SPAs ----
+      - name: Build app (base /app/)
+        working-directory: app
+        run: |
+          npm ci
+          npx tsc -b
+          npx vite build --base=/app/
+
+      - name: Build landing (base /)
+        working-directory: landing
+        run: |
+          npm ci
+          npx tsc -b
+          npx vite build --base=/
+
+      # ---- upload each surface to its cPanel dir (paths are relative to the FTP home) ----
+      - name: Deploy landing → egolimited.com/
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./landing/dist/
+          server-dir: egolimited.com/
+          # Never touch the app or api subtrees from the landing sync.
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            app/**
+            api/**
+
+      - name: Deploy app → egolimited.com/app/
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./app/dist/
+          server-dir: egolimited.com/app/
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+
+      - name: Deploy API → egolimited.com/api/  (preserve server config/uploads/.htaccess)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          protocol: ftps
+          local-dir: ./api/
+          server-dir: egolimited.com/api/
+          # Never upload or delete server-side secrets/state.
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            config.php
+            config.sample.php
+            error_log
+            .htaccess
+            uploads/**
+            .impeccable/**
