@@ -680,6 +680,34 @@ function ensure_email_templates(mysqli $db): void {
     foreach ($seed as $t) { $stmt->bind_param("ssss", $t[0], $t[1], $t[2], $t[3]); $stmt->execute(); }
 }
 
+/** Generic {{company}}-based cold-outreach presets — company-agnostic, so they work for ANY lead
+ *  (not just agents/landlords/commercial). Separate self-marking block so existing installs pick
+ *  them up on the next call without touching the segment sequences or any custom template. */
+function ensure_outreach_presets(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_email_templates (
+        id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(190) NOT NULL, kind VARCHAR(24) NOT NULL DEFAULT 'campaign',
+        subject VARCHAR(255) NULL, body MEDIUMTEXT NULL, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $db->query("ALTER TABLE ego_email_templates ADD COLUMN IF NOT EXISTS preset TINYINT NOT NULL DEFAULT 0");
+    if ((int) ($db->query("SELECT COUNT(*) c FROM ego_email_templates WHERE name='Outreach · 1 · Intro'")->fetch_assoc()["c"] ?? 0) > 0) return;
+    $sig = "\n\nThe EGO LTD team\n07539 705576 · hello@egolimited.com · egolimited.com\nGeneral maintenance for homes and commercial across South-East London";
+    $stop = "\n\nReply STOP and we won't email again.";
+    $seed = [
+        ["Outreach · 1 · Intro", "marketing", "A reliable maintenance team for {{company}}",
+         "Hi {{first_name}},\n\nWe're EGO LTD, a general maintenance team across South-East London: carpentry, painting and decorating, minor plumbing, walls and tiling. The everyday repairs that keep a place running.\n\nMost people we speak to are juggling a patchy list of contractors who don't always pick up. We work the other way round: one number, fixed prices in writing, and a record kept per property so nobody's starting from scratch on the next call.\n\nIf that'd be useful for {{company}}, reply here or call 07539 705576 and we'll take a quick look at how your repairs get handled now." . $sig . $stop],
+        ["Outreach · 2 · Follow-up", "marketing", "Fewer chase calls for {{company}}",
+         "Hi {{first_name}},\n\nQuick follow-up. The thing people actually want is fewer chase calls, from tenants and from their contractors. So here's how we work:\n\n- Fixed price in writing before any job starts.\n- A live tracking link on every job, so you're never chasing.\n- Itemised VAT invoices, clean for your accounts.\n\nThe simplest way to judge it is to let us run a small job for {{company}}. Reply with an address, or call 07539 705576." . $sig . $stop],
+        ["Outreach · 3 · Proof", "marketing", "One contractor, a clean record for {{company}}",
+         "Hi {{first_name}},\n\nRather than telling you we're reliable, the standard we hold on every job is simple: turn up when we said, fix it properly, invoice it cleanly.\n\nFor every property we look after we keep a maintenance record: what was done, what was used, what to keep an eye on. Less back-and-forth, faster fixes, and a clean paper trail whenever {{company}} needs one.\n\nGot one or two problem jobs on the list right now? Hand them over, no tie-in on the first. Reply here or call 07539 705576." . $sig . $stop],
+        ["Outreach · 4 · Break-up", "marketing", "Should we close your file, {{first_name}}?",
+         "Hi {{first_name}},\n\nWe've dropped {{company}} a couple of notes and not heard back, which is completely fine — timing is everything.\n\nWe won't keep emailing. If you'd like us on standby for the next repair or job that lands, reply \"keep me in mind\" and we'll be ready. Fixed price in writing, a live tracking link, an itemised invoice, same every time.\n\nEither way, thanks for your time." . $sig],
+        ["Outreach · Re-engage", "marketing", "Still here when {{company}} needs us",
+         "Hi {{first_name}},\n\nNo agenda here, just a hello. We're still a one-number maintenance team across South-East London whenever a repair or a bit of upkeep lands on {{company}}'s list.\n\nSame way of working: fixed price in writing, a live tracking link, an itemised invoice, everything logged. If something's been sitting on the \"we'll get to that\" pile, that's exactly what we're good at. Reply or call 07539 705576 whenever it crops up." . $sig],
+    ];
+    $stmt = $db->prepare("INSERT INTO ego_email_templates (name,kind,subject,body,preset) VALUES (?,?,?,?,1)");
+    foreach ($seed as $t) { $stmt->bind_param("ssss", $t[0], $t[1], $t[2], $t[3]); $stmt->execute(); }
+}
+
 /** Mint (or reuse) the customer-portal access token for a job. */
 function mint_track_token(mysqli $db, int $jobId): array {
     $ex = db_one($db, "SELECT token,short_code FROM ego_customer_access WHERE job_id=? AND (expires_at IS NULL OR expires_at>NOW()) ORDER BY id DESC LIMIT 1", "i", $jobId);
@@ -2666,6 +2694,7 @@ switch ("$method $route") {
     case "GET /email-templates": {
         require_role($db, "admin");
         ensure_email_templates($db);
+        ensure_outreach_presets($db);
         $rows = db_all($db, "SELECT id,name,kind,subject,body,created_at FROM ego_email_templates ORDER BY name");
         foreach ($rows as &$r) $r["id"] = (int)$r["id"];
         send(["templates" => $rows]);
