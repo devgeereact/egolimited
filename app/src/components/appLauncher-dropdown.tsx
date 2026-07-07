@@ -115,6 +115,7 @@ export function AppLauncherDropdown() {
           variant="ghost"
           size="icon"
           className="rounded-full [&_svg]:size-5 h-10 w-10 p-0"
+          aria-label="Open app launcher"
         >
           <Grid2x2Plus />
         </Button>

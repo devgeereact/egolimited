@@ -43,6 +43,7 @@ export default function ShadcnFullCalendar() {
             variant="outline"
             size="icon"
             onClick={() => calendarRef.current?.getApi().prev()}
+            aria-label="Previous"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
@@ -51,6 +52,7 @@ export default function ShadcnFullCalendar() {
             variant="outline"
             size="icon"
             onClick={() => calendarRef.current?.getApi().next()}
+            aria-label="Next"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>

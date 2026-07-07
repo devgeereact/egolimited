@@ -356,7 +356,7 @@ export default function ContactsPage() {
               <p className="text-sm text-muted-foreground">Share this invite link so they can set a password:</p>
               <div className="flex items-center gap-2">
                 <Input readOnly value={invite} onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 font-mono text-xs" />
-                <Button size="icon" variant="outline" className="size-9 shrink-0" onClick={() => { navigator.clipboard.writeText(invite); toast.success("Copied") }}><Copy className="size-4" /></Button>
+                <Button size="icon" variant="outline" className="size-9 shrink-0" onClick={() => { navigator.clipboard.writeText(invite); toast.success("Copied") }} aria-label="Copy invite link"><Copy className="size-4" /></Button>
               </div>
               <DialogFooter><Button onClick={() => setTeamOpen(false)}>Done</Button></DialogFooter>
             </div>

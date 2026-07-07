@@ -78,7 +78,7 @@ export function GlobalSearch() {
 
   return (
     <>
-      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} className="h-10 w-10 rounded-full p-0 [&_svg]:size-5">
+      <Button variant="ghost" size="icon" onClick={() => setOpen(true)} className="h-10 w-10 rounded-full p-0 [&_svg]:size-5" aria-label="Search">
         <Search />
       </Button>
 

@@ -288,7 +288,7 @@ export default function PurchaseOrderForm() {
                       <span className="w-20 text-right text-sm tabular-nums text-muted-foreground">{gbp(line)}</span>
                       {!locked && (
                         <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground"
-                          onClick={() => remove(i)} disabled={fields.length === 1}>
+                          onClick={() => remove(i)} disabled={fields.length === 1} aria-label="Remove line">
                           <Trash2 className="size-4" />
                         </Button>
                       )}

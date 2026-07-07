@@ -38,6 +38,7 @@ export function LanguageDropdown() {
           variant="ghost"
           size="icon"
           className="rounded-full [&_svg]:size-5 h-10 w-10 p-0"
+          aria-label="Select language"
         >
           <Flag />
         </Button>

@@ -402,12 +402,12 @@ export default function JobDetail() {
                   {checklist.map((item, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <Input value={item} onChange={(e) => setChecklist((cs) => cs.map((c, idx) => idx === i ? e.target.value : c))} className="h-9" />
-                      <Button size="icon" variant="ghost" className="size-9 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => setChecklist((cs) => cs.filter((_, idx) => idx !== i))}><X className="size-4" /></Button>
+                      <Button size="icon" variant="ghost" className="size-9 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => setChecklist((cs) => cs.filter((_, idx) => idx !== i))} aria-label="Remove check"><X className="size-4" /></Button>
                     </div>
                   ))}
                   <form onSubmit={(e) => { e.preventDefault(); if (newCheck.trim()) { setChecklist((cs) => [...cs, newCheck.trim()]); setNewCheck("") } }} className="flex items-center gap-2">
                     <Input value={newCheck} onChange={(e) => setNewCheck(e.target.value)} placeholder="Add a check…" className="h-9" />
-                    <Button type="submit" size="icon" variant="outline" className="size-9 shrink-0"><Plus className="size-4" /></Button>
+                    <Button type="submit" size="icon" variant="outline" className="size-9 shrink-0" aria-label="Add check"><Plus className="size-4" /></Button>
                   </form>
                 </div>
                 <div className="flex justify-end">

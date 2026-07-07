@@ -240,7 +240,7 @@ export default function ContractForm() {
                     <FormItem>{i === 0 && <FormLabel>Rate £</FormLabel>}<FormControl><Input type="number" step="0.01" {...field} /></FormControl></FormItem>
                   )} />
                   <div className="pb-1">
-                    <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={() => remove(i)}><Trash2 className="size-4" /></Button>
+                    <Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground" onClick={() => remove(i)} aria-label="Remove allocation"><Trash2 className="size-4" /></Button>
                   </div>
                 </div>
               ))}

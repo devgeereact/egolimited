@@ -18,9 +18,9 @@ export function Pager({ page, pages, total, onPage, noun = "items" }:
       <span>{total} {noun}</span>
       {pages > 1 && (
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="icon" className="size-8" disabled={page <= 1} onClick={() => onPage(page - 1)}><ChevronLeft className="size-4" /></Button>
+          <Button variant="outline" size="icon" className="size-8" disabled={page <= 1} onClick={() => onPage(page - 1)} aria-label="Previous page"><ChevronLeft className="size-4" /></Button>
           <span className="tabular-nums">Page {page} of {pages}</span>
-          <Button variant="outline" size="icon" className="size-8" disabled={page >= pages} onClick={() => onPage(page + 1)}><ChevronRight className="size-4" /></Button>
+          <Button variant="outline" size="icon" className="size-8" disabled={page >= pages} onClick={() => onPage(page + 1)} aria-label="Next page"><ChevronRight className="size-4" /></Button>
         </div>
       )}
     </div>

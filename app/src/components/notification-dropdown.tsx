@@ -53,7 +53,7 @@ export function NotificationDropdown() {
     <DropdownMenu onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <div className="relative">
-          <Button variant="ghost" size="icon" className="rounded-full [&_svg]:size-5 h-10 w-10 p-0">
+          <Button variant="ghost" size="icon" className="rounded-full [&_svg]:size-5 h-10 w-10 p-0" aria-label="Notifications">
             <Bell />
           </Button>
           {count > 0 && (

@@ -291,9 +291,9 @@ export default function InboxPage() {
             <span>{filtered.length} {folder === "notes" ? "notes" : "messages"}</span>
             {pages > 1 && (
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="icon" className="size-8" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}><ChevronLeft className="size-4" /></Button>
+                <Button variant="outline" size="icon" className="size-8" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} aria-label="Previous page"><ChevronLeft className="size-4" /></Button>
                 <span className="tabular-nums">Page {page} of {pages}</span>
-                <Button variant="outline" size="icon" className="size-8" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}><ChevronRight className="size-4" /></Button>
+                <Button variant="outline" size="icon" className="size-8" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} aria-label="Next page"><ChevronRight className="size-4" /></Button>
               </div>
             )}
           </div>
@@ -433,7 +433,7 @@ function ComposeDialog({ open, onOpenChange, draft, onSaved }:
                     <Paperclip className="size-3 text-muted-foreground" />
                     <span className="max-w-[160px] truncate">{f.name}</span>
                     <span className="text-muted-foreground">{fmtBytes(f.size)}</span>
-                    <button type="button" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive"><X className="size-3.5" /></button>
+                    <button type="button" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))} className="text-muted-foreground hover:text-destructive" aria-label="Remove file"><X className="size-3.5" /></button>
                   </span>
                 ))}
               </div>

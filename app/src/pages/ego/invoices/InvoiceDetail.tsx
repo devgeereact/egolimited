@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react"
 import { Link, useSearchParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft, Plus, Trash2, Send, Download, Eye, BadgePoundSterling, Ban, Loader2, Wrench, Mail,
-  CheckCircle2, Undo2,
+  CheckCircle2, Undo2, MoreHorizontal,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -17,6 +17,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
 import PaymentDialog from "@/components/ego/PaymentDialog"
 import { DetailSkeleton } from "@/components/ego/Skeletons"
@@ -232,33 +235,47 @@ export default function InvoiceDetail() {
         <Button asChild variant="ghost" size="sm" className="-ml-2 text-muted-foreground">
           <Link to={inv.kind === "quote" ? "/ego/quotes" : "/ego/invoices"}><ArrowLeft /> {label}s</Link>
         </Button>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {isEditable && <Button variant="outline" onClick={save} disabled={busy}>{isDraft ? "Save draft" : "Save changes"}</Button>}
+
+          {/* Primary contextual action — one filled button, driven by state */}
           {isDraft && <Button onClick={send} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <Send />} Send</Button>}
           {inv.kind === "quote" && !["void", "declined", "accepted", "paid"].includes(inv.status) && (
             <Button onClick={accept} disabled={busy}>{busy ? <Loader2 className="animate-spin" /> : <CheckCircle2 />} Accept → invoice</Button>
           )}
-          {inv.kind === "quote" && !["void", "declined", "accepted", "paid"].includes(inv.status) && (
-            <Button variant="outline" onClick={decline} disabled={busy}>Decline</Button>
-          )}
-          <Button variant="outline" onClick={previewPdf}><Eye /> Preview</Button>
-          <Button variant="outline" onClick={downloadPdf}><Download /> PDF</Button>
-          <Button variant="outline" onClick={openEmail} disabled={busy}><Mail /> Email</Button>
           {inv.kind === "invoice" && (inv.status === "sent" || inv.status === "overdue") && (
-            <>
-              <Button onClick={() => setPayOpen(true)}><BadgePoundSterling /> Mark paid</Button>
-              <Button variant="outline" onClick={remind} disabled={busy}><Mail /> Reminder</Button>
-            </>
+            <Button onClick={() => setPayOpen(true)}><BadgePoundSterling /> Mark paid</Button>
           )}
-          {inv.kind === "invoice" && inv.status === "paid" && atLeast(user?.role, "manager") && (
-            <Button variant="outline" onClick={unpay} disabled={busy}><Undo2 /> Undo payment</Button>
-          )}
-          {inv.status !== "paid" && inv.status !== "void" && (
-            <Button variant="outline" className="text-destructive" onClick={voidDoc}><Ban /> Void</Button>
-          )}
-          {atLeast(user?.role, "manager") && (
-            <Button variant="outline" className="text-destructive hover:text-destructive" onClick={deleteDoc}><Trash2 /> Delete</Button>
-          )}
+
+          {/* Email stays visible — the most common day-to-day action */}
+          <Button variant="outline" onClick={openEmail} disabled={busy}><Mail /> Email</Button>
+
+          {/* Everything secondary + destructive lives behind one overflow menu */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" aria-label="More actions"><MoreHorizontal /></Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem onClick={previewPdf}><Eye /> Preview</DropdownMenuItem>
+              <DropdownMenuItem onClick={downloadPdf}><Download /> Download PDF</DropdownMenuItem>
+              {inv.kind === "quote" && !["void", "declined", "accepted", "paid"].includes(inv.status) && (
+                <DropdownMenuItem onClick={decline}><Ban /> Decline quote</DropdownMenuItem>
+              )}
+              {inv.kind === "invoice" && (inv.status === "sent" || inv.status === "overdue") && (
+                <DropdownMenuItem onClick={remind}><Mail /> Send reminder</DropdownMenuItem>
+              )}
+              {inv.kind === "invoice" && inv.status === "paid" && atLeast(user?.role, "manager") && (
+                <DropdownMenuItem onClick={unpay}><Undo2 /> Undo payment</DropdownMenuItem>
+              )}
+              {((inv.status !== "paid" && inv.status !== "void") || atLeast(user?.role, "manager")) && <DropdownMenuSeparator />}
+              {inv.status !== "paid" && inv.status !== "void" && (
+                <DropdownMenuItem onClick={voidDoc} className="text-destructive focus:text-destructive"><Ban /> Void</DropdownMenuItem>
+              )}
+              {atLeast(user?.role, "manager") && (
+                <DropdownMenuItem onClick={deleteDoc} className="text-destructive focus:text-destructive"><Trash2 /> Delete</DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

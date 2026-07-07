@@ -238,7 +238,7 @@ export default function EngineerJobField() {
             {canAddChecks && (
               <form onSubmit={(e) => { e.preventDefault(); addCheckItem() }} className="flex items-center gap-2">
                 <Input value={newCheck} onChange={(e) => setNewCheck(e.target.value)} placeholder="Add your own check…" className="h-9" />
-                <Button type="submit" size="icon" variant="outline" className="size-9 shrink-0" disabled={!newCheck.trim()}><Plus className="size-4" /></Button>
+                <Button type="submit" size="icon" variant="outline" className="size-9 shrink-0" disabled={!newCheck.trim()} aria-label="Add check"><Plus className="size-4" /></Button>
               </form>
             )}
           </CardContent>

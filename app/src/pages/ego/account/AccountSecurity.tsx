@@ -144,7 +144,7 @@ export default function AccountSecurity() {
                 </ol>
                 <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-3">
                   <code className="flex-1 break-all font-mono text-sm tracking-wider">{secret}</code>
-                  <Button variant="ghost" size="icon" className="size-8"
+                  <Button variant="ghost" size="icon" className="size-8" aria-label="Copy setup key"
                     onClick={() => { navigator.clipboard?.writeText(secret); setCopied(true); setTimeout(() => setCopied(false), 1500) }}>
                     {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
                   </Button>
