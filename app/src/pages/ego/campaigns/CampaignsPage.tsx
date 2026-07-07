@@ -14,6 +14,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
+import LeadOutreachDialog from "@/components/ego/LeadOutreachDialog"
+import { TokenHint } from "@/components/ego/TokenHint"
 
 interface Subscriber {
   id: number
@@ -87,6 +89,8 @@ export default function CampaignsPage() {
   const [searchLocation, setSearchLocation] = useState("")
   const [searching, setSearching] = useState(false)
   const [selected, setSelected] = useState<Set<number>>(new Set())
+  const [outreachLead, setOutreachLead] = useState<Lead | null>(null)
+  const [outreachOpen, setOutreachOpen] = useState(false)
 
   // automation (M17: unattended drip via campaign_cron.php)
   const [auto, setAuto] = useState<AutomationResponse | null>(null)
@@ -96,6 +100,8 @@ export default function CampaignsPage() {
   const [autoBody, setAutoBody] = useState("")
   const [autoBatch, setAutoBatch] = useState(25)
   const [autoSaving, setAutoSaving] = useState(false)
+  const [autoBrief, setAutoBrief] = useState("")
+  const [autoDrafting, setAutoDrafting] = useState(false)
 
   function load() {
     return api<SubsResponse>("/subscribers")
@@ -278,6 +284,22 @@ export default function CampaignsPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save") }
     finally { setAutoSaving(false) }
   }
+  function useAutoPreset(id: string) {
+    const t = templates.find((x) => String(x.id) === id)
+    if (!t) return
+    setAutoSubject(t.subject ?? ""); setAutoBody(t.body ?? "")
+    toast.success(`Loaded "${t.name}" — {{first_name}} / {{company}} fill per lead`)
+  }
+  async function draftAutomation() {
+    if (!autoBrief.trim()) { toast.error("Tell the AI what the drip should say"); return }
+    setAutoDrafting(true)
+    try {
+      const r = await api<{ subject: string; body: string }>("/campaigns/draft", { method: "POST", body: { brief: `${autoBrief}. Address the reader as {{first_name}} and their business as {{company}} using those exact placeholders.`, kind: "marketing" } })
+      if (r.subject) setAutoSubject(r.subject)
+      setAutoBody(r.body || "")
+      toast.success("Draft ready — review before turning automation on")
+    } catch (e) { toast.error(e instanceof Error ? e.message : "AI draft failed") } finally { setAutoDrafting(false) }
+  }
 
   const audiences: { id: Audience; label: string; icon: typeof Users; count: number }[] = [
     { id: "subscribers", label: "Subscribers", icon: Mail, count: data?.subscriber_count ?? 0 },
@@ -366,6 +388,7 @@ export default function CampaignsPage() {
                 <div className="space-y-2">
                   <Label htmlFor="body">Message</Label>
                   <Textarea id="body" rows={10} value={bodyText} onChange={(e) => setBodyText(e.target.value)} placeholder="Write your message, or generate a draft above…" />
+                  <TokenHint />
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-xs text-muted-foreground">Sends on the EGO branded email template. Plain line breaks become paragraphs.</p>
                     <Button type="button" variant="ghost" size="sm" className="shrink-0 text-muted-foreground" onClick={saveAsTemplate}>
@@ -506,6 +529,11 @@ export default function CampaignsPage() {
                           <p className="truncate text-xs text-muted-foreground">{l.email || "no public email found"}{l.website ? ` · ${l.website}` : ""}</p>
                           {l.note && <p className="mt-0.5 truncate text-xs text-muted-foreground">{l.note}</p>}
                         </div>
+                        {l.email && (
+                          <Button variant="outline" size="sm" className="h-8 shrink-0" onClick={() => { setOutreachLead(l); setOutreachOpen(true) }}>
+                            <Mail className="size-4" /> Email
+                          </Button>
+                        )}
                         <Button variant="ghost" size="icon" className="size-8 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => deleteLead(l.id)} aria-label="Remove">
                           <Trash2 className="size-4" />
                         </Button>
@@ -539,6 +567,26 @@ export default function CampaignsPage() {
                     <Switch checked={autoEnabled} disabled={autoSaving} onCheckedChange={(v) => saveAutomation(v)} />
                   </div>
 
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Start from a preset sequence</Label>
+                      <Select onValueChange={useAutoPreset}>
+                        <SelectTrigger><SelectValue placeholder="Pick a sequence…" /></SelectTrigger>
+                        <SelectContent>
+                          {templates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">…or let AI draft the drip</Label>
+                      <div className="flex gap-2">
+                        <Input value={autoBrief} onChange={(e) => setAutoBrief(e.target.value)} placeholder="e.g. intro to letting agents" className="flex-1" />
+                        <Button type="button" variant="outline" onClick={draftAutomation} disabled={autoDrafting}>
+                          {autoDrafting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <Label>Subject</Label>
                     <Input value={autoSubject} onChange={(e) => setAutoSubject(e.target.value)} placeholder="Subject line" />
@@ -546,6 +594,7 @@ export default function CampaignsPage() {
                   <div className="space-y-2">
                     <Label>Message</Label>
                     <Textarea rows={8} value={autoBody} onChange={(e) => setAutoBody(e.target.value)} placeholder="What every drip email says. {{first_name}} and {{company}} are personalised per lead." />
+                    <TokenHint />
                   </div>
                   <div className="space-y-2">
                     <Label>Batch size per run</Label>
@@ -562,6 +611,14 @@ export default function CampaignsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <LeadOutreachDialog
+        lead={outreachLead}
+        templates={templates}
+        open={outreachOpen}
+        onOpenChange={setOutreachOpen}
+        onSent={() => { loadLeads(leadStatus); loadLeadCounts() }}
+      />
     </div>
   )
 }

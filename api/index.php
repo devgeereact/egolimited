@@ -4032,23 +4032,24 @@ switch ("$method $route") {
         $subject = trim($b["subject"] ?? ""); $bodyTxt = trim($b["body"] ?? "");
         $audience = (string)($b["audience"] ?? "subscribers");
         if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
-        // De-duped recipient map: email => name.
+        // De-duped recipient map: email => ["name"=>?, "company"=>?]. Company is the RECIPIENT's
+        // own business (a lead's company) so {{company}}/{{agency_name}} personalise correctly.
         $rows = [];
         if ($audience === "list") {
             foreach ((array)($b["emails"] ?? []) as $e) {
                 $e = strtolower(trim((string)$e));
-                if (filter_var($e, FILTER_VALIDATE_EMAIL)) $rows[$e] = $rows[$e] ?? null;
+                if (filter_var($e, FILTER_VALIDATE_EMAIL)) $rows[$e] = $rows[$e] ?? ["name" => null, "company" => ""];
             }
         } elseif ($audience === "leads") {
             ensure_leads_table($db);
             foreach (db_all($db, "SELECT email,name,company FROM ego_leads WHERE status='approved' AND email IS NOT NULL") as $r)
-                $rows[strtolower($r["email"])] = $r["name"] ?: $r["company"];
+                $rows[strtolower($r["email"])] = ["name" => $r["name"] ?: $r["company"], "company" => (string)($r["company"] ?? "")];
         } else {
             if ($audience === "subscribers" || $audience === "all")
-                foreach (db_all($db, "SELECT email,name FROM ego_subscribers WHERE subscribed=1") as $r) $rows[strtolower($r["email"])] = $r["name"];
+                foreach (db_all($db, "SELECT email,name FROM ego_subscribers WHERE subscribed=1") as $r) $rows[strtolower($r["email"])] = ["name" => $r["name"], "company" => ""];
             if ($audience === "customers" || $audience === "all")
                 foreach (db_all($db, "SELECT email,name FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL") as $r)
-                    $rows[strtolower($r["email"])] = $rows[strtolower($r["email"])] ?? $r["name"];
+                    $rows[strtolower($r["email"])] = $rows[strtolower($r["email"])] ?? ["name" => $r["name"], "company" => ""];
         }
         // Honour opt-outs across EVERY audience (suppression list) — UK PECR.
         foreach (db_all($db, "SELECT email FROM ego_subscribers WHERE subscribed=0") as $r) unset($rows[strtolower($r["email"])]);
@@ -4064,13 +4065,14 @@ switch ("$method $route") {
         $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
         $unsubBase = "$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe";
         $sent = 0; $failed = 0;
-        foreach ($rows as $email => $name) {
+        foreach ($rows as $email => $rc) {
+            $name = $rc["name"]; $company = (string)($rc["company"] ?? "");
             // Throttle so a big send doesn't saturate the SMTP relay (~8/sec).
             if ($sent + $failed > 0) usleep(120000);
-            // Personalise per recipient: their first name (and details) filled into the tokens,
+            // Personalise per recipient: their first name + THEIR company filled into the tokens,
             // so one bulk send addresses everyone individually rather than a generic blast.
-            $first = $name ? (preg_split('/\s+/', trim($name))[0] ?? "") : "";
-            $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => (string)$name, "sender_name" => $coNamePlain, "company_name" => $coNamePlain];
+            $first = $name ? (preg_split('/\s+/', trim((string)$name))[0] ?? "") : "";
+            $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => (string)$name, "sender_name" => $coNamePlain, "company_name" => $company];
             $subjR = ego_merge_tokens($subject, $ctx);
             $bodyR = ego_merge_tokens($bodyTxt, $ctx);
             // Per-recipient unsubscribe link so every marketing email carries a real opt-out.
@@ -4164,6 +4166,74 @@ switch ("$method $route") {
         $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
         db_exec($db, "DELETE FROM ego_leads WHERE id=?", "i", $id);
         send(["ok" => true]);
+    }
+
+    // AI-draft a personalised outreach email for ONE lead, using its company/website/note.
+    // The draft keeps {{first_name}} + {{company}} placeholders so they fill correctly on send.
+    case "POST /leads/draft": {
+        require_role($db, "admin");
+        ensure_leads_table($db);
+        $b = body();
+        $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        $lead = db_one($db, "SELECT * FROM ego_leads WHERE id=?", "i", $id);
+        if (!$lead) fail("Lead not found", 404);
+        $us = (db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED";
+        $angle = trim((string)($b["brief"] ?? ""));
+        $ctxLines = array_filter([
+            $lead["company"] ? "Their business: {$lead['company']}" : "",
+            $lead["name"] ? "Contact name: {$lead['name']}" : "",
+            $lead["website"] ? "Website: {$lead['website']}" : "",
+            $lead["note"] ? "Why they may be a fit: {$lead['note']}" : "",
+            $lead["search_query"] ? "Found searching: {$lead['search_query']}" : "",
+        ]);
+        $task = "Write a short, warm B2B cold-outreach email from $us (a UK general-maintenance company covering homes and commercial across South-East London) to this prospect.\n"
+            . implode("\n", $ctxLines) . "\n"
+            . ($angle !== "" ? "Angle to take: $angle\n" : "")
+            . "IMPORTANT: address the reader as {{first_name}} and refer to their business as {{company}} — use those EXACT placeholders (they are filled per recipient on send). "
+            . "Reference something specific from the notes if you can. Three short paragraphs, no fluff, one clear ask (a quick call or reply). Sign off as 'The $us team'. "
+            . "Return EXACTLY as:\nSubject: <subject line>\n\n<email body>";
+        try { $text = ai_draft($db, $task, ego_brand_voice($db)); }
+        catch (Throwable $e) { client_error($e, "Draft failed"); }
+        $subject = ""; $bodyTxt = trim($text);
+        if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
+        send(["subject" => $subject, "body" => $bodyTxt]);
+    }
+
+    // Send an individual email to ONE lead — merges {{first_name}}/{{company}} from the lead,
+    // adds the PECR unsubscribe footer, records it in Sent, marks the lead emailed.
+    case "POST /leads/email": {
+        $actor = require_role($db, "admin");
+        ensure_leads_table($db);
+        rate_write($db, "w:leademail:" . $actor["id"], 60, 60);
+        $b = body();
+        $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
+        $subject = trim((string)($b["subject"] ?? "")); $bodyTxt = trim((string)($b["body"] ?? ""));
+        if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
+        $lead = db_one($db, "SELECT * FROM ego_leads WHERE id=?", "i", $id);
+        if (!$lead) fail("Lead not found", 404);
+        $email = strtolower(trim((string)($lead["email"] ?? "")));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail("This lead has no valid email address");
+        if (db_one($db, "SELECT 1 FROM ego_subscribers WHERE email=? AND subscribed=0", "s", $email)) fail("This address has opted out — can't email it");
+        require_once __DIR__ . "/lib/mailer.php";
+        $coNamePlain = (db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED";
+        $coName = htmlspecialchars($coNamePlain);
+        $name = trim((string)($lead["name"] ?? "")) ?: trim((string)($lead["company"] ?? ""));
+        $first = $name !== "" ? (preg_split('/\s+/', $name)[0] ?? "") : "";
+        $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => $name, "sender_name" => $coNamePlain,
+                "company_name" => trim((string)($lead["company"] ?? "")), "website" => trim((string)($lead["website"] ?? ""))];
+        $subjR = ego_merge_tokens($subject, $ctx);
+        $bodyR = ego_merge_tokens($bodyTxt, $ctx);
+        $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
+        $unsub = htmlspecialchars("$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe?e=" . rawurlencode($email) . "&t=" . ego_unsub_token($email));
+        $foot = "<p style='margin:18px 0 0;color:#9ca3af;font-size:12px'>You're receiving this from $coName. <a href='$unsub' style='color:#9ca3af'>Unsubscribe</a>.</p>";
+        $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyR)) . $foot);
+        try {
+            ego_send_mail($db, $email, $name ?: null, $subjR, $html);
+            db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subjR, $bodyR);
+            db_exec($db, "UPDATE ego_leads SET status='emailed', emailed_at=NOW() WHERE id=?", "i", $id);
+            log_activity($db, null, (int)$actor["id"], "lead_emailed", ["id" => $id, "email" => $email]);
+            send(["ok" => true, "to" => $email]);
+        } catch (Throwable $e) { client_error($e, "Send failed"); }
     }
 
     /* ===================== M17: CAMPAIGN AUTOMATION (drip config for campaign_cron.php) ===================== */

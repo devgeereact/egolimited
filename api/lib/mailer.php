@@ -36,18 +36,33 @@ function ego_email_shell(mysqli $db, string $heading, string $innerHtml): string
  * Fill personalisation tokens per recipient so a bulk send addresses each person by name
  * with their own details. Known tokens use real data; common business tokens get a sensible
  * generic fallback; anything unfilled is stripped so a raw {{token}} never ships.
- * $ctx keys: first_name, name, sender_name, company_name.
+ *
+ * $ctx keys:
+ *   first_name / name  — the RECIPIENT's first + full name
+ *   company_name       — the RECIPIENT's business (a lead's company, NOT ours)
+ *   website            — the recipient's website (leads)
+ *   sender_name        — OUR company (for sign-offs / "from")
+ * So {{first_name}}, {{company}}, {{agency_name}}, {{business_name}} all resolve to the
+ * PERSON we're writing to; {{sender_name}}/{{sender_company}} resolve to us.
  */
 function ego_merge_tokens(string $text, array $ctx): string {
+    $recipCo = trim((string) ($ctx["company_name"] ?? ""));
     $known = [
         "first_name" => $ctx["first_name"] ?? "", "name" => $ctx["first_name"] ?? "",
         "firstname" => $ctx["first_name"] ?? "", "first name" => $ctx["first_name"] ?? "",
         "full_name" => ($ctx["name"] ?? "") ?: ($ctx["first_name"] ?? ""),
-        "sender_name" => $ctx["sender_name"] ?? "", "company" => $ctx["company_name"] ?? "",
-        "company_name" => $ctx["company_name"] ?? "",
+        // Recipient's business — every "their company" alias points here.
+        "company" => $recipCo, "company_name" => $recipCo,
+        "agency_name" => $recipCo, "business_name" => $recipCo,
+        "organisation" => $recipCo, "organization" => $recipCo,
+        "website" => $ctx["website"] ?? "",
+        // Us — the sender.
+        "sender_name" => $ctx["sender_name"] ?? "", "sender_company" => $ctx["sender_name"] ?? "",
+        "from_company" => $ctx["sender_name"] ?? "", "our_company" => $ctx["sender_name"] ?? "",
     ];
     $fallback = [
         "agency_name" => "your business", "business_name" => "your business",
+        "company" => "your business", "company_name" => "your business", "organisation" => "your business", "organization" => "your business",
         "property_or_premises" => "your property", "property_or_portfolio" => "your property",
         "property_address" => "your property", "job_summary" => "your job",
         "last_job_summary" => "your last job", "month" => date("F"), "season" => "the season",

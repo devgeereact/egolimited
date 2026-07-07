@@ -80,7 +80,10 @@ foreach ($leads as $lead) {
     if ($sent + $failed > 0) usleep(120000); // ~8/sec — don't saturate the SMTP relay
     $name = trim((string)($lead["name"] ?? "")) ?: trim((string)($lead["company"] ?? ""));
     $first = $name !== "" ? (preg_split('/\s+/', $name)[0] ?? "") : "";
-    $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => $name, "sender_name" => $coNamePlain, "company_name" => $coNamePlain];
+    // company_name = the LEAD's business (personalises {{company}}/{{agency_name}}); sender = us.
+    $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => $name,
+            "sender_name" => $coNamePlain, "company_name" => trim((string)($lead["company"] ?? "")),
+            "website" => trim((string)($lead["website"] ?? ""))];
     $subjR = ego_merge_tokens($subject, $ctx);
     $bodyR = ego_merge_tokens($bodyTxt, $ctx);
     $link = htmlspecialchars($unsubBase . "?e=" . rawurlencode($email) . "&t=" . ego_unsub_token($email));
