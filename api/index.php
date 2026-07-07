@@ -461,6 +461,26 @@ function ensure_campaign_automation(mysqli $db): void {
         updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, updated_by INT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     $db->query("INSERT IGNORE INTO ego_campaign_automation (id, enabled) VALUES (1, 0)");
+    // Multi-step drip: an ordered sequence of touches, each with a delay after the previous.
+    $db->query("CREATE TABLE IF NOT EXISTS ego_campaign_steps (
+        id INT AUTO_INCREMENT PRIMARY KEY, step_no INT NOT NULL, delay_days INT NOT NULL DEFAULT 0,
+        subject VARCHAR(255) NULL, body MEDIUMTEXT NULL, image_url VARCHAR(500) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_step_no (step_no)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // Per-lead send log — one row per (lead, step) so we never re-send a touch.
+    $db->query("CREATE TABLE IF NOT EXISTS ego_campaign_sends (
+        lead_id INT NOT NULL, step_no INT NOT NULL, sent_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_lead_step (lead_id, step_no), INDEX idx_send_lead (lead_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    // One-time migration: fold a legacy single automation message into step 1 so existing
+    // setups keep dripping without reconfiguration.
+    if ((int) ($db->query("SELECT COUNT(*) c FROM ego_campaign_steps")->fetch_assoc()["c"] ?? 0) === 0) {
+        $a = db_one($db, "SELECT subject,body,image_url FROM ego_campaign_automation WHERE id=1");
+        if ($a && trim((string) ($a["subject"] ?? "")) !== "" && trim((string) ($a["body"] ?? "")) !== "") {
+            db_exec($db, "INSERT INTO ego_campaign_steps (step_no,delay_days,subject,body,image_url) VALUES (1,0,?,?,?)",
+                "sss", $a["subject"], $a["body"], $a["image_url"]);
+        }
+    }
 }
 
 /** Mailbox flags (archive/flag) — added lazily so no manual migration on deploy. Idempotent. */
@@ -4168,12 +4188,14 @@ switch ("$method $route") {
         require_role($db, "admin");
         ensure_leads_table($db);
         $status = trim((string)($_GET["status"] ?? ""));
+        // Only surface leads we can actually email — a prospect with no public address is dead weight.
+        $emailOnly = "email IS NOT NULL AND email <> ''";
         $rows = $status !== ""
-            ? db_all($db, "SELECT * FROM ego_leads WHERE status=? ORDER BY id DESC LIMIT 500", "s", $status)
-            : db_all($db, "SELECT * FROM ego_leads ORDER BY id DESC LIMIT 500");
+            ? db_all($db, "SELECT * FROM ego_leads WHERE status=? AND $emailOnly ORDER BY id DESC LIMIT 500", "s", $status)
+            : db_all($db, "SELECT * FROM ego_leads WHERE $emailOnly ORDER BY id DESC LIMIT 500");
         foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["found_by"] = $r["found_by"] !== null ? (int)$r["found_by"] : null; }
         $counts = [];
-        foreach (db_all($db, "SELECT status, COUNT(*) c FROM ego_leads GROUP BY status") as $r) $counts[$r["status"]] = (int)$r["c"];
+        foreach (db_all($db, "SELECT status, COUNT(*) c FROM ego_leads WHERE $emailOnly GROUP BY status") as $r) $counts[$r["status"]] = (int)$r["c"];
         send(["leads" => $rows, "counts" => $counts]);
     }
     case "POST /leads/approve":
@@ -4192,9 +4214,17 @@ switch ("$method $route") {
     case "POST /leads/delete": {
         require_role($db, "admin");
         ensure_leads_table($db);
-        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
-        db_exec($db, "DELETE FROM ego_leads WHERE id=?", "i", $id);
-        send(["ok" => true]);
+        ensure_campaign_automation($db); // ego_campaign_sends must exist for the cleanup below
+        $b = body();
+        // Accept a single id or a multi-select ids[] array.
+        $ids = array_values(array_filter(array_map("intval", (array)($b["ids"] ?? [])), fn($n) => $n > 0));
+        if (!$ids && (int)($b["id"] ?? 0) > 0) $ids = [(int)$b["id"]];
+        if (!$ids) fail("Select at least one lead");
+        $place = implode(",", array_fill(0, count($ids), "?"));
+        db_exec($db, "DELETE FROM ego_leads WHERE id IN ($place)", str_repeat("i", count($ids)), ...$ids);
+        // Clean up any sequence progress rows for the removed leads.
+        db_exec($db, "DELETE FROM ego_campaign_sends WHERE lead_id IN ($place)", str_repeat("i", count($ids)), ...$ids);
+        send(["ok" => true, "count" => count($ids)]);
     }
 
     // AI-draft a personalised outreach email for ONE lead, using its company/website/note.
@@ -4270,23 +4300,60 @@ switch ("$method $route") {
         require_role($db, "admin");
         ensure_campaign_automation($db);
         ensure_leads_table($db);
-        $cfg2 = db_one($db, "SELECT * FROM ego_campaign_automation WHERE id=1");
+        $cfg2 = db_one($db, "SELECT enabled,batch_size FROM ego_campaign_automation WHERE id=1");
+        $steps = array_map(fn($s) => [
+            "id" => (int)$s["id"], "step_no" => (int)$s["step_no"], "delay_days" => (int)$s["delay_days"],
+            "subject" => $s["subject"], "body" => $s["body"], "image_url" => $s["image_url"],
+        ], db_all($db, "SELECT * FROM ego_campaign_steps ORDER BY step_no"));
         $ready = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_leads WHERE status='approved'")["c"] ?? 0);
-        send(["automation" => $cfg2, "approved_leads" => $ready]);
+        $done = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_leads WHERE status='emailed'")["c"] ?? 0);
+        send(["automation" => $cfg2, "steps" => $steps, "approved_leads" => $ready, "completed_leads" => $done]);
     }
+    // Global on/off + batch size (the per-touch content lives in /campaigns/steps).
     case "POST /campaigns/automation": {
         $actor = require_role($db, "admin");
         ensure_campaign_automation($db);
         $b = body();
         $enabled = !empty($b["enabled"]) ? 1 : 0;
+        $batch = max(1, min(100, (int)($b["batch_size"] ?? 25)));
+        if ($enabled) {
+            $n = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_campaign_steps WHERE subject<>'' AND body<>''")["c"] ?? 0);
+            if ($n === 0) fail("Add at least one step with a subject and message before turning the sequence on");
+        }
+        db_exec($db, "UPDATE ego_campaign_automation SET enabled=?,batch_size=?,updated_by=? WHERE id=1",
+            "iii", $enabled, $batch, (int)$actor["id"]);
+        log_activity($db, null, (int)$actor["id"], "campaign_automation_saved", ["enabled" => $enabled, "batch_size" => $batch]);
+        send(["ok" => true]);
+    }
+    // Create or update one sequence step.
+    case "POST /campaigns/steps": {
+        $actor = require_role($db, "admin");
+        ensure_campaign_automation($db);
+        $b = body();
         $subject = trim((string)($b["subject"] ?? ""));
         $bodyTxt = trim((string)($b["body"] ?? ""));
-        $imageUrl = trim((string)($b["image_url"] ?? "")) ?: null;
-        $batch = max(1, min(100, (int)($b["batch_size"] ?? 25)));
-        if ($enabled && ($subject === "" || $bodyTxt === "")) fail("Write a subject and message before turning automation on");
-        db_exec($db, "UPDATE ego_campaign_automation SET enabled=?,subject=?,body=?,image_url=?,batch_size=?,updated_by=? WHERE id=1",
-            "isssii", $enabled, $subject, $bodyTxt, $imageUrl, $batch, (int)$actor["id"]);
-        log_activity($db, null, (int)$actor["id"], "campaign_automation_saved", ["enabled" => $enabled, "batch_size" => $batch]);
+        if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
+        $delay = max(0, min(365, (int)($b["delay_days"] ?? 0)));
+        $img = trim((string)($b["image_url"] ?? "")) ?: null;
+        $id = (int)($b["id"] ?? 0);
+        if ($id) {
+            db_exec($db, "UPDATE ego_campaign_steps SET delay_days=?,subject=?,body=?,image_url=? WHERE id=?",
+                "isssi", $delay, $subject, $bodyTxt, $img, $id);
+        } else {
+            $next = (int)(db_one($db, "SELECT COALESCE(MAX(step_no),0)+1 n FROM ego_campaign_steps")["n"] ?? 1);
+            db_exec($db, "INSERT INTO ego_campaign_steps (step_no,delay_days,subject,body,image_url) VALUES (?,?,?,?,?)",
+                "iisss", $next, $delay, $subject, $bodyTxt, $img);
+            $id = (int)$db->insert_id;
+        }
+        log_activity($db, null, (int)$actor["id"], "campaign_step_saved", ["id" => $id]);
+        send(["id" => $id], 201);
+    }
+    case "POST /campaigns/steps/delete": {
+        $actor = require_role($db, "admin");
+        ensure_campaign_automation($db);
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "DELETE FROM ego_campaign_steps WHERE id=?", "i", $id);
+        log_activity($db, null, (int)$actor["id"], "campaign_step_deleted", ["id" => $id]);
         send(["ok" => true]);
     }
 

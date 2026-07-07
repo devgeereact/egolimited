@@ -16,6 +16,8 @@ import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
 import LeadOutreachDialog from "@/components/ego/LeadOutreachDialog"
 import { TokenHint } from "@/components/ego/TokenHint"
+import { TemplateSelect } from "@/components/ego/TemplateSelect"
+import SequenceStep from "@/components/ego/SequenceStep"
 
 interface Subscriber {
   id: number
@@ -49,14 +51,9 @@ interface Lead {
 }
 interface LeadsResponse { leads: Lead[]; counts: Record<string, number> }
 
-interface AutomationConfig {
-  enabled: number
-  subject: string | null
-  body: string | null
-  image_url: string | null
-  batch_size: number
-}
-interface AutomationResponse { automation: AutomationConfig | null; approved_leads: number }
+interface AutomationConfig { enabled: number; batch_size: number }
+interface Step { id: number; step_no: number; delay_days: number; subject: string | null; body: string | null }
+interface AutomationResponse { automation: AutomationConfig | null; steps: Step[]; approved_leads: number; completed_leads: number }
 
 export default function CampaignsPage() {
   const [data, setData] = useState<SubsResponse | null>(null)
@@ -92,16 +89,14 @@ export default function CampaignsPage() {
   const [outreachLead, setOutreachLead] = useState<Lead | null>(null)
   const [outreachOpen, setOutreachOpen] = useState(false)
 
-  // automation (M17: unattended drip via campaign_cron.php)
+  // automation (M17: multi-step drip sequence via campaign_cron.php)
   const [auto, setAuto] = useState<AutomationResponse | null>(null)
   const [autoLoading, setAutoLoading] = useState(false)
   const [autoEnabled, setAutoEnabled] = useState(false)
-  const [autoSubject, setAutoSubject] = useState("")
-  const [autoBody, setAutoBody] = useState("")
+  const [steps, setSteps] = useState<Step[]>([])
+  const [addingStep, setAddingStep] = useState(false)
   const [autoBatch, setAutoBatch] = useState(25)
   const [autoSaving, setAutoSaving] = useState(false)
-  const [autoBrief, setAutoBrief] = useState("")
-  const [autoDrafting, setAutoDrafting] = useState(false)
 
   function load() {
     return api<SubsResponse>("/subscribers")
@@ -247,20 +242,28 @@ export default function CampaignsPage() {
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't update") }
   }
 
+  async function bulkDelete() {
+    if (!selected.size) { toast.error("Select at least one lead"); return }
+    if (!(await confirmDialog({ title: `Delete ${selected.size} lead${selected.size === 1 ? "" : "s"}?`, body: "Removes them and any sequence progress.", confirmText: "Delete", danger: true }))) return
+    try {
+      const r = await api<{ count: number }>("/leads/delete", { method: "POST", body: { ids: Array.from(selected) } })
+      toast.success(`Deleted ${r.count}`)
+      setSelected(new Set()); loadLeads(leadStatus)
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete") }
+  }
   async function deleteLead(id: number) {
     try { await api("/leads/delete", { method: "POST", body: { id } }); loadLeads(leadStatus) }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't remove") }
   }
 
-  // ---- Automation (M17) ----
+  // ---- Automation (M17): multi-step sequence ----
   function loadAutomation() {
     setAutoLoading(true)
     api<AutomationResponse>("/campaigns/automation")
       .then((r) => {
         setAuto(r)
         setAutoEnabled(!!r.automation?.enabled)
-        setAutoSubject(r.automation?.subject ?? "")
-        setAutoBody(r.automation?.body ?? "")
+        setSteps(r.steps ?? [])
         setAutoBatch(r.automation?.batch_size ?? 25)
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load automation"))
@@ -268,37 +271,19 @@ export default function CampaignsPage() {
   }
   useEffect(() => { loadAutomation() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
 
+  function reloadSteps() {
+    setAddingStep(false)
+    api<AutomationResponse>("/campaigns/automation").then((r) => { setAuto(r); setSteps(r.steps ?? []) }).catch(() => {})
+  }
   async function saveAutomation(nextEnabled: boolean) {
-    if (nextEnabled && (!autoSubject.trim() || !autoBody.trim())) {
-      toast.error("Write a subject and message before turning automation on")
-      return
-    }
+    if (nextEnabled && steps.length === 0) { toast.error("Add at least one step before turning the sequence on"); return }
     setAutoSaving(true)
     try {
-      await api("/campaigns/automation", {
-        method: "POST",
-        body: { enabled: nextEnabled, subject: autoSubject, body: autoBody, batch_size: autoBatch },
-      })
+      await api("/campaigns/automation", { method: "POST", body: { enabled: nextEnabled, batch_size: autoBatch } })
       setAutoEnabled(nextEnabled)
-      toast.success(nextEnabled ? "Automation on — the cron job will drip approved leads" : "Automation off")
+      toast.success(nextEnabled ? "Sequence on — the cron drips approved leads (8am–6pm, weekdays)" : "Sequence off")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save") }
     finally { setAutoSaving(false) }
-  }
-  function useAutoPreset(id: string) {
-    const t = templates.find((x) => String(x.id) === id)
-    if (!t) return
-    setAutoSubject(t.subject ?? ""); setAutoBody(t.body ?? "")
-    toast.success(`Loaded "${t.name}" — {{first_name}} / {{company}} fill per lead`)
-  }
-  async function draftAutomation() {
-    if (!autoBrief.trim()) { toast.error("Tell the AI what the drip should say"); return }
-    setAutoDrafting(true)
-    try {
-      const r = await api<{ subject: string; body: string }>("/campaigns/draft", { method: "POST", body: { brief: `${autoBrief}. Address the reader as {{first_name}} and their business as {{company}} using those exact placeholders.`, kind: "marketing" } })
-      if (r.subject) setAutoSubject(r.subject)
-      setAutoBody(r.body || "")
-      toast.success("Draft ready — review before turning automation on")
-    } catch (e) { toast.error(e instanceof Error ? e.message : "AI draft failed") } finally { setAutoDrafting(false) }
   }
 
   const audiences: { id: Audience; label: string; icon: typeof Users; count: number }[] = [
@@ -364,12 +349,7 @@ export default function CampaignsPage() {
                 {templates.length > 0 && (
                   <div className="space-y-2">
                     <Label>Start from a template</Label>
-                    <Select onValueChange={useTemplate}>
-                      <SelectTrigger><SelectValue placeholder="Pick a saved brand template…" /></SelectTrigger>
-                      <SelectContent>
-                        {templates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <TemplateSelect templates={templates} onPick={(t) => useTemplate(String(t.id))} placeholder="Pick a saved brand template…" />
                   </div>
                 )}
 
@@ -482,10 +462,11 @@ export default function CampaignsPage() {
             <Card className="lg:col-span-3">
               <CardHeader className="flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-base">Prospects</CardTitle>
-                {selected.size > 0 && leadStatus === "found" && (
-                  <div className="flex gap-2">
-                    <Button size="sm" onClick={() => bulkAction("approve")}><Check className="size-4" /> Approve {selected.size}</Button>
-                    <Button size="sm" variant="outline" onClick={() => bulkAction("reject")}>Reject {selected.size}</Button>
+                {selected.size > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {leadStatus === "found" && <Button size="sm" onClick={() => bulkAction("approve")}><Check className="size-4" /> Approve {selected.size}</Button>}
+                    {leadStatus === "found" && <Button size="sm" variant="outline" onClick={() => bulkAction("reject")}>Reject {selected.size}</Button>}
+                    <Button size="sm" variant="outline" className="text-destructive" onClick={bulkDelete}><Trash2 className="size-4" /> Delete {selected.size}</Button>
                   </div>
                 )}
               </CardHeader>
@@ -516,14 +497,13 @@ export default function CampaignsPage() {
                   <ul className="max-h-[32rem] divide-y divide-border overflow-y-auto rounded-lg border">
                     {leads.map((l) => (
                       <li key={l.id} className="flex items-start gap-3 px-3 py-2.5 text-sm">
-                        {leadStatus === "found" && (
-                          <input
-                            type="checkbox"
-                            className="mt-1 size-4 shrink-0"
-                            checked={selected.has(l.id)}
-                            onChange={() => toggleLead(l.id)}
-                          />
-                        )}
+                        <input
+                          type="checkbox"
+                          className="mt-1 size-4 shrink-0"
+                          checked={selected.has(l.id)}
+                          onChange={() => toggleLead(l.id)}
+                          aria-label={`Select ${l.company || l.name || l.email}`}
+                        />
                         <div className="min-w-0 flex-1">
                           <p className="truncate font-medium">{l.company || l.name || l.email}</p>
                           <p className="truncate text-xs text-muted-foreground">{l.email || "no public email found"}{l.website ? ` · ${l.website}` : ""}</p>
@@ -548,67 +528,64 @@ export default function CampaignsPage() {
 
         {/* ===================== AUTOMATION ===================== */}
         <TabsContent value="automation">
-          <Card className="max-w-2xl">
-            <CardHeader><CardTitle className="text-base flex items-center gap-1.5"><Zap className="size-4 text-accent" /> Auto-drip to approved leads</CardTitle></CardHeader>
-            <CardContent className="space-y-5">
-              <p className="text-sm text-muted-foreground">
-                When on, the scheduled job (<code>campaign_cron.php</code>, runs every 1-2h) sends this message to a small batch of
-                approved leads that haven't been emailed yet — a fresh segment each run, never a repeat send to the same person.
-              </p>
-              {autoLoading ? (
-                <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div>
-                      <p className="text-sm font-medium">Automation</p>
-                      <p className="text-xs text-muted-foreground">{auto?.approved_leads ?? 0} approved lead{(auto?.approved_leads ?? 0) === 1 ? "" : "s"} waiting to be drip-sent</p>
-                    </div>
-                    <Switch checked={autoEnabled} disabled={autoSaving} onCheckedChange={(v) => saveAutomation(v)} />
-                  </div>
-
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">Start from a preset sequence</Label>
-                      <Select onValueChange={useAutoPreset}>
-                        <SelectTrigger><SelectValue placeholder="Pick a sequence…" /></SelectTrigger>
-                        <SelectContent>
-                          {templates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs">…or let AI draft the drip</Label>
-                      <div className="flex gap-2">
-                        <Input value={autoBrief} onChange={(e) => setAutoBrief(e.target.value)} placeholder="e.g. intro to letting agents" className="flex-1" />
-                        <Button type="button" variant="outline" onClick={draftAutomation} disabled={autoDrafting}>
-                          {autoDrafting ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
-                        </Button>
+          <div className="max-w-2xl space-y-5">
+            <Card>
+              <CardHeader><CardTitle className="text-base flex items-center gap-1.5"><Zap className="size-4 text-accent" /> Drip sequence to approved leads</CardTitle></CardHeader>
+              <CardContent className="space-y-5">
+                <p className="text-sm text-muted-foreground">
+                  A multi-step sequence: each approved lead gets touch 1, then touch 2 after its delay, and so on — one email at a time,
+                  never a repeat. Personalised per lead ({"{{first_name}}"} / {"{{company}}"}). Runs <strong>8am–6pm, Mon–Fri only</strong> (skips weekends &amp; UK bank holidays).
+                </p>
+                {autoLoading ? (
+                  <div className="flex justify-center py-8 text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between rounded-lg border p-3">
+                      <div>
+                        <p className="text-sm font-medium">Sequence {autoEnabled ? "on" : "off"}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {auto?.approved_leads ?? 0} in sequence · {auto?.completed_leads ?? 0} completed · {steps.length} step{steps.length === 1 ? "" : "s"}
+                        </p>
                       </div>
+                      <Switch checked={autoEnabled} disabled={autoSaving || steps.length === 0} onCheckedChange={(v) => saveAutomation(v)} />
                     </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Subject</Label>
-                    <Input value={autoSubject} onChange={(e) => setAutoSubject(e.target.value)} placeholder="Subject line" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Message</Label>
-                    <Textarea rows={8} value={autoBody} onChange={(e) => setAutoBody(e.target.value)} placeholder="What every drip email says. {{first_name}} and {{company}} are personalised per lead." />
-                    <TokenHint />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Batch size per run</Label>
-                    <Input type="number" min={1} max={100} value={autoBatch} onChange={(e) => setAutoBatch(Number(e.target.value) || 25)} className="max-w-[8rem]" />
-                    <p className="text-xs text-muted-foreground">How many approved leads get emailed each time the cron job runs.</p>
-                  </div>
 
-                  <Button onClick={() => saveAutomation(autoEnabled)} disabled={autoSaving} className="w-full sm:w-auto">
-                    {autoSaving ? <Loader2 className="animate-spin" /> : <Check className="size-4" />} Save message
+                    <div className="flex items-end gap-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Emails per run (across all leads)</Label>
+                        <Input type="number" min={1} max={100} value={autoBatch} onChange={(e) => setAutoBatch(Number(e.target.value) || 25)} className="w-24" />
+                      </div>
+                      <Button variant="outline" onClick={() => saveAutomation(autoEnabled)} disabled={autoSaving}>
+                        {autoSaving ? <Loader2 className="size-4 animate-spin" /> : <Check className="size-4" />} Save settings
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {!autoLoading && (
+              <>
+                {steps.map((s, i) => (
+                  <SequenceStep key={s.id} step={s} index={i} templates={templates} onSaved={reloadSteps} onDeleted={reloadSteps} />
+                ))}
+                {addingStep ? (
+                  <SequenceStep
+                    step={{ id: 0, step_no: steps.length + 1, delay_days: steps.length === 0 ? 0 : 3, subject: "", body: "" }}
+                    index={steps.length}
+                    templates={templates}
+                    onSaved={reloadSteps}
+                    onDeleted={reloadSteps}
+                    onCancel={() => setAddingStep(false)}
+                  />
+                ) : (
+                  <Button variant="outline" className="w-full border-dashed" onClick={() => setAddingStep(true)}>
+                    <Plus className="size-4" /> Add {steps.length === 0 ? "first" : "next"} step
                   </Button>
-                </>
-              )}
-            </CardContent>
-          </Card>
+                )}
+              </>
+            )}
+          </div>
         </TabsContent>
       </Tabs>
 

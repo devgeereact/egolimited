@@ -8,8 +8,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { TokenHint } from "@/components/ego/TokenHint"
+import { TemplateSelect } from "@/components/ego/TemplateSelect"
 
 interface Lead {
   id: number
@@ -115,12 +115,7 @@ export default function LeadOutreachDialog({ lead, templates, open, onOpenChange
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label className="text-xs">Start from a preset</Label>
-              <Select onValueChange={usePreset}>
-                <SelectTrigger><SelectValue placeholder="Pick a sequence…" /></SelectTrigger>
-                <SelectContent>
-                  {templates.map((t) => <SelectItem key={t.id} value={String(t.id)}>{t.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <TemplateSelect templates={templates} onPick={(t) => usePreset(String(t.id))} />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">…or let AI draft it</Label>
