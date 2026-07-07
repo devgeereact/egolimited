@@ -610,3 +610,39 @@ ALTER TABLE ego_company_settings ADD COLUMN IF NOT EXISTS companies_house_no VAR
 
 -- Reviews: source so app reviews + imported Google reviews live together (M: reviews hub).
 ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS source VARCHAR(16) NULL;
+
+-- M17: LEAD PROSPECTING + AUTO-DRIP CAMPAIGNS
+-- AI web-search finds candidate businesses; a human APPROVES before anything is queued to
+-- send (never a blind scrape-and-blast — GDPR/PECR). campaign_cron.php then drips approved,
+-- not-yet-emailed leads in small batches on a schedule (cPanel cron, every 1-2h).
+CREATE TABLE IF NOT EXISTS ego_leads (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(190) NULL,
+  company     VARCHAR(190) NULL,
+  email       VARCHAR(190) NULL,
+  website     VARCHAR(255) NULL,
+  source_url  VARCHAR(500) NULL,
+  note        VARCHAR(500) NULL,
+  status      ENUM('found','approved','rejected','emailed') NOT NULL DEFAULT 'found',
+  search_query VARCHAR(255) NULL,
+  found_by    INT NULL,
+  emailed_at  DATETIME NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_lead_email (email),
+  INDEX idx_ego_lead_status (status),
+  CONSTRAINT fk_ego_lead_found_by FOREIGN KEY (found_by) REFERENCES ego_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Single-row config for the unattended drip: what to send + how many per run. Disabled by
+-- default — an office user must explicitly turn it on after reviewing the message.
+CREATE TABLE IF NOT EXISTS ego_campaign_automation (
+  id         INT PRIMARY KEY DEFAULT 1,
+  enabled    TINYINT NOT NULL DEFAULT 0,
+  subject    VARCHAR(255) NULL,
+  body       MEDIUMTEXT NULL,
+  image_url  VARCHAR(500) NULL,
+  batch_size INT NOT NULL DEFAULT 25,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by INT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+INSERT IGNORE INTO ego_campaign_automation (id, enabled) VALUES (1, 0);

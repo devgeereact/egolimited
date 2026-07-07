@@ -319,6 +319,40 @@ function ai_draft(mysqli $db, string $prompt, ?string $system = null, int $maxTo
     throw new RuntimeException("AI is unavailable right now ($lastErr) — try again shortly.");
 }
 
+/** M17: web-search-grounded AI call (OpenRouter's "web" plugin — works on any chat
+ *  model, no separate search API key needed). Used ONLY for lead prospecting; findings
+ *  always land as unreviewed ('found') rows — never auto-approved, never auto-sent. */
+function ai_web_search(mysqli $db, string $prompt, int $maxTokens = 1200): string {
+    $key = integ($db, "openrouter_key");
+    if (!$key) throw new RuntimeException("OpenRouter key not set (Settings → Integrations)");
+    ai_rate_guard($db, "text");
+    if (mb_strlen($prompt) > 4000) $prompt = mb_substr($prompt, 0, 4000);
+    $model = ai_models($db)[0]; // web search needs one deliberate call, not the full backup chain
+    $payload = json_encode([
+        "model" => $model, "max_tokens" => max(1, min($maxTokens, 1500)),
+        "plugins" => [["id" => "web"]],
+        "messages" => [["role" => "user", "content" => $prompt]],
+    ]);
+    $ch = curl_init("https://openrouter.ai/api/v1/chat/completions");
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true, CURLOPT_POST => true, CURLOPT_TIMEOUT => 60,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_HTTPHEADER => [
+            "Authorization: Bearer $key", "Content-Type: application/json",
+            "HTTP-Referer: https://egolimited.com", "X-Title: EGO LIMITED",
+        ],
+    ]);
+    $resp = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    if ($code === 401 || $code === 403) throw new RuntimeException("AI key rejected — check the OpenRouter key in Settings → Integrations.");
+    if ($code !== 200) throw new RuntimeException("Search is unavailable right now ($code) — try again shortly.");
+    $j = json_decode($resp, true);
+    $text = trim((string) ($j["choices"][0]["message"]["content"] ?? ""));
+    if ($text === "") throw new RuntimeException("No results came back — try a different search.");
+    return $text;
+}
+
 /** Generate a marketing image via an OpenRouter image model, save it under
  *  /uploads, and return an absolute URL the email can embed. Best-effort:
  *  needs an image model set in Settings → Integrations. */
@@ -385,6 +419,32 @@ function ensure_subscribers_table(mysqli $db): void {
         created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         UNIQUE KEY uq_sub_email (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** M17: AI-found prospects — always land as status='found' and need a human APPROVE
+ *  before campaign_cron.php (or a manual send) will ever email them. Lazily created. */
+function ensure_leads_table(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_leads (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(190) NULL, company VARCHAR(190) NULL, email VARCHAR(190) NULL,
+        website VARCHAR(255) NULL, source_url VARCHAR(500) NULL, note VARCHAR(500) NULL,
+        status ENUM('found','approved','rejected','emailed') NOT NULL DEFAULT 'found',
+        search_query VARCHAR(255) NULL, found_by INT NULL, emailed_at DATETIME NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_lead_email (email), INDEX idx_ego_lead_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/** M17: single-row config for the unattended lead drip (campaign_cron.php reads this).
+ *  Disabled by default — someone must review the message and flip it on. */
+function ensure_campaign_automation(mysqli $db): void {
+    $db->query("CREATE TABLE IF NOT EXISTS ego_campaign_automation (
+        id INT PRIMARY KEY DEFAULT 1, enabled TINYINT NOT NULL DEFAULT 0,
+        subject VARCHAR(255) NULL, body MEDIUMTEXT NULL, image_url VARCHAR(500) NULL,
+        batch_size INT NOT NULL DEFAULT 25,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, updated_by INT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    $db->query("INSERT IGNORE INTO ego_campaign_automation (id, enabled) VALUES (1, 0)");
 }
 
 /** Mailbox flags (archive/flag) — added lazily so no manual migration on deploy. Idempotent. */
@@ -3793,6 +3853,10 @@ switch ("$method $route") {
                 $e = strtolower(trim((string)$e));
                 if (filter_var($e, FILTER_VALIDATE_EMAIL)) $rows[$e] = $rows[$e] ?? null;
             }
+        } elseif ($audience === "leads") {
+            ensure_leads_table($db);
+            foreach (db_all($db, "SELECT email,name,company FROM ego_leads WHERE status='approved' AND email IS NOT NULL") as $r)
+                $rows[strtolower($r["email"])] = $r["name"] ?: $r["company"];
         } else {
             if ($audience === "subscribers" || $audience === "all")
                 foreach (db_all($db, "SELECT email,name FROM ego_subscribers WHERE subscribed=1") as $r) $rows[strtolower($r["email"])] = $r["name"];
@@ -3832,11 +3896,115 @@ switch ("$method $route") {
                 ego_send_mail($db, $email, $name ?: null, $subjR, $html);
                 $sent++;
                 db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subjR, $bodyR);
+                if ($audience === "leads") db_exec($db, "UPDATE ego_leads SET status='emailed', emailed_at=NOW() WHERE email=?", "s", $email);
             } catch (Throwable $e) { $failed++; }
         }
         log_activity($db, null, (int)$actor["id"], "campaign_sent", ["audience" => $audience, "sent" => $sent, "failed" => $failed]);
         send(["ok" => true, "sent" => $sent, "failed" => $failed, "recipients" => count($rows)]);
     }
+
+    /* ===================== M17: LEAD PROSPECTING (AI web search, human-approved) ===================== */
+    case "POST /leads/search": {
+        $actor = require_role($db, "admin");
+        ensure_leads_table($db);
+        rate_write($db, "w:leadsearch:" . $actor["id"], 6, 3600); // web-search calls cost more — hard cap/hour
+        $b = body();
+        $query = trim($b["query"] ?? ""); if ($query === "") fail("Describe the kind of business to look for");
+        $location = trim($b["location"] ?? "");
+        $co = db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1");
+        $us = $co["company_name"] ?? "EGO LIMITED";
+        $prompt = "You are finding B2B prospects for $us (a UK property maintenance company) to contact about their services. "
+            . "Search: \"$query\"" . ($location !== "" ? " near \"$location\"" : "") . ". "
+            . "Find up to 15 real, currently-operating businesses that match. For each one, ONLY include a contact email if it is "
+            . "PUBLICLY PUBLISHED on that business's own website or official listing — never guess, infer, or construct an email address. "
+            . "Return ONLY a JSON array (no markdown, no commentary), each item shaped exactly as: "
+            . '{"name":"contact or business name","company":"company name","email":"published email or null","website":"https://...","source_url":"page you found this on","note":"one short line on why they fit"}';
+        try { $text = ai_web_search($db, $prompt); }
+        catch (Throwable $e) { client_error($e, "Search failed"); }
+        if (preg_match('/\[.*\]/s', $text, $m)) $text = $m[0];
+        $items = json_decode($text, true);
+        if (!is_array($items)) fail("The search didn't return usable results — try rephrasing", 502);
+        $found = 0; $skipped = 0;
+        foreach (array_slice($items, 0, 20) as $it) {
+            if (!is_array($it)) continue;
+            $email = strtolower(trim((string)($it["email"] ?? "")));
+            $email = ($email === "" || strtolower($email) === "null" || !filter_var($email, FILTER_VALIDATE_EMAIL)) ? null : $email;
+            $name = trim((string)($it["name"] ?? "")) ?: null;
+            $company = trim((string)($it["company"] ?? "")) ?: null;
+            if (!$email && !$company) { $skipped++; continue; } // nothing to act on
+            $website = trim((string)($it["website"] ?? "")) ?: null;
+            $src = trim((string)($it["source_url"] ?? "")) ?: null;
+            $note = trim((string)($it["note"] ?? "")) ?: null;
+            if ($email) {
+                // De-dupe by email; leave existing status alone if it's already been triaged.
+                $exists = db_one($db, "SELECT id FROM ego_leads WHERE email=?", "s", $email);
+                if ($exists) { $skipped++; continue; }
+            }
+            db_exec($db, "INSERT INTO ego_leads (name,company,email,website,source_url,note,search_query,found_by) VALUES (?,?,?,?,?,?,?,?)",
+                "sssssssi", $name, $company, $email, $website, $src, $note, $query, (int)$actor["id"]);
+            $found++;
+        }
+        log_activity($db, null, (int)$actor["id"], "leads_searched", ["query" => $query, "found" => $found, "skipped" => $skipped]);
+        send(["found" => $found, "skipped" => $skipped], 201);
+    }
+    case "GET /leads": {
+        require_role($db, "admin");
+        ensure_leads_table($db);
+        $status = trim((string)($_GET["status"] ?? ""));
+        $rows = $status !== ""
+            ? db_all($db, "SELECT * FROM ego_leads WHERE status=? ORDER BY id DESC LIMIT 500", "s", $status)
+            : db_all($db, "SELECT * FROM ego_leads ORDER BY id DESC LIMIT 500");
+        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["found_by"] = $r["found_by"] !== null ? (int)$r["found_by"] : null; }
+        $counts = [];
+        foreach (db_all($db, "SELECT status, COUNT(*) c FROM ego_leads GROUP BY status") as $r) $counts[$r["status"]] = (int)$r["c"];
+        send(["leads" => $rows, "counts" => $counts]);
+    }
+    case "POST /leads/approve":
+    case "POST /leads/reject": {
+        $actor = require_role($db, "admin");
+        ensure_leads_table($db);
+        $ids = array_values(array_filter(array_map("intval", (array)(body()["ids"] ?? [])), fn($n) => $n > 0));
+        if (!$ids) fail("Select at least one lead");
+        $newStatus = str_ends_with($route, "approve") ? "approved" : "rejected";
+        $place = implode(",", array_fill(0, count($ids), "?"));
+        db_exec($db, "UPDATE ego_leads SET status=? WHERE id IN ($place) AND status='found'",
+            "s" . str_repeat("i", count($ids)), $newStatus, ...$ids);
+        log_activity($db, null, (int)$actor["id"], "leads_$newStatus", ["ids" => $ids]);
+        send(["ok" => true, "count" => count($ids)]);
+    }
+    case "POST /leads/delete": {
+        require_role($db, "admin");
+        ensure_leads_table($db);
+        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
+        db_exec($db, "DELETE FROM ego_leads WHERE id=?", "i", $id);
+        send(["ok" => true]);
+    }
+
+    /* ===================== M17: CAMPAIGN AUTOMATION (drip config for campaign_cron.php) ===================== */
+    case "GET /campaigns/automation": {
+        require_role($db, "admin");
+        ensure_campaign_automation($db);
+        ensure_leads_table($db);
+        $cfg2 = db_one($db, "SELECT * FROM ego_campaign_automation WHERE id=1");
+        $ready = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_leads WHERE status='approved'")["c"] ?? 0);
+        send(["automation" => $cfg2, "approved_leads" => $ready]);
+    }
+    case "POST /campaigns/automation": {
+        $actor = require_role($db, "admin");
+        ensure_campaign_automation($db);
+        $b = body();
+        $enabled = !empty($b["enabled"]) ? 1 : 0;
+        $subject = trim((string)($b["subject"] ?? ""));
+        $bodyTxt = trim((string)($b["body"] ?? ""));
+        $imageUrl = trim((string)($b["image_url"] ?? "")) ?: null;
+        $batch = max(1, min(100, (int)($b["batch_size"] ?? 25)));
+        if ($enabled && ($subject === "" || $bodyTxt === "")) fail("Write a subject and message before turning automation on");
+        db_exec($db, "UPDATE ego_campaign_automation SET enabled=?,subject=?,body=?,image_url=?,batch_size=?,updated_by=? WHERE id=1",
+            "isssii", $enabled, $subject, $bodyTxt, $imageUrl, $batch, (int)$actor["id"]);
+        log_activity($db, null, (int)$actor["id"], "campaign_automation_saved", ["enabled" => $enabled, "batch_size" => $batch]);
+        send(["ok" => true]);
+    }
+
     case "POST /notes": {
         $actor = require_role($db, "admin");
         $b = body();
