@@ -10,9 +10,14 @@ import { router } from "@/routes"
 import "@/index.css"
 
 // Register the engineer-PWA service worker (prod only; dev path 404s harmlessly).
+// The ?v= query is part of the registration URL — bump it whenever sw.js's logic
+// changes so this deploy is fetched as a URL neither the browser nor Cloudflare's
+// edge has ever cached, guaranteeing every client picks up the fix immediately
+// instead of waiting out whatever cache TTL was in effect (root cause of the
+// 2026-07-08 white-screen: sw.js sat at Cloudflare's edge for ~9 days unrevalidated).
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {})
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js?v=2`).catch(() => {})
   })
 }
 
