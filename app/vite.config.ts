@@ -15,19 +15,12 @@ export default defineConfig({
   server: { port: 5051, strictPort: true },
   preview: { port: 5051, strictPort: true },
   build: {
+    // A hand-rolled manualChunks() grouping (react/router/radix/charts into separate
+    // vendor chunks) previously shipped here and broke chunk load ordering — it threw
+    // "Cannot access 'T' before initialization" in vendor-charts at module-eval time,
+    // before React ever rendered, causing a site-wide white screen (2026-07-08). Route
+    // code-splitting still happens via React.lazy() per page; leave vendor chunking to
+    // Rollup's automatic (and correctly ordered) algorithm.
     chunkSizeWarningLimit: 900,
-    rollupOptions: {
-      output: {
-        // Split big, stable vendors into their own long-cached chunks so the app
-        // shell stays small and a page change doesn't re-download React/Radix.
-        manualChunks(id) {
-          if (!id.includes("node_modules")) return
-          if (id.includes("react-router") || id.includes("/@remix-run/")) return "vendor-router"
-          if (id.includes("/react-dom/") || id.includes("/react/") || id.includes("/scheduler/")) return "vendor-react"
-          if (id.includes("@radix-ui")) return "vendor-radix"
-          if (id.includes("recharts") || id.includes("/d3-") || id.includes("victory") || id.includes("apexcharts")) return "vendor-charts"
-        },
-      },
-    },
   },
 })
