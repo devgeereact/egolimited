@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   Activity, BadgePoundSterling, CalendarClock, Camera, ChevronLeft, ChevronRight, FileText,
   Loader2, Lock, Mail, MessageSquare, PauseCircle, Plus, Search, Star, StickyNote, type LucideIcon,
 } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { STATUS_LABEL, type JobStatus } from "@/lib/jobStatus"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -58,26 +58,29 @@ function describe(action: string, detail: string | null): string {
 }
 
 export default function ActivityPage({ embedded = false }: { embedded?: boolean } = {}) {
-  const [data, setData] = useState<Resp | null>(null)
-  const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
   const [q, setQ] = useState("")
   const [user, setUser] = useState<string>(ALL)
+  const [query, setQuery] = useState({ page: 1, q: "", user: ALL })
 
   const onSearch = (v: string) => { setQ(v); setPage(1) }
   const onUser = (v: string) => { setUser(v); setPage(1) }
 
   // Single debounced fetch; handlers reset the page so a new query starts at 1.
   useEffect(() => {
-    setLoading(true)
-    const t = setTimeout(() => {
-      const qs = new URLSearchParams({ page: String(page) })
-      if (q.trim()) qs.set("q", q.trim())
-      if (user !== ALL) qs.set("user", user)
-      api<Resp>(`/activity?${qs}`).then(setData).finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQuery({ page, q, user }), 250)
     return () => clearTimeout(t)
   }, [page, q, user])
+
+  const qs = useMemo(() => {
+    const p = new URLSearchParams({ page: String(query.page) })
+    if (query.q.trim()) p.set("q", query.q.trim())
+    if (query.user !== ALL) p.set("user", query.user)
+    return p.toString()
+  }, [query])
+
+  const { data, isPending } = useApi<Resp>(`/activity?${qs}`)
+  const loading = isPending
 
   const events = data?.activity ?? []
   const isFounder = data?.scope === "all"

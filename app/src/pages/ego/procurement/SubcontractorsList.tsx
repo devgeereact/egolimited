@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { HardHat, Plus, Search, Loader2, AlertTriangle } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -40,19 +40,17 @@ function insuranceLapsed(date: string | null): boolean {
 }
 
 export default function SubcontractorsList() {
-  const [rows, setRows] = useState<SubRow[]>([])
   const [q, setQ] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [qDebounced, setQDebounced] = useState("")
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading(true)
-      api<{ subcontractors: SubRow[] }>(`/subcontractors?q=${encodeURIComponent(q)}`)
-        .then((r) => setRows(r.subcontractors))
-        .finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
+
+  const { data, isPending } = useApi<{ subcontractors: SubRow[] }>(`/subcontractors?q=${encodeURIComponent(qDebounced)}`)
+  const rows = useMemo(() => data?.subcontractors ?? [], [data])
+  const loading = isPending
 
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q])

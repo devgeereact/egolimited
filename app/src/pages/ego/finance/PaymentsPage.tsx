@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { BadgePoundSterling, CreditCard, Loader2, TriangleAlert, Wallet } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { gbp } from "@/lib/invoicing"
 import { Button } from "@/components/ui/button"
@@ -40,25 +40,22 @@ function ageLabel(tab: TabKey, due: string | null): string {
   return due ?? "—"
 }
 
+const DUE_PATH = "/invoices?kind=invoice&status=sent"
+const OVERDUE_PATH = "/invoices?kind=invoice&status=overdue"
+const PAID_PATH = "/invoices?kind=invoice&status=paid"
+
 export default function PaymentsPage() {
-  const [due, setDue] = useState<Row[]>([])
-  const [overdue, setOverdue] = useState<Row[]>([])
-  const [paid, setPaid] = useState<Row[]>([])
-  const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<TabKey>("due")
   const [pay, setPay] = useState<Row | null>(null)
 
-  function load() {
-    setLoading(true)
-    return Promise.all([
-      api<{ invoices: Row[] }>("/invoices?kind=invoice&status=sent"),
-      api<{ invoices: Row[] }>("/invoices?kind=invoice&status=overdue"),
-      api<{ invoices: Row[] }>("/invoices?kind=invoice&status=paid"),
-    ])
-      .then(([d, o, p]) => { setDue(d.invoices); setOverdue(o.invoices); setPaid(p.invoices) })
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => { load() }, [])
+  const { data: dueData, isPending: duePending } = useApi<{ invoices: Row[] }>(DUE_PATH)
+  const { data: overdueData, isPending: overduePending } = useApi<{ invoices: Row[] }>(OVERDUE_PATH)
+  const { data: paidData, isPending: paidPending } = useApi<{ invoices: Row[] }>(PAID_PATH)
+
+  const due = useMemo(() => dueData?.invoices ?? [], [dueData])
+  const overdue = useMemo(() => overdueData?.invoices ?? [], [overdueData])
+  const paid = useMemo(() => paidData?.invoices ?? [], [paidData])
+  const loading = duePending || overduePending || paidPending
 
   const kpis = useMemo(() => ({
     outstanding: sum(due) + sum(overdue),
@@ -145,7 +142,7 @@ export default function PaymentsPage() {
           total={Number(pay.total)}
           open={!!pay}
           onOpenChange={(o) => !o && setPay(null)}
-          onDone={() => { setPay(null); load() }}
+          onDone={() => { setPay(null); invalidate(DUE_PATH, OVERDUE_PATH, PAID_PATH) }}
         />
       )}
     </div>

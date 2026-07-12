@@ -1,6 +1,4 @@
-import { useEffect, useState } from "react"
-
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Card, CardContent } from "@/components/ui/card"
 
 interface Wx {
@@ -13,8 +11,7 @@ interface Wx {
 const OWM = (icon: string) => `https://openweathermap.org/img/wn/${icon}@2x.png`
 
 export default function WeatherPanel() {
-  const [wx, setWx] = useState<Wx | null>(null)
-  useEffect(() => { api<Wx>("/weather").then(setWx).catch(() => {}) }, [])
+  const { data: wx } = useApi<Wx>("/weather")
   if (!wx) return null
 
   const windKmph = wx.wind != null ? Math.round(wx.wind * 3.6) : null

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { BadgeCheck, Plus, Search, Loader2 } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -16,11 +16,15 @@ interface Row {
 const ST: Record<Row["status"], "default" | "secondary" | "destructive"> = { valid: "default", expiring: "secondary", expired: "destructive" }
 
 export default function CertificatesList() {
-  const [rows, setRows] = useState<Row[]>([]); const [q, setQ] = useState(""); const [loading, setLoading] = useState(true)
+  const [q, setQ] = useState("")
+  const [qDebounced, setQDebounced] = useState("")
   useEffect(() => {
-    const t = setTimeout(() => { setLoading(true); api<{ certificates: Row[] }>(`/certificates?q=${encodeURIComponent(q)}`).then((r) => setRows(r.certificates)).finally(() => setLoading(false)) }, 250)
+    const t = setTimeout(() => setQDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
+  const { data, isPending } = useApi<{ certificates: Row[] }>(`/certificates?q=${encodeURIComponent(qDebounced)}`)
+  const rows = useMemo(() => data?.certificates ?? [], [data])
+  const loading = isPending
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q])
 

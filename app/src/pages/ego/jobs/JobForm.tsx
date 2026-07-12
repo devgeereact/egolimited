@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -7,6 +7,7 @@ import { ArrowLeft, FilePlus, Pencil, Loader2, UserPlus, Users } from "lucide-re
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,40 +36,39 @@ export default function JobForm() {
   const editing = Boolean(id)
   const preCustomer = params.get("customer") ?? ""
 
-  const [customers, setCustomers] = useState<{ id: number; name: string }[]>([])
-  const [loading, setLoading] = useState(editing)
   // Create mode: choose an existing customer OR create one inline with the job.
   const [newCust, setNewCust] = useState(false)
   const [cust, setCust] = useState({ name: "", phone: "", email: "" })
-  const [customerName, setCustomerName] = useState("") // shown read-only when editing
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { customer_id: preCustomer, title: "", description: "", priority: "normal", quotedAmount: "", line1: "", city: "", postcode: "" },
   })
 
-  useEffect(() => {
-    if (!editing) api<{ customers: { id: number; name: string }[] }>("/customers").then((r) => setCustomers(r.customers))
-  }, [editing])
+  const { data: customersData } = useApi<{ customers: { id: number; name: string }[] }>(!editing ? "/customers" : null)
+  const customers = useMemo(() => customersData?.customers ?? [], [customersData])
+
+  const { data: jobData, isLoading, error } = useApi<{ job: any }>(id ? `/jobs/get?id=${id}` : null)
+  const loading = isLoading
+  const customerName = jobData?.job?.customer_name ?? "" // shown read-only when editing
 
   useEffect(() => {
-    if (!id) return
-    api<{ job: any }>(`/jobs/get?id=${id}`)
-      .then(({ job }) => {
-        const a = job.address ?? {}
-        setCustomerName(job.customer_name ?? "")
-        form.reset({
-          customer_id: String(job.customer_id ?? ""),
-          title: job.title ?? "",
-          description: job.description ?? "",
-          priority: (["low", "normal", "urgent"].includes(job.priority) ? job.priority : "normal") as Values["priority"],
-          quotedAmount: job.quoted_amount != null ? String(job.quoted_amount) : "",
-          line1: a.line1 ?? "", city: a.city ?? "", postcode: a.postcode ?? "",
-        })
-      })
-      .catch(() => toast.error("Job not found"))
-      .finally(() => setLoading(false))
-  }, [id, form])
+    if (!jobData) return
+    const job = jobData.job
+    const a = job.address ?? {}
+    form.reset({
+      customer_id: String(job.customer_id ?? ""),
+      title: job.title ?? "",
+      description: job.description ?? "",
+      priority: (["low", "normal", "urgent"].includes(job.priority) ? job.priority : "normal") as Values["priority"],
+      quotedAmount: job.quoted_amount != null ? String(job.quoted_amount) : "",
+      line1: a.line1 ?? "", city: a.city ?? "", postcode: a.postcode ?? "",
+    })
+  }, [jobData, form])
+
+  useEffect(() => {
+    if (error) toast.error("Job not found")
+  }, [error])
 
   async function onSubmit(v: Values) {
     const address = { line1: v.line1, city: v.city, postcode: v.postcode }
@@ -83,6 +83,7 @@ export default function JobForm() {
       if (editing) {
         await api("/jobs/update", { method: "POST", body: { id: Number(id), ...core } })
         toast.success("Job updated")
+        invalidate("/jobs", "/dashboard")
         navigate(`/ego/jobs/detail?id=${id}`)
         return
       }
@@ -97,6 +98,7 @@ export default function JobForm() {
       }
       const res = await api<{ id: number; reference: string }>("/jobs", { method: "POST", body })
       toast.success(`${res.reference} created`)
+      invalidate("/jobs", "/dashboard")
       navigate(`/ego/jobs/detail?id=${res.id}`)
     } catch (e) {
       toast.error(e instanceof Error ? e.message : editing ? "Couldn't update job" : "Couldn't create job")

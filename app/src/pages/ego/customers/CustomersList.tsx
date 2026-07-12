@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Users, Plus, Search, Phone, Mail, Briefcase } from "lucide-react"
 import { toast } from "sonner"
 
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,21 +31,24 @@ interface CustomerRow {
 }
 
 export default function CustomersList() {
-  const [rows, setRows] = useState<CustomerRow[]>([])
   const [q, setQ] = useState("")
-  const [loading, setLoading] = useState(true)
-  const [capped, setCapped] = useState(false)
+  const [qDebounced, setQDebounced] = useState("")
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading(true)
-      api<{ customers: CustomerRow[]; capped?: boolean }>(`/customers?q=${encodeURIComponent(q)}`)
-        .then((r) => { setRows(r.customers); setCapped(!!r.capped) })
-        .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load customers"))
-        .finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
+
+  const { data, error, isPending } = useApi<{ customers: CustomerRow[]; capped?: boolean }>(
+    `/customers?q=${encodeURIComponent(qDebounced)}`
+  )
+  const rows = useMemo(() => data?.customers ?? [], [data])
+  const loading = isPending
+  const capped = !!data?.capped
+
+  useEffect(() => {
+    if (error) toast.error(error instanceof Error ? error.message : "Couldn't load customers")
+  }, [error])
 
   const pager = usePager(rows)
   // Reset to page 1 when the search changes so filtering never leaves us on an

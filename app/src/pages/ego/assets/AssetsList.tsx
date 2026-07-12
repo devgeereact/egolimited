@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Boxes, Plus, Search, Loader2, CalendarClock } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -36,20 +36,20 @@ function dueSoon(date: string | null): boolean {
 }
 
 export default function AssetsList() {
-  const [rows, setRows] = useState<AssetRow[]>([])
   const [q, setQ] = useState("")
   const [dueOnly, setDueOnly] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState({ q: "", dueOnly: false })
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading(true)
-      api<{ assets: AssetRow[] }>(`/assets?q=${encodeURIComponent(q)}${dueOnly ? "&due=1" : ""}`)
-        .then((r) => setRows(r.assets))
-        .finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQuery({ q, dueOnly }), 250)
     return () => clearTimeout(t)
   }, [q, dueOnly])
+
+  const { data, isPending } = useApi<{ assets: AssetRow[] }>(
+    `/assets?q=${encodeURIComponent(query.q)}${query.dueOnly ? "&due=1" : ""}`
+  )
+  const rows = useMemo(() => data?.assets ?? [], [data])
+  const loading = isPending
 
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q, dueOnly])

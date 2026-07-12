@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { Megaphone, Plus, Loader2, Pin } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -24,14 +24,9 @@ const AUDIENCE_LABEL: Record<AnnRow["audience"], string> = {
 }
 
 export default function AnnouncementsList() {
-  const [rows, setRows] = useState<AnnRow[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    api<{ announcements: AnnRow[] }>("/announcements/manage")
-      .then((r) => setRows(r.announcements))
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isPending } = useApi<{ announcements: AnnRow[] }>("/announcements/manage")
+  const rows = useMemo(() => data?.announcements ?? [], [data])
+  const loading = isPending
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">

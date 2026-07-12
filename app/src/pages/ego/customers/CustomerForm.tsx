@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -7,6 +7,7 @@ import { ArrowLeft, Users, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -29,30 +30,29 @@ export default function CustomerForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(editing)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { name: "", phone: "", email: "", notes: "", line1: "", city: "", postcode: "" },
   })
 
+  const { data, isLoading } = useApi<{ customer: any }>(id ? `/customers/get?id=${id}` : null)
+  const loading = isLoading
+
   useEffect(() => {
-    if (!id) return
-    api<{ customer: any }>(`/customers/get?id=${id}`)
-      .then(({ customer }) => {
-        const a = customer.addresses?.[0] ?? {}
-        form.reset({
-          name: customer.name ?? "",
-          phone: customer.phone ?? "",
-          email: customer.email ?? "",
-          notes: customer.notes ?? "",
-          line1: a.line1 ?? "",
-          city: a.city ?? "",
-          postcode: a.postcode ?? "",
-        })
-      })
-      .finally(() => setLoading(false))
-  }, [id, form])
+    if (!data) return
+    const customer = data.customer
+    const a = customer.addresses?.[0] ?? {}
+    form.reset({
+      name: customer.name ?? "",
+      phone: customer.phone ?? "",
+      email: customer.email ?? "",
+      notes: customer.notes ?? "",
+      line1: a.line1 ?? "",
+      city: a.city ?? "",
+      postcode: a.postcode ?? "",
+    })
+  }, [data, form])
 
   async function onSubmit(v: Values) {
     const payload = {
@@ -67,10 +67,12 @@ export default function CustomerForm() {
       if (editing) {
         await api("/customers/update", { method: "POST", body: payload })
         toast.success("Customer updated")
+        invalidate("/customers")
         navigate(`/ego/customers/detail?id=${id}`)
       } else {
         const res = await api<{ id: number }>("/customers", { method: "POST", body: payload })
         toast.success("Customer created")
+        invalidate("/customers")
         navigate(`/ego/customers/detail?id=${res.id}`)
       }
     } catch (e) {

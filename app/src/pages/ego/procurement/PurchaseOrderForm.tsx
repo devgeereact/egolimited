@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, ClipboardList, Plus, Trash2, Loader2, PackageCheck, Ban } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -49,11 +50,6 @@ export default function PurchaseOrderForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(true)
-  const [suppliers, setSuppliers] = useState<Opt[]>([])
-  const [parts, setParts] = useState<PartOpt[]>([])
-  const [reference, setReference] = useState<string | null>(null)
-  const [status, setStatus] = useState<string>("draft")
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -68,39 +64,42 @@ export default function PurchaseOrderForm() {
     (sum, it) => sum + (parseFloat(it?.qty || "0") || 0) * (parseFloat(it?.unit_cost || "0") || 0), 0,
   )
 
+  const { data: suppliersData, isLoading: suppliersLoading } = useApi<{ suppliers: Opt[] }>("/suppliers")
+  const suppliers = useMemo(() => suppliersData?.suppliers ?? [], [suppliersData])
+
+  const { data: partsData, isLoading: partsLoading } = useApi<{ parts: PartOpt[] }>("/parts")
+  const parts = useMemo(() => partsData?.parts ?? [], [partsData])
+
+  const { data: poData, isLoading: poLoading, error: poError } =
+    useApi<{ purchase_order: Record<string, unknown> }>(id ? `/purchase-orders/get?id=${id}` : null)
+  const reference = (poData?.purchase_order.reference as string) ?? null
+  const status = (poData?.purchase_order.status as string) ?? "draft"
+  const loading = suppliersLoading || partsLoading || (editing && poLoading)
+
   useEffect(() => {
-    const loads: Promise<unknown>[] = [
-      api<{ suppliers: Opt[] }>("/suppliers").then((r) => setSuppliers(r.suppliers)).catch(() => {}),
-      api<{ parts: PartOpt[] }>("/parts").then((r) => setParts(r.parts)).catch(() => {}),
-    ]
-    if (id) {
-      loads.push(
-        api<{ purchase_order: Record<string, unknown> }>(`/purchase-orders/get?id=${id}`)
-          .then(({ purchase_order: po }) => {
-            setReference((po.reference as string) ?? null)
-            setStatus((po.status as string) ?? "draft")
-            const items = (po.items as Array<Record<string, unknown>>) ?? []
-            form.reset({
-              supplier_id: String(po.supplier_id ?? ""),
-              status: (["draft", "ordered"].includes(po.status as string) ? po.status : "draft") as Values["status"],
-              order_date: (po.order_date as string) ?? "",
-              expected_date: (po.expected_date as string) ?? "",
-              notes: (po.notes as string) ?? "",
-              items: items.length
-                ? items.map((it) => ({
-                    part_id: it.part_id != null ? String(it.part_id) : NONE,
-                    description: (it.description as string) ?? "",
-                    qty: String(it.qty ?? 1),
-                    unit_cost: String(it.unit_cost ?? 0),
-                  }))
-                : [{ part_id: NONE, description: "", qty: "1", unit_cost: "0" }],
-            })
-          })
-          .catch(() => toast.error("Purchase order not found")),
-      )
-    }
-    Promise.all(loads).finally(() => setLoading(false))
-  }, [id, form])
+    if (!poData) return
+    const po = poData.purchase_order
+    const items = (po.items as Array<Record<string, unknown>>) ?? []
+    form.reset({
+      supplier_id: String(po.supplier_id ?? ""),
+      status: (["draft", "ordered"].includes(po.status as string) ? po.status : "draft") as Values["status"],
+      order_date: (po.order_date as string) ?? "",
+      expected_date: (po.expected_date as string) ?? "",
+      notes: (po.notes as string) ?? "",
+      items: items.length
+        ? items.map((it) => ({
+            part_id: it.part_id != null ? String(it.part_id) : NONE,
+            description: (it.description as string) ?? "",
+            qty: String(it.qty ?? 1),
+            unit_cost: String(it.unit_cost ?? 0),
+          }))
+        : [{ part_id: NONE, description: "", qty: "1", unit_cost: "0" }],
+    })
+  }, [poData, form])
+
+  useEffect(() => {
+    if (poError) toast.error("Purchase order not found")
+  }, [poError])
 
   const locked = editing && !["draft", "ordered"].includes(status)
 
@@ -134,6 +133,7 @@ export default function PurchaseOrderForm() {
       const path = editing ? "/purchase-orders/update" : "/purchase-orders"
       await api(path, { method: "POST", body: payload })
       toast.success(editing ? "Purchase order saved" : "Purchase order created")
+      invalidate("/purchase-orders")
       navigate("/ego/purchase-orders")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed")
@@ -145,6 +145,7 @@ export default function PurchaseOrderForm() {
     try {
       await api("/purchase-orders/receive", { method: "POST", body: { id: Number(id) } })
       toast.success("Received — stock updated")
+      invalidate("/purchase-orders", "/parts")
       navigate("/ego/purchase-orders")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Receive failed")
@@ -156,6 +157,7 @@ export default function PurchaseOrderForm() {
     try {
       await api("/purchase-orders/cancel", { method: "POST", body: { id: Number(id) } })
       toast.success("Purchase order cancelled")
+      invalidate("/purchase-orders")
       navigate("/ego/purchase-orders")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Cancel failed")

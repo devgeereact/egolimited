@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, FileSignature, Trash2, Loader2, Plus, ReceiptText, CalendarCheck } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -50,9 +51,6 @@ export default function ContractForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(true)
-  const [customers, setCustomers] = useState<Opt[]>([])
-  const [reference, setReference] = useState<string | null>(null)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -64,45 +62,49 @@ export default function ContractForm() {
   })
   const { fields, append, remove } = useFieldArray({ control: form.control, name: "allocations" })
 
+  const { data: customersData, isLoading: customersLoading } = useApi<{ customers: Opt[] }>("/customers")
+  const customers = useMemo(() => customersData?.customers ?? [], [customersData])
+
+  const { data: contractData, isLoading: contractLoading, error: contractError } =
+    useApi<{ contract: Record<string, unknown> & { allocations: Array<Record<string, unknown>> } }>(id ? `/contracts/get?id=${id}` : null)
+  const reference = (contractData?.contract.reference as string) ?? null
+  const loading = customersLoading || (editing && contractLoading)
+
   useEffect(() => {
-    const loads: Promise<unknown>[] = [
-      api<{ customers: Opt[] }>("/customers").then((r) => setCustomers(r.customers)).catch(() => {}),
-    ]
-    if (id) {
-      loads.push(api<{ contract: Record<string, unknown> & { allocations: Array<Record<string, unknown>> } }>(`/contracts/get?id=${id}`)
-        .then(({ contract: ct }) => {
-          setReference((ct.reference as string) ?? null)
-          const s = (k: string) => (ct[k] != null ? String(ct[k]) : "")
-          form.reset({
-            customer_id: ct.customer_id != null ? String(ct.customer_id) : NONE,
-            title: (ct.title as string) ?? "",
-            value: s("value") || "0",
-            status: (STATUSES.includes(ct.status as Values["status"]) ? ct.status : "active") as Values["status"],
-            start_date: (ct.start_date as string) ?? "", renewal_date: (ct.renewal_date as string) ?? "",
-            sla_response_hours: s("sla_response_hours"), sla_fix_hours: s("sla_fix_hours"),
-            ppm_every_days: s("ppm_every_days"), next_service: (ct.next_service as string) ?? "",
-            bill_every_days: s("bill_every_days"), next_bill_date: (ct.next_bill_date as string) ?? "",
-            bill_amount: s("bill_amount"), notes: (ct.notes as string) ?? "",
-            allocations: (ct.allocations ?? []).map((a) => ({
-              kind: (a.kind as "employee" | "subcontractor") ?? "employee",
-              person_name: (a.person_name as string) ?? "",
-              role: (a.role as string) ?? "",
-              hours_per_week: a.hours_per_week != null ? String(a.hours_per_week) : "",
-              rate: a.rate != null ? String(a.rate) : "",
-              notes: (a.notes as string) ?? "",
-            })),
-          })
-        })
-        .catch(() => toast.error("Contract not found")))
-    }
-    Promise.all(loads).finally(() => setLoading(false))
-  }, [id, form])
+    if (!contractData) return
+    const ct = contractData.contract
+    const s = (k: string) => (ct[k] != null ? String(ct[k]) : "")
+    form.reset({
+      customer_id: ct.customer_id != null ? String(ct.customer_id) : NONE,
+      title: (ct.title as string) ?? "",
+      value: s("value") || "0",
+      status: (STATUSES.includes(ct.status as Values["status"]) ? ct.status : "active") as Values["status"],
+      start_date: (ct.start_date as string) ?? "", renewal_date: (ct.renewal_date as string) ?? "",
+      sla_response_hours: s("sla_response_hours"), sla_fix_hours: s("sla_fix_hours"),
+      ppm_every_days: s("ppm_every_days"), next_service: (ct.next_service as string) ?? "",
+      bill_every_days: s("bill_every_days"), next_bill_date: (ct.next_bill_date as string) ?? "",
+      bill_amount: s("bill_amount"), notes: (ct.notes as string) ?? "",
+      allocations: (ct.allocations ?? []).map((a) => ({
+        kind: (a.kind as "employee" | "subcontractor") ?? "employee",
+        person_name: (a.person_name as string) ?? "",
+        role: (a.role as string) ?? "",
+        hours_per_week: a.hours_per_week != null ? String(a.hours_per_week) : "",
+        rate: a.rate != null ? String(a.rate) : "",
+        notes: (a.notes as string) ?? "",
+      })),
+    })
+  }, [contractData, form])
+
+  useEffect(() => {
+    if (contractError) toast.error("Contract not found")
+  }, [contractError])
 
   async function onSubmit(v: Values) {
     const payload = { ...v, id: id ? Number(id) : undefined, customer_id: v.customer_id && v.customer_id !== NONE ? Number(v.customer_id) : "" }
     try {
       await api(editing ? "/contracts/update" : "/contracts", { method: "POST", body: payload })
       toast.success(editing ? "Contract saved" : "Contract created")
+      invalidate("/contracts")
       navigate("/ego/contracts")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed")
@@ -114,6 +116,7 @@ export default function ContractForm() {
     try {
       await api(path, { method: "POST", body: { id: Number(id) } })
       toast.success(msg)
+      invalidate("/contracts")
       navigate("/ego/contracts")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Action failed")

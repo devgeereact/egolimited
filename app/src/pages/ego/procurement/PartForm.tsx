@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Package, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -44,8 +45,6 @@ export default function PartForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(true)
-  const [suppliers, setSuppliers] = useState<SupplierOpt[]>([])
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -55,29 +54,34 @@ export default function PartForm() {
     },
   })
 
+  const { data: suppliersData, isLoading: suppliersLoading } = useApi<{ suppliers: SupplierOpt[] }>("/suppliers")
+  const suppliers = useMemo(() => suppliersData?.suppliers ?? [], [suppliersData])
+
+  const { data: partData, isLoading: partLoading, error: partError } =
+    useApi<{ part: Record<string, unknown> }>(id ? `/parts/get?id=${id}` : null)
+  const loading = suppliersLoading || (editing && partLoading)
+
   useEffect(() => {
-    const loadSuppliers = api<{ suppliers: SupplierOpt[] }>("/suppliers")
-      .then((r) => setSuppliers(r.suppliers))
-      .catch(() => {})
-    const loadPart = id
-      ? api<{ part: Record<string, unknown> }>(`/parts/get?id=${id}`).then(({ part: p }) => {
-          form.reset({
-            sku: (p.sku as string) ?? "",
-            name: (p.name as string) ?? "",
-            description: (p.description as string) ?? "",
-            category: (p.category as string) ?? "",
-            supplier_id: p.supplier_id != null ? String(p.supplier_id) : NONE,
-            unit: (p.unit as string) ?? "each",
-            cost_price: String(p.cost_price ?? 0),
-            sale_price: String(p.sale_price ?? 0),
-            stock_qty: String(p.stock_qty ?? 0),
-            reorder_level: String(p.reorder_level ?? 0),
-            active: Boolean(p.active),
-          })
-        }).catch(() => toast.error("Part not found"))
-      : Promise.resolve()
-    Promise.all([loadSuppliers, loadPart]).finally(() => setLoading(false))
-  }, [id, form])
+    if (!partData) return
+    const p = partData.part
+    form.reset({
+      sku: (p.sku as string) ?? "",
+      name: (p.name as string) ?? "",
+      description: (p.description as string) ?? "",
+      category: (p.category as string) ?? "",
+      supplier_id: p.supplier_id != null ? String(p.supplier_id) : NONE,
+      unit: (p.unit as string) ?? "each",
+      cost_price: String(p.cost_price ?? 0),
+      sale_price: String(p.sale_price ?? 0),
+      stock_qty: String(p.stock_qty ?? 0),
+      reorder_level: String(p.reorder_level ?? 0),
+      active: Boolean(p.active),
+    })
+  }, [partData, form])
+
+  useEffect(() => {
+    if (partError) toast.error("Part not found")
+  }, [partError])
 
   async function onSubmit(v: Values) {
     const payload = {
@@ -94,6 +98,7 @@ export default function PartForm() {
         await api<{ id: number }>("/parts", { method: "POST", body: payload })
         toast.success("Part created")
       }
+      invalidate("/parts")
       navigate("/ego/parts")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed")
@@ -105,6 +110,7 @@ export default function PartForm() {
     try {
       await api("/parts/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Part deleted")
+      invalidate("/parts")
       navigate("/ego/parts")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed")

@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { ChevronRight, Loader2, ListChecks } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Card } from "@/components/ui/card"
 import { StatusPill, type EgoStatus } from "@/components/ego/StatusPill"
 
@@ -24,12 +24,9 @@ function dayLabel(d: string | null) {
 }
 
 export default function EngineerMyJobs() {
-  const [jobs, setJobs] = useState<MyJob[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    api<{ jobs: MyJob[] }>("/me/jobs").then((r) => setJobs(r.jobs)).finally(() => setLoading(false))
-  }, [])
+  const { data, isPending } = useApi<{ jobs: MyJob[] }>("/me/jobs")
+  const jobs = useMemo(() => data?.jobs ?? [], [data])
+  const loading = isPending
 
   const groups = useMemo(() => {
     const map = new Map<string, MyJob[]>()

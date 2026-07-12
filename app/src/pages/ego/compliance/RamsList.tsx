@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { FileCheck2, Plus, Search, Loader2, AlertTriangle } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -12,11 +12,15 @@ interface Row { id: number; title: string; trade: string | null; reference: stri
 const overdue = (d: string | null) => !!d && new Date(d) < new Date(new Date().toDateString())
 
 export default function RamsList() {
-  const [rows, setRows] = useState<Row[]>([]); const [q, setQ] = useState(""); const [loading, setLoading] = useState(true)
+  const [q, setQ] = useState("")
+  const [qDebounced, setQDebounced] = useState("")
   useEffect(() => {
-    const t = setTimeout(() => { setLoading(true); api<{ rams: Row[] }>(`/rams?q=${encodeURIComponent(q)}`).then((r) => setRows(r.rams)).finally(() => setLoading(false)) }, 250)
+    const t = setTimeout(() => setQDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
+  const { data, isPending } = useApi<{ rams: Row[] }>(`/rams?q=${encodeURIComponent(qDebounced)}`)
+  const rows = useMemo(() => data?.rams ?? [], [data])
+  const loading = isPending
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q])
 

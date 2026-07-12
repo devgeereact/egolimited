@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
   User, Mail, Phone, ShieldCheck, Building2, MapPin, Receipt, Landmark, Loader2, Settings2, Pencil,
 } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { useAuth } from "@/store/auth.store"
 import { ROLE_LABEL, atLeast } from "@/lib/roles"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -20,12 +19,9 @@ const initials = (s: string) => s.split(" ").map((p) => p[0]).slice(0, 2).join("
 
 export default function UserProfile() {
   const { user } = useAuth()
-  const [co, setCo] = useState<Company | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    api<{ settings: Company }>("/settings").then((r) => setCo(r.settings)).catch(() => {}).finally(() => setLoading(false))
-  }, [])
+  const { data, isPending } = useApi<{ settings: Company }>("/settings")
+  const co = data?.settings ?? null
+  const loading = isPending
 
   const Row = ({ icon: Icon, label, value }: { icon: typeof User; label: string; value?: string | null }) => (
     <div className="flex items-start gap-3 text-sm">

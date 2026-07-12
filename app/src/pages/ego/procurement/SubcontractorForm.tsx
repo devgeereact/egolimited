@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, HardHat, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -40,7 +41,6 @@ export default function SubcontractorForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(editing)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -50,28 +50,31 @@ export default function SubcontractorForm() {
     },
   })
 
+  const { data, isLoading, error } = useApi<{ subcontractor: Record<string, unknown> }>(id ? `/subcontractors/get?id=${id}` : null)
+  const loading = isLoading
+
   useEffect(() => {
-    if (!id) return
-    api<{ subcontractor: Record<string, unknown> }>(`/subcontractors/get?id=${id}`)
-      .then(({ subcontractor: s }) => {
-        form.reset({
-          name: (s.name as string) ?? "",
-          company: (s.company as string) ?? "",
-          trades: (s.trades as string) ?? "",
-          coverage_areas: (s.coverage_areas as string) ?? "",
-          phone: (s.phone as string) ?? "",
-          email: (s.email as string) ?? "",
-          insurance_expiry: (s.insurance_expiry as string) ?? "",
-          qualifications: (s.qualifications as string) ?? "",
-          day_rate: s.day_rate != null ? String(s.day_rate) : "",
-          rating: s.rating != null ? String(s.rating) : "",
-          status: (s.status as Values["status"]) ?? "active",
-          notes: (s.notes as string) ?? "",
-        })
-      })
-      .catch(() => toast.error("Subcontractor not found"))
-      .finally(() => setLoading(false))
-  }, [id, form])
+    if (!data) return
+    const s = data.subcontractor
+    form.reset({
+      name: (s.name as string) ?? "",
+      company: (s.company as string) ?? "",
+      trades: (s.trades as string) ?? "",
+      coverage_areas: (s.coverage_areas as string) ?? "",
+      phone: (s.phone as string) ?? "",
+      email: (s.email as string) ?? "",
+      insurance_expiry: (s.insurance_expiry as string) ?? "",
+      qualifications: (s.qualifications as string) ?? "",
+      day_rate: s.day_rate != null ? String(s.day_rate) : "",
+      rating: s.rating != null ? String(s.rating) : "",
+      status: (s.status as Values["status"]) ?? "active",
+      notes: (s.notes as string) ?? "",
+    })
+  }, [data, form])
+
+  useEffect(() => {
+    if (error) toast.error("Subcontractor not found")
+  }, [error])
 
   async function onSubmit(v: Values) {
     const payload = { ...v, id: id ? Number(id) : undefined }
@@ -83,6 +86,7 @@ export default function SubcontractorForm() {
         await api<{ id: number }>("/subcontractors", { method: "POST", body: payload })
         toast.success("Subcontractor created")
       }
+      invalidate("/subcontractors")
       navigate("/ego/subcontractors")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed")
@@ -94,6 +98,7 @@ export default function SubcontractorForm() {
     try {
       await api("/subcontractors/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Subcontractor deleted")
+      invalidate("/subcontractors")
       navigate("/ego/subcontractors")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed")

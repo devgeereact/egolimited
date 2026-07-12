@@ -1,11 +1,20 @@
 /**
  * EGO LIMITED API client. Talks to the PHP/MySQL backend.
- * - Dev (vite): cross-origin to the server API (CORS allows :5050/:5051).
  * - Prod: same-origin relative path under /api.
+ * - Dev (vite): cross-origin to the server API (CORS allows :5050/:5051).
+ *
+ * ⚠️ The dev default is the LIVE PRODUCTION API. There is no staging environment, so running
+ * `npm run dev` and clicking "delete customer" deletes a REAL customer on egolimited.com.
+ * To point dev at a local PHP API instead, set VITE_API_BASE in app/.env.local, e.g.
+ *
+ *     VITE_API_BASE=http://127.0.0.1:8080
+ *
+ * (and add that origin to `cors_origins` in the API's config.php). The default is left as-is
+ * so nobody's existing workflow breaks, but prefer the local API for anything destructive.
  */
-export const API_BASE = import.meta.env.DEV
-  ? "https://egolimited.com/api"
-  : "/api"
+export const API_BASE =
+  (import.meta.env.VITE_API_BASE as string | undefined) ??
+  (import.meta.env.DEV ? "https://egolimited.com/api" : "/api")
 
 const TOKEN_KEY = "ego_token"
 

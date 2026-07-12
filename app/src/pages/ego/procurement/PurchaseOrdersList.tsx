@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ClipboardList, Plus, Search, Loader2 } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -34,19 +34,17 @@ const gbp = (n: number) =>
   new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(n)
 
 export default function PurchaseOrdersList() {
-  const [rows, setRows] = useState<PORow[]>([])
   const [q, setQ] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [qDebounced, setQDebounced] = useState("")
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading(true)
-      api<{ purchase_orders: PORow[] }>(`/purchase-orders?q=${encodeURIComponent(q)}`)
-        .then((r) => setRows(r.purchase_orders))
-        .finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
+
+  const { data, isPending } = useApi<{ purchase_orders: PORow[] }>(`/purchase-orders?q=${encodeURIComponent(qDebounced)}`)
+  const rows = useMemo(() => data?.purchase_orders ?? [], [data])
+  const loading = isPending
 
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q])

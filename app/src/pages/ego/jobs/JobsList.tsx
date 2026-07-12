@@ -3,7 +3,7 @@ import { Link } from "react-router-dom"
 import { Briefcase, Plus, Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -40,15 +40,15 @@ const FILTERS: { value: string; label: string; match: EgoStatus[] }[] = [
 ]
 
 export default function JobsList() {
-  const [all, setAll] = useState<JobRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [capped, setCapped] = useState(false)
   const [tab, setTab] = useState("all")
   const [q, setQ] = useState("")
 
-  useEffect(() => {
-    api<{ jobs: JobRow[]; capped?: boolean }>("/jobs").then((r) => { setAll(r.jobs); setCapped(!!r.capped) }).finally(() => setLoading(false))
-  }, [])
+  // Cached + deduped + refetched in the background. The previous hand-rolled version had no
+  // .catch(), so a failed request left the spinner up forever and threw into the void.
+  const { data, isPending } = useApi<{ jobs: JobRow[]; capped?: boolean }>("/jobs")
+  const all = useMemo(() => data?.jobs ?? [], [data])
+  const loading = isPending
+  const capped = !!data?.capped
 
   const rows = useMemo(() => {
     const f = FILTERS.find((x) => x.value === tab)!

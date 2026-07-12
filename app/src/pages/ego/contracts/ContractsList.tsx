@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { FileSignature, Plus, Search, Loader2 } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -30,19 +30,17 @@ const STATUS_VARIANT: Record<CtRow["status"], "default" | "secondary" | "destruc
 const gbp = (n: number) => new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP", maximumFractionDigits: 0 }).format(n)
 
 export default function ContractsList() {
-  const [rows, setRows] = useState<CtRow[]>([])
   const [q, setQ] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [qDebounced, setQDebounced] = useState("")
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading(true)
-      api<{ contracts: CtRow[] }>(`/contracts?q=${encodeURIComponent(q)}`)
-        .then((r) => setRows(r.contracts))
-        .finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
+
+  const { data, isPending } = useApi<{ contracts: CtRow[] }>(`/contracts?q=${encodeURIComponent(qDebounced)}`)
+  const rows = useMemo(() => data?.contracts ?? [], [data])
+  const loading = isPending
 
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q])

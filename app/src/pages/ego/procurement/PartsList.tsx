@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Package, Plus, Search, Loader2, AlertTriangle } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -32,20 +32,20 @@ const gbp = (n: number) =>
 const isLow = (p: PartRow) => p.reorder_level > 0 && p.stock_qty <= p.reorder_level
 
 export default function PartsList() {
-  const [rows, setRows] = useState<PartRow[]>([])
   const [q, setQ] = useState("")
   const [lowOnly, setLowOnly] = useState(false)
-  const [loading, setLoading] = useState(true)
+  const [query, setQuery] = useState({ q: "", lowOnly: false })
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading(true)
-      api<{ parts: PartRow[] }>(`/parts?q=${encodeURIComponent(q)}${lowOnly ? "&low=1" : ""}`)
-        .then((r) => setRows(r.parts))
-        .finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQuery({ q, lowOnly }), 250)
     return () => clearTimeout(t)
   }, [q, lowOnly])
+
+  const { data, isPending } = useApi<{ parts: PartRow[] }>(
+    `/parts?q=${encodeURIComponent(query.q)}${query.lowOnly ? "&low=1" : ""}`
+  )
+  const rows = useMemo(() => data?.parts ?? [], [data])
+  const loading = isPending
 
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q, lowOnly])

@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { Truck, Plus, Search, Loader2 } from "lucide-react"
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
@@ -23,19 +23,17 @@ interface SupplierRow {
 }
 
 export default function SuppliersList() {
-  const [rows, setRows] = useState<SupplierRow[]>([])
   const [q, setQ] = useState("")
-  const [loading, setLoading] = useState(true)
+  const [qDebounced, setQDebounced] = useState("")
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      setLoading(true)
-      api<{ suppliers: SupplierRow[] }>(`/suppliers?q=${encodeURIComponent(q)}`)
-        .then((r) => setRows(r.suppliers))
-        .finally(() => setLoading(false))
-    }, 250)
+    const t = setTimeout(() => setQDebounced(q), 250)
     return () => clearTimeout(t)
   }, [q])
+
+  const { data, isPending } = useApi<{ suppliers: SupplierRow[] }>(`/suppliers?q=${encodeURIComponent(qDebounced)}`)
+  const rows = useMemo(() => data?.suppliers ?? [], [data])
+  const loading = isPending
 
   const pager = usePager(rows)
   useEffect(() => { pager.setPage(1) }, [q])

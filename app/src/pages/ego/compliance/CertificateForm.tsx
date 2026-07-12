@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, BadgeCheck, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,40 +32,51 @@ export default function CertificateForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(true)
-  const [engineers, setEngineers] = useState<Opt[]>([])
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { title: "", holder: "", engineer_id: NONE, type: "", reference: "", issued_date: "", expiry_date: "" },
   })
 
+  const { data: teamData, isLoading: engineersLoading } = useApi<{ team: Opt[] }>("/team")
+  const engineers = useMemo(() => teamData?.team ?? [], [teamData])
+
+  const { data: certData, isLoading: certLoading, error: certError } =
+    useApi<{ certificate: Record<string, unknown> }>(id ? `/certificates/get?id=${id}` : null)
+  const loading = engineersLoading || (editing && certLoading)
+
   useEffect(() => {
-    const loads: Promise<unknown>[] = [
-      api<{ team: Opt[] }>("/team").then((r) => setEngineers(r.team ?? [])).catch(() => {}),
-    ]
-    if (id) {
-      loads.push(api<{ certificate: Record<string, unknown> }>(`/certificates/get?id=${id}`)
-        .then(({ certificate: c }) => form.reset({
-          title: (c.title as string) ?? "", holder: (c.holder as string) ?? "",
-          engineer_id: c.engineer_id != null ? String(c.engineer_id) : NONE,
-          type: (c.type as string) ?? "", reference: (c.reference as string) ?? "",
-          issued_date: (c.issued_date as string) ?? "", expiry_date: (c.expiry_date as string) ?? "",
-        })).catch(() => toast.error("Certificate not found")))
-    }
-    Promise.all(loads).finally(() => setLoading(false))
-  }, [id, form])
+    if (!certData) return
+    const c = certData.certificate
+    form.reset({
+      title: (c.title as string) ?? "", holder: (c.holder as string) ?? "",
+      engineer_id: c.engineer_id != null ? String(c.engineer_id) : NONE,
+      type: (c.type as string) ?? "", reference: (c.reference as string) ?? "",
+      issued_date: (c.issued_date as string) ?? "", expiry_date: (c.expiry_date as string) ?? "",
+    })
+  }, [certData, form])
+
+  useEffect(() => {
+    if (certError) toast.error("Certificate not found")
+  }, [certError])
 
   async function onSubmit(v: Values) {
     const payload = { ...v, id: id ? Number(id) : undefined, engineer_id: v.engineer_id && v.engineer_id !== NONE ? Number(v.engineer_id) : "" }
     try {
       await api(editing ? "/certificates/update" : "/certificates", { method: "POST", body: payload })
-      toast.success(editing ? "Certificate saved" : "Certificate added"); navigate("/ego/certificates")
+      toast.success(editing ? "Certificate saved" : "Certificate added")
+      invalidate("/certificates")
+      navigate("/ego/certificates")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") }
   }
   async function onDelete() {
     if (!id || !(await confirmDialog({ title: "Delete this certificate?", danger: true, confirmText: "Delete" }))) return
-    try { await api("/certificates/delete", { method: "POST", body: { id: Number(id) } }); toast.success("Deleted"); navigate("/ego/certificates") }
+    try {
+      await api("/certificates/delete", { method: "POST", body: { id: Number(id) } })
+      toast.success("Deleted")
+      invalidate("/certificates")
+      navigate("/ego/certificates")
+    }
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }
   if (loading) return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="size-5 animate-spin" /></div>

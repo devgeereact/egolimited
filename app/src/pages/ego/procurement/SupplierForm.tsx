@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Truck, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,7 +36,6 @@ export default function SupplierForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(editing)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -45,25 +45,28 @@ export default function SupplierForm() {
     },
   })
 
+  const { data, isLoading, error } = useApi<{ supplier: Record<string, unknown> }>(id ? `/suppliers/get?id=${id}` : null)
+  const loading = isLoading
+
   useEffect(() => {
-    if (!id) return
-    api<{ supplier: Record<string, unknown> }>(`/suppliers/get?id=${id}`)
-      .then(({ supplier: s }) => {
-        form.reset({
-          name: (s.name as string) ?? "",
-          contact: (s.contact as string) ?? "",
-          phone: (s.phone as string) ?? "",
-          email: (s.email as string) ?? "",
-          account_ref: (s.account_ref as string) ?? "",
-          category: (s.category as string) ?? "",
-          address: (s.address as string) ?? "",
-          notes: (s.notes as string) ?? "",
-          active: Boolean(s.active),
-        })
-      })
-      .catch(() => toast.error("Supplier not found"))
-      .finally(() => setLoading(false))
-  }, [id, form])
+    if (!data) return
+    const s = data.supplier
+    form.reset({
+      name: (s.name as string) ?? "",
+      contact: (s.contact as string) ?? "",
+      phone: (s.phone as string) ?? "",
+      email: (s.email as string) ?? "",
+      account_ref: (s.account_ref as string) ?? "",
+      category: (s.category as string) ?? "",
+      address: (s.address as string) ?? "",
+      notes: (s.notes as string) ?? "",
+      active: Boolean(s.active),
+    })
+  }, [data, form])
+
+  useEffect(() => {
+    if (error) toast.error("Supplier not found")
+  }, [error])
 
   async function onSubmit(v: Values) {
     try {
@@ -74,6 +77,7 @@ export default function SupplierForm() {
         await api<{ id: number }>("/suppliers", { method: "POST", body: { ...v, active: v.active ? 1 : 0 } })
         toast.success("Supplier created")
       }
+      invalidate("/suppliers")
       navigate("/ego/suppliers")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed")
@@ -85,6 +89,7 @@ export default function SupplierForm() {
     try {
       await api("/suppliers/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Supplier deleted")
+      invalidate("/suppliers")
       navigate("/ego/suppliers")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed")

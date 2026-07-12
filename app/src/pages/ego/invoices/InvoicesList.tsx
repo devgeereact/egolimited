@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { FileText, Loader2, Download, Eye } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { gbp } from "@/lib/invoicing"
 import { buildInvoicePdf, type InvoiceDoc } from "@/lib/invoicePdf"
 import { Button } from "@/components/ui/button"
@@ -30,9 +31,6 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
   // the right list instead of sticking on whichever loaded first.
   const kind = defaultKind
   const [status, setStatus] = useState("all")
-  const [rows, setRows] = useState<Row[]>([])
-  const [loading, setLoading] = useState(true)
-  const [capped, setCapped] = useState(false)
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
   const [previewingId, setPreviewingId] = useState<number | null>(null)
 
@@ -58,12 +56,16 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
     finally { setPreviewingId(null) }
   }
 
-  useEffect(() => {
-    setLoading(true)
-    const qs = new URLSearchParams({ kind })
-    if (status !== "all") qs.set("status", status)
-    api<{ invoices: Row[]; capped?: boolean }>(`/invoices?${qs}`).then((r) => { setRows(r.invoices); setCapped(!!r.capped) }).finally(() => setLoading(false))
+  const qs = useMemo(() => {
+    const p = new URLSearchParams({ kind })
+    if (status !== "all") p.set("status", status)
+    return p.toString()
   }, [kind, status])
+
+  const { data, isPending } = useApi<{ invoices: Row[]; capped?: boolean }>(`/invoices?${qs}`)
+  const rows = useMemo(() => data?.invoices ?? [], [data])
+  const loading = isPending
+  const capped = !!data?.capped
 
   const pager = usePager(rows)
   return (

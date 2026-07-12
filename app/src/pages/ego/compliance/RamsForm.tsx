@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, FileCheck2, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -27,27 +28,40 @@ export default function RamsForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(editing)
   const form = useForm<Values>({ resolver: zodResolver(schema), defaultValues: { title: "", trade: "", reference: "", review_date: "", content: "" } })
 
+  const { data, isLoading, error } = useApi<{ rams: Record<string, unknown> }>(id ? `/rams/get?id=${id}` : null)
+  const loading = isLoading
+
   useEffect(() => {
-    if (!id) return
-    api<{ rams: Record<string, unknown> }>(`/rams/get?id=${id}`)
-      .then(({ rams: r }) => form.reset({
-        title: (r.title as string) ?? "", trade: (r.trade as string) ?? "", reference: (r.reference as string) ?? "",
-        review_date: (r.review_date as string) ?? "", content: (r.content as string) ?? "",
-      })).catch(() => toast.error("RAMS not found")).finally(() => setLoading(false))
-  }, [id, form])
+    if (!data) return
+    const r = data.rams
+    form.reset({
+      title: (r.title as string) ?? "", trade: (r.trade as string) ?? "", reference: (r.reference as string) ?? "",
+      review_date: (r.review_date as string) ?? "", content: (r.content as string) ?? "",
+    })
+  }, [data, form])
+
+  useEffect(() => {
+    if (error) toast.error("RAMS not found")
+  }, [error])
 
   async function onSubmit(v: Values) {
     try {
       await api(editing ? "/rams/update" : "/rams", { method: "POST", body: { ...v, id: id ? Number(id) : undefined } })
-      toast.success(editing ? "RAMS saved" : "RAMS created"); navigate("/ego/rams")
+      toast.success(editing ? "RAMS saved" : "RAMS created")
+      invalidate("/rams")
+      navigate("/ego/rams")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") }
   }
   async function onDelete() {
     if (!id || !(await confirmDialog({ title: "Delete this RAMS document?", danger: true, confirmText: "Delete" }))) return
-    try { await api("/rams/delete", { method: "POST", body: { id: Number(id) } }); toast.success("Deleted"); navigate("/ego/rams") }
+    try {
+      await api("/rams/delete", { method: "POST", body: { id: Number(id) } })
+      toast.success("Deleted")
+      invalidate("/rams")
+      navigate("/ego/rams")
+    }
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }
   if (loading) return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="size-5 animate-spin" /></div>

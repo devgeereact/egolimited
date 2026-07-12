@@ -8,7 +8,8 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 
-import { api, apiDownload } from "@/lib/api"
+import { apiDownload } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { gbp } from "@/lib/invoicing"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -43,12 +44,12 @@ const EXPORTS = [
 ] as const
 
 export default function AnalyticsPage() {
-  const [d, setD] = useState<Analytics | null>(null)
+  const { data: d, error } = useApi<Analytics>("/analytics")
   const [busy, setBusy] = useState<string | null>(null)
 
   useEffect(() => {
-    api<Analytics>("/analytics").then(setD).catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load analytics"))
-  }, [])
+    if (error) toast.error(error instanceof Error ? error.message : "Couldn't load analytics")
+  }, [error])
 
   async function exportCsv(report: string) {
     setBusy(report)

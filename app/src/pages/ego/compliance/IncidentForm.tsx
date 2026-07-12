@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, ShieldAlert, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -33,36 +34,47 @@ export default function IncidentForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(editing)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { incident_date: "", type: "near_miss", severity: "low", location: "", person: "", description: "", action_taken: "", reported_by: "", status: "open" },
   })
 
+  const { data, isLoading, error } = useApi<{ incident: Record<string, unknown> }>(id ? `/incidents/get?id=${id}` : null)
+  const loading = isLoading
+
   useEffect(() => {
-    if (!id) return
-    api<{ incident: Record<string, unknown> }>(`/incidents/get?id=${id}`)
-      .then(({ incident: i }) => form.reset({
-        incident_date: (i.incident_date as string) ?? "", type: (i.type as Values["type"]) ?? "near_miss",
-        severity: (i.severity as Values["severity"]) ?? "low", location: (i.location as string) ?? "",
-        person: (i.person as string) ?? "", description: (i.description as string) ?? "",
-        action_taken: (i.action_taken as string) ?? "", reported_by: (i.reported_by as string) ?? "",
-        status: (i.status as Values["status"]) ?? "open",
-      }))
-      .catch(() => toast.error("Incident not found")).finally(() => setLoading(false))
-  }, [id, form])
+    if (!data) return
+    const i = data.incident
+    form.reset({
+      incident_date: (i.incident_date as string) ?? "", type: (i.type as Values["type"]) ?? "near_miss",
+      severity: (i.severity as Values["severity"]) ?? "low", location: (i.location as string) ?? "",
+      person: (i.person as string) ?? "", description: (i.description as string) ?? "",
+      action_taken: (i.action_taken as string) ?? "", reported_by: (i.reported_by as string) ?? "",
+      status: (i.status as Values["status"]) ?? "open",
+    })
+  }, [data, form])
+
+  useEffect(() => {
+    if (error) toast.error("Incident not found")
+  }, [error])
 
   async function onSubmit(v: Values) {
     try {
       await api(editing ? "/incidents/update" : "/incidents", { method: "POST", body: { ...v, id: id ? Number(id) : undefined } })
       toast.success(editing ? "Incident saved" : "Incident reported")
+      invalidate("/incidents")
       navigate("/ego/incidents")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") }
   }
   async function onDelete() {
     if (!id || !(await confirmDialog({ title: "Delete this incident?", danger: true, confirmText: "Delete" }))) return
-    try { await api("/incidents/delete", { method: "POST", body: { id: Number(id) } }); toast.success("Deleted"); navigate("/ego/incidents") }
+    try {
+      await api("/incidents/delete", { method: "POST", body: { id: Number(id) } })
+      toast.success("Deleted")
+      invalidate("/incidents")
+      navigate("/ego/incidents")
+    }
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }
   if (loading) return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="size-5 animate-spin" /></div>

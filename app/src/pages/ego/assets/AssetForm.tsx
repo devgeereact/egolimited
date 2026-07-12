@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Boxes, Trash2, Loader2, Wrench, Plus } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -57,9 +58,6 @@ export default function AssetForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(true)
-  const [customers, setCustomers] = useState<Opt[]>([])
-  const [services, setServices] = useState<Service[]>([])
   const [svc, setSvc] = useState({ service_date: "", outcome: "ok", notes: "", next_due: "" })
   const [savingSvc, setSavingSvc] = useState(false)
 
@@ -71,35 +69,36 @@ export default function AssetForm() {
     },
   })
 
-  const loadAsset = useCallback(() => {
-    if (!id) return Promise.resolve()
-    return api<{ asset: Record<string, unknown> & { services: Service[] } }>(`/assets/get?id=${id}`)
-      .then(({ asset: a }) => {
-        setServices(a.services ?? [])
-        form.reset({
-          name: (a.name as string) ?? "",
-          asset_tag: (a.asset_tag as string) ?? "",
-          customer_id: a.customer_id != null ? String(a.customer_id) : NONE,
-          location: (a.location as string) ?? "",
-          type: (a.type as string) ?? "",
-          make: (a.make as string) ?? "",
-          model: (a.model as string) ?? "",
-          serial: (a.serial as string) ?? "",
-          status: (STATUSES.includes(a.status as Values["status"]) ? a.status : "ok") as Values["status"],
-          install_date: (a.install_date as string) ?? "",
-          next_service_date: (a.next_service_date as string) ?? "",
-          notes: (a.notes as string) ?? "",
-        })
-      })
-      .catch(() => toast.error("Asset not found"))
-  }, [id, form])
+  const { data: customersData, isLoading: customersLoading } = useApi<{ customers: Opt[] }>("/customers")
+  const customers = useMemo(() => customersData?.customers ?? [], [customersData])
+
+  const { data: assetData, isLoading: assetLoading, error: assetError, refetch: refetchAsset } =
+    useApi<{ asset: Record<string, unknown> & { services: Service[] } }>(id ? `/assets/get?id=${id}` : null)
+  const services = useMemo(() => assetData?.asset.services ?? [], [assetData])
+  const loading = customersLoading || (editing && assetLoading)
 
   useEffect(() => {
-    Promise.all([
-      api<{ customers: Opt[] }>("/customers").then((r) => setCustomers(r.customers)).catch(() => {}),
-      loadAsset(),
-    ]).finally(() => setLoading(false))
-  }, [loadAsset])
+    if (!assetData) return
+    const a = assetData.asset
+    form.reset({
+      name: (a.name as string) ?? "",
+      asset_tag: (a.asset_tag as string) ?? "",
+      customer_id: a.customer_id != null ? String(a.customer_id) : NONE,
+      location: (a.location as string) ?? "",
+      type: (a.type as string) ?? "",
+      make: (a.make as string) ?? "",
+      model: (a.model as string) ?? "",
+      serial: (a.serial as string) ?? "",
+      status: (STATUSES.includes(a.status as Values["status"]) ? a.status : "ok") as Values["status"],
+      install_date: (a.install_date as string) ?? "",
+      next_service_date: (a.next_service_date as string) ?? "",
+      notes: (a.notes as string) ?? "",
+    })
+  }, [assetData, form])
+
+  useEffect(() => {
+    if (assetError) toast.error("Asset not found")
+  }, [assetError])
 
   async function onSubmit(v: Values) {
     const payload = { ...v, id: id ? Number(id) : undefined, customer_id: v.customer_id && v.customer_id !== NONE ? Number(v.customer_id) : "" }
@@ -111,6 +110,7 @@ export default function AssetForm() {
         await api<{ id: number }>("/assets", { method: "POST", body: payload })
         toast.success("Asset created")
       }
+      invalidate("/assets")
       navigate("/ego/assets")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed")
@@ -122,6 +122,7 @@ export default function AssetForm() {
     try {
       await api("/assets/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Asset deleted")
+      invalidate("/assets")
       navigate("/ego/assets")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed")
@@ -135,7 +136,7 @@ export default function AssetForm() {
       await api("/assets/service", { method: "POST", body: { asset_id: Number(id), ...svc } })
       toast.success("Service logged")
       setSvc({ service_date: "", outcome: "ok", notes: "", next_due: "" })
-      await loadAsset()
+      await refetchAsset()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not log service")
     } finally {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { ArrowLeft, Megaphone, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -34,28 +35,30 @@ export default function AnnouncementForm() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const editing = Boolean(id)
-  const [loading, setLoading] = useState(editing)
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
     defaultValues: { title: "", body: "", audience: "all", pinned: false, active: true },
   })
 
+  const { data, isLoading, error } = useApi<{ announcement: Record<string, unknown> }>(id ? `/announcements/get?id=${id}` : null)
+  const loading = isLoading
+
   useEffect(() => {
-    if (!id) return
-    api<{ announcement: Record<string, unknown> }>(`/announcements/get?id=${id}`)
-      .then(({ announcement: a }) => {
-        form.reset({
-          title: (a.title as string) ?? "",
-          body: (a.body as string) ?? "",
-          audience: (a.audience as Values["audience"]) ?? "all",
-          pinned: Boolean(a.pinned),
-          active: Boolean(a.active),
-        })
-      })
-      .catch(() => toast.error("Announcement not found"))
-      .finally(() => setLoading(false))
-  }, [id, form])
+    if (!data) return
+    const a = data.announcement
+    form.reset({
+      title: (a.title as string) ?? "",
+      body: (a.body as string) ?? "",
+      audience: (a.audience as Values["audience"]) ?? "all",
+      pinned: Boolean(a.pinned),
+      active: Boolean(a.active),
+    })
+  }, [data, form])
+
+  useEffect(() => {
+    if (error) toast.error("Announcement not found")
+  }, [error])
 
   async function onSubmit(v: Values) {
     const payload = { ...v, id: id ? Number(id) : undefined, pinned: v.pinned ? 1 : 0, active: v.active ? 1 : 0 }
@@ -67,6 +70,7 @@ export default function AnnouncementForm() {
         await api<{ id: number }>("/announcements", { method: "POST", body: payload })
         toast.success("Announcement posted")
       }
+      invalidate("/announcements")
       navigate("/ego/announcements")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Save failed")
@@ -78,6 +82,7 @@ export default function AnnouncementForm() {
     try {
       await api("/announcements/delete", { method: "POST", body: { id: Number(id) } })
       toast.success("Announcement deleted")
+      invalidate("/announcements")
       navigate("/ego/announcements")
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Delete failed")

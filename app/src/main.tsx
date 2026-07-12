@@ -4,9 +4,12 @@ import { RouterProvider } from "react-router-dom"
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "sonner"
 
+import { QueryClientProvider } from "@tanstack/react-query"
+
 import ErrorBoundary from "@/components/ego/ErrorBoundary"
 import UIThemeProvider from "@/providers/ui-theme-provider"
 
+import { queryClient } from "@/lib/query"
 import { router } from "@/routes"
 import "@/index.css"
 
@@ -32,9 +35,11 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     >
       
       <UIThemeProvider>
-        <ErrorBoundary label="app root">
-          <RouterProvider router={router} />
-        </ErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <ErrorBoundary label="app root">
+            <RouterProvider router={router} />
+          </ErrorBoundary>
+        </QueryClientProvider>
       </UIThemeProvider>
     </ThemeProvider>
     <Toaster position="top-right" richColors closeButton />
