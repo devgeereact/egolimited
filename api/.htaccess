@@ -9,7 +9,7 @@ RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 # backup.php/restore.php shell out to mysqldump/mysql — restore.php can OVERWRITE the live
 # database. They must never be reachable over HTTP. Their in-code `PHP_SAPI !== "cli"` guard
 # is the second layer, not the only one.
-RewriteRule ^(lib/|seed\.php|migrate\.php|cron\.php|campaign_cron\.php|backup\.php|restore\.php) - [F,L]
+RewriteRule ^(lib/|tests/|seed\.php|migrate\.php|cron\.php|campaign_cron\.php|backup\.php|restore\.php) - [F,L]
 
 # Send all non-file requests to index.php.
 RewriteCond %{REQUEST_FILENAME} !-f

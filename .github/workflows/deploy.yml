@@ -26,8 +26,10 @@ jobs:
       # ---- quality gates: nothing reaches production that fails these ----
       # This workflow deploys straight to the LIVE site with no staging step, so CI is the
       # only gate that exists. A failing step here stops the upload — that is the point.
-      - name: PHP syntax check (api)
-        run: find api -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: PHP syntax check + API tests (blocking)
+        run: |
+          find api -name '*.php' -print0 | xargs -0 -n1 php -l
+          php api/tests/run.php
 
       - name: Install deps
         run: |

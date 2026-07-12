@@ -10,6 +10,7 @@ $cfg = require __DIR__ . "/config.php";
 require __DIR__ . "/lib/job_status.php";
 require __DIR__ . "/lib/invoicing.php";
 require __DIR__ . "/lib/brand.php";
+require __DIR__ . "/lib/authz.php";   // who may call what — enforced in one gate before the switch
 
 /* ---------- CORS ---------- */
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
@@ -221,9 +222,8 @@ function current_user(mysqli $db): ?array {
 }
 function require_user(mysqli $db): array { $u = current_user($db); if (!$u) fail("Not authenticated", 401); return $u; }
 
-/* Role hierarchy: founder(4) > manager(3) > office/Employee-Admin(2) > engineer(1). */
-const ROLE_RANK = ["engineer" => 1, "office" => 2, "manager" => 3, "founder" => 4];
-function role_rank(?string $r): int { return ROLE_RANK[$r ?? ""] ?? 0; }
+/* Role hierarchy (ROLE_RANK, role_rank) now lives in lib/authz.php — the one place that owns
+ * "who may do what" — so the access decision is testable without booting the whole front controller. */
 
 /**
  * Backwards-compatible role gate.
@@ -908,6 +908,27 @@ $MCP_ALLOW = ["POST /auth/login", "POST /auth/logout", "GET /auth/me", "GET /hea
 if (!in_array("$method $route", $MCP_ALLOW, true)) {
     $cu = current_user($db);
     if ($cu && (int) ($cu["must_change_password"] ?? 0) === 1) fail("Password change required", 403);
+}
+
+/* ---------- authorization: ONE gate, in front of every route ----------
+ * Authorization used to live only in ~150 hand-copied require_role() calls inside the switch.
+ * It was complete — but it was complete by convention, and the next endpoint added in a hurry
+ * is the one that ships without a guard. lib/authz.php now declares the required level for
+ * every route, and this gate enforces it before any handler runs.
+ *
+ * FAIL-CLOSED: an unregistered route is unreachable (404). So forgetting to register a new
+ * endpoint means "it 404s and I notice immediately", never "it is open to the internet".
+ *
+ * The per-case require_*() calls stay. They are defence in depth now rather than the only
+ * defence, and handlers still need the acting user they return. api/tests/run.php re-derives
+ * this table from index.php and fails the build if the two ever disagree.
+ */
+// (OPTIONS preflights already returned 204 above, so every request reaching here is a real call.)
+$level = route_level($method, $route);
+if ($level === null) fail("Not found", 404);   // unregistered => does not exist
+if ($level !== ROLE_PUBLIC) {
+    $gateUser = require_user($db);             // 401 if there is no valid session
+    if (!level_satisfied_by($level, $gateUser["role"])) fail("Forbidden", 403);
 }
 
 switch ("$method $route") {
@@ -3223,7 +3244,7 @@ switch ("$method $route") {
 
     /* ===================== Task board (kanban) — any staff; workers assign to each other ===================== */
     case "GET /tasks": {
-        require_user($db);
+        require_role($db, "admin");
         ensure_task_cols($db);
         // Auto-archive housekeeping (also covered by cron; done here so it works even without cron):
         //  1) any 'done' card missing a completed_at gets its clock started now, then
@@ -3246,7 +3267,7 @@ switch ("$method $route") {
         send(["tasks" => $rows, "staff" => $staff, "archived_count" => $archivedCount]);
     }
     case "POST /tasks": {
-        require_user($db);
+        require_role($db, "admin");
         $b = body();
         $title = trim($b["title"] ?? "");
         if ($title === "") fail("Title required");
@@ -3257,7 +3278,7 @@ switch ("$method $route") {
         send(["id" => (int)$db->insert_id], 201);
     }
     case "POST /tasks/update": {
-        require_user($db);
+        require_role($db, "admin");
         $b = body();
         $id = (int)($b["id"] ?? 0);
         if (!$id) fail("id required");
@@ -3274,7 +3295,7 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
     case "POST /tasks/assign": {
-        require_user($db);
+        require_role($db, "admin");
         $b = body();
         $id = (int)($b["id"] ?? 0);
         if (!$id) fail("id required");
@@ -3283,7 +3304,7 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
     case "POST /tasks/move": {
-        require_user($db);
+        require_role($db, "admin");
         ensure_task_cols($db);
         $b = body();
         $id = (int)($b["id"] ?? 0);
@@ -3300,7 +3321,7 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
     case "POST /tasks/delete": {
-        require_user($db);
+        require_role($db, "admin");
         $id = (int)(body()["id"] ?? 0);
         if ($id) db_exec($db, "DELETE FROM ego_tasks WHERE id=?", "i", $id);
         send(["ok" => true]);

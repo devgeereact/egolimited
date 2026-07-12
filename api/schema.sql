@@ -180,10 +180,8 @@ CREATE TABLE IF NOT EXISTS ego_invoice_lines (
 -- M12: throttle invoice reminders
 ALTER TABLE ego_invoices ADD COLUMN IF NOT EXISTS reminded_at DATETIME NULL;
 
--- Messages: acknowledge + engineer visibility + html body (for existing tables)
-ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS acknowledged TINYINT(1) NOT NULL DEFAULT 0;
-ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS visible_to_engineer TINYINT(1) NOT NULL DEFAULT 0;
-ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS body_html MEDIUMTEXT NULL;
+-- (The ego_messages ALTERs that used to sit here have moved BELOW the table's CREATE — see the
+--  note there. Running them before the table existed made this file unable to build a fresh DB.)
 
 -- Task board (kanban)
 CREATE TABLE IF NOT EXISTS ego_tasks (
@@ -249,6 +247,15 @@ CREATE TABLE IF NOT EXISTS ego_messages (
   INDEX idx_ego_msg_cust (customer_id),
   INDEX idx_ego_msg_job (job_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Backfill for databases created before these columns existed. They are already in the CREATE
+-- above, so this is a no-op on a fresh build. These ALTERs previously sat ~45 lines EARLIER in
+-- this file, i.e. before ego_messages was created — which made schema.sql unable to build a
+-- database from scratch at all ("Table 'ego_messages' doesn't exist"). Nobody noticed because
+-- the live DB already had the tables. Keep migrations AFTER the CREATE they depend on.
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS acknowledged TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS visible_to_engineer TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS body_html MEDIUMTEXT NULL;
 
 -- Phase 2: integration secrets (SMTP, OpenWeather, OpenRouter, IMAP).
 -- Values live ONLY here in MySQL — never in the repo, never committed/pushed.
