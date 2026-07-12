@@ -355,6 +355,11 @@ CREATE TABLE IF NOT EXISTS ego_message_attachments (
 -- ============================================================================
 -- PROCUREMENT (M-B): suppliers + subcontractors. ego_-prefixed, soft-delete.
 -- ============================================================================
+-- DEPRECATED (module removed 2026-07-13): the Procurement module was dropped —
+-- engineers buy parts from a merchant and hand in a receipt, nobody raises
+-- purchase orders or tracks stock. Table retained (not dropped): purchase
+-- records may carry a 6-year accounting retention duty, and dropping tables
+-- is irreversible while removing the code is not.
 CREATE TABLE IF NOT EXISTS ego_suppliers (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   name        VARCHAR(190) NOT NULL,
@@ -394,6 +399,11 @@ CREATE TABLE IF NOT EXISTS ego_subcontractors (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- PROCUREMENT (M-B slice 2): parts catalogue + pricebook (cost/sale) + stock level.
+-- DEPRECATED (module removed 2026-07-13): the Procurement module was dropped —
+-- engineers buy parts from a merchant and hand in a receipt, nobody raises
+-- purchase orders or tracks stock. Table retained (not dropped): purchase
+-- records may carry a 6-year accounting retention duty, and dropping tables
+-- is irreversible while removing the code is not.
 CREATE TABLE IF NOT EXISTS ego_parts (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   sku           VARCHAR(60)  NULL,
@@ -416,6 +426,11 @@ CREATE TABLE IF NOT EXISTS ego_parts (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- PROCUREMENT (M-B slice 3): stock movements ledger + purchase orders (header + items).
+-- DEPRECATED (module removed 2026-07-13): the Procurement module was dropped —
+-- engineers buy parts from a merchant and hand in a receipt, nobody raises
+-- purchase orders or tracks stock. Table retained (not dropped): purchase
+-- records may carry a 6-year accounting retention duty, and dropping tables
+-- is irreversible while removing the code is not.
 CREATE TABLE IF NOT EXISTS ego_stock_movements (
   id         INT AUTO_INCREMENT PRIMARY KEY,
   part_id    INT NOT NULL,
@@ -429,6 +444,11 @@ CREATE TABLE IF NOT EXISTS ego_stock_movements (
   CONSTRAINT fk_ego_stock_part FOREIGN KEY (part_id) REFERENCES ego_parts(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- DEPRECATED (module removed 2026-07-13): the Procurement module was dropped —
+-- engineers buy parts from a merchant and hand in a receipt, nobody raises
+-- purchase orders or tracks stock. Table retained (not dropped): purchase
+-- records may carry a 6-year accounting retention duty, and dropping tables
+-- is irreversible while removing the code is not.
 CREATE TABLE IF NOT EXISTS ego_purchase_orders (
   id            INT AUTO_INCREMENT PRIMARY KEY,
   reference     VARCHAR(24) NULL UNIQUE,
@@ -448,6 +468,11 @@ CREATE TABLE IF NOT EXISTS ego_purchase_orders (
   CONSTRAINT fk_ego_po_supplier FOREIGN KEY (supplier_id) REFERENCES ego_suppliers(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- DEPRECATED (module removed 2026-07-13): the Procurement module was dropped —
+-- engineers buy parts from a merchant and hand in a receipt, nobody raises
+-- purchase orders or tracks stock. Table retained (not dropped): purchase
+-- records may carry a 6-year accounting retention duty, and dropping tables
+-- is irreversible while removing the code is not.
 CREATE TABLE IF NOT EXISTS ego_po_items (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   po_id       INT NOT NULL,

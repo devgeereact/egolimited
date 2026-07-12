@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/command"
 import {
   Search, ChevronRight, Gauge, BarChart3, Briefcase, CalendarDays, Contact, KanbanSquare, FileText, ScrollText,
-  CreditCard, Inbox, Send, Quote, Megaphone, Package, ClipboardList, Truck, HardHat, Boxes, FileSignature,
+  CreditCard, Inbox, Send, Quote, Megaphone, HardHat, Boxes, FileSignature,
   ShieldAlert, FileCheck2, BadgeCheck, Users, Settings2, KeyRound, type LucideIcon,
 } from "lucide-react"
 
@@ -41,10 +41,7 @@ const SECTIONS: Section[] = [
     { label: "Reviews", to: "/ego/reviews", icon: Quote },
     { label: "Announcements", to: "/ego/announcements", icon: Megaphone, min: "manager" },
   ]},
-  { heading: "Procurement", items: [
-    { label: "Parts", to: "/ego/parts", icon: Package },
-    { label: "Purchase Orders", to: "/ego/purchase-orders", icon: ClipboardList },
-    { label: "Suppliers", to: "/ego/suppliers", icon: Truck },
+  { heading: "Subcontractors", items: [
     { label: "Subcontractors", to: "/ego/subcontractors", icon: HardHat },
   ]},
   { heading: "Assets & Compliance", items: [

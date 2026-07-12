@@ -234,7 +234,7 @@ export default function SubcontractorForm() {
                   <div className="flex items-center justify-between">
                     <FormLabel>Notes</FormLabel>
                     <AiButton
-                      endpoint="/procurement/draft" title="Draft subcontractor notes"
+                      endpoint="/subcontractors/draft" title="Draft subcontractor notes"
                       extra={{ kind: "subcontractor", name: form.watch("name") }}
                       placeholder="e.g. electrician, 18th edition, reliable, covers SE London"
                       onResult={(d: { text: string }) => form.setValue("notes", d.text)}

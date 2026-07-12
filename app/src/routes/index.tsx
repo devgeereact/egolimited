@@ -33,14 +33,8 @@ const EgoScheduleBoard = lazy(() => import("@/pages/ego/schedule/ScheduleBoard")
 const EgoCustomersList = lazy(() => import("@/pages/ego/customers/CustomersList"))
 const EgoCustomerDetail = lazy(() => import("@/pages/ego/customers/CustomerDetail"))
 const EgoCustomerForm = lazy(() => import("@/pages/ego/customers/CustomerForm"))
-const SuppliersList = lazy(() => import("@/pages/ego/procurement/SuppliersList"))
-const SupplierForm = lazy(() => import("@/pages/ego/procurement/SupplierForm"))
-const SubcontractorsList = lazy(() => import("@/pages/ego/procurement/SubcontractorsList"))
-const SubcontractorForm = lazy(() => import("@/pages/ego/procurement/SubcontractorForm"))
-const PartsList = lazy(() => import("@/pages/ego/procurement/PartsList"))
-const PartForm = lazy(() => import("@/pages/ego/procurement/PartForm"))
-const PurchaseOrdersList = lazy(() => import("@/pages/ego/procurement/PurchaseOrdersList"))
-const PurchaseOrderForm = lazy(() => import("@/pages/ego/procurement/PurchaseOrderForm"))
+const SubcontractorsList = lazy(() => import("@/pages/ego/subcontractors/SubcontractorsList"))
+const SubcontractorForm = lazy(() => import("@/pages/ego/subcontractors/SubcontractorForm"))
 const AssetsList = lazy(() => import("@/pages/ego/assets/AssetsList"))
 const AssetForm = lazy(() => import("@/pages/ego/assets/AssetForm"))
 const AnnouncementsList = lazy(() => import("@/pages/ego/announcements/AnnouncementsList"))
@@ -106,18 +100,9 @@ export const router = createBrowserRouter (
             {path: "ego/customers/detail", element: <EgoCustomerDetail /> },
             {path: "ego/customers/new", element: <EgoCustomerForm /> },
             {path: "ego/customers/edit", element: <EgoCustomerForm /> },
-            {path: "ego/suppliers", element: <SuppliersList /> },
-            {path: "ego/suppliers/new", element: <SupplierForm /> },
-            {path: "ego/suppliers/edit", element: <SupplierForm /> },
             {path: "ego/subcontractors", element: <SubcontractorsList /> },
             {path: "ego/subcontractors/new", element: <SubcontractorForm /> },
             {path: "ego/subcontractors/edit", element: <SubcontractorForm /> },
-            {path: "ego/parts", element: <PartsList /> },
-            {path: "ego/parts/new", element: <PartForm /> },
-            {path: "ego/parts/edit", element: <PartForm /> },
-            {path: "ego/purchase-orders", element: <PurchaseOrdersList /> },
-            {path: "ego/purchase-orders/new", element: <PurchaseOrderForm /> },
-            {path: "ego/purchase-orders/edit", element: <PurchaseOrderForm /> },
             {path: "ego/assets", element: <AssetsList /> },
             {path: "ego/assets/new", element: <AssetForm /> },
             {path: "ego/assets/edit", element: <AssetForm /> },

@@ -162,35 +162,21 @@ const ROUTE_ROLES = [
     "POST /ai/image"             => "office",
     "POST /tasks/draft"          => "office",
     "POST /incidents/polish"     => "office",
-    "POST /procurement/draft"    => "office",
+    "POST /subcontractors/draft" => "office", // AI notes drafter on the subcontractor record
     // Recurring / PPM
     "GET /recurring"             => "office",
     "POST /recurring"            => "office",
     "POST /recurring/delete"     => "office",
     "POST /recurring/generate"   => "office",
-    // Procurement
-    "GET /suppliers"             => "office",
-    "GET /suppliers/get"         => "office",
-    "POST /suppliers"            => "office",
-    "POST /suppliers/update"     => "office",
-    "POST /suppliers/delete"     => "office",
+    // Procurement (Subcontractors only — Suppliers/Parts/Purchase Orders/Stock
+    // Movements removed 2026-07-13: engineers buy parts from a merchant and hand
+    // in a receipt, nobody raises POs or tracks stock. See schema.sql for the
+    // retained-but-deprecated tables.)
     "GET /subcontractors"        => "office",
     "GET /subcontractors/get"    => "office",
     "POST /subcontractors"       => "office",
     "POST /subcontractors/update" => "office",
     "POST /subcontractors/delete" => "office",
-    "GET /parts"                 => "office",
-    "GET /parts/get"             => "office",
-    "POST /parts"                => "office",
-    "POST /parts/update"         => "office",
-    "POST /parts/delete"         => "office",
-    "GET /purchase-orders"       => "office",
-    "GET /purchase-orders/get"   => "office",
-    "POST /purchase-orders"      => "office",
-    "POST /purchase-orders/update" => "office",
-    "POST /purchase-orders/receive" => "office",
-    "POST /purchase-orders/cancel"  => "office",
-    "GET /stock-movements"       => "office",
     // Assets
     "GET /assets"                => "office",
     "GET /assets/get"            => "office",

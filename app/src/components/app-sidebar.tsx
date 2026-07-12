@@ -16,10 +16,7 @@ import {
   Contact,
   Quote,
   ScrollText,
-  Truck,
   HardHat,
-  Package,
-  ClipboardList,
   Boxes,
   Megaphone,
   Send,
@@ -84,11 +81,8 @@ const NAV: EgoSection[] = [
     ],
   },
   {
-    label: "Procurement",
+    label: "Subcontractors",
     items: [
-      { title: "Parts", url: "ego/parts", icon: Package },
-      { title: "Purchase Orders", url: "ego/purchase-orders", icon: ClipboardList },
-      { title: "Suppliers", url: "ego/suppliers", icon: Truck },
       { title: "Subcontractors", url: "ego/subcontractors", icon: HardHat },
     ],
   },
