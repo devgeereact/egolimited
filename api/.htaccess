@@ -6,7 +6,10 @@ RewriteCond %{HTTP:Authorization} .
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
 
 # Never web-serve internals: vendored libs, CLI scripts, config.
-RewriteRule ^(lib/|seed\.php|migrate\.php|cron\.php) - [F,L]
+# backup.php/restore.php shell out to mysqldump/mysql — restore.php can OVERWRITE the live
+# database. They must never be reachable over HTTP. Their in-code `PHP_SAPI !== "cli"` guard
+# is the second layer, not the only one.
+RewriteRule ^(lib/|seed\.php|migrate\.php|cron\.php|campaign_cron\.php|backup\.php|restore\.php) - [F,L]
 
 # Send all non-file requests to index.php.
 RewriteCond %{REQUEST_FILENAME} !-f
@@ -14,6 +17,6 @@ RewriteCond %{REQUEST_FILENAME} !-d
 RewriteRule ^ index.php [QSA,L]
 
 # Never serve secrets / sql / CLI scripts.
-<FilesMatch "\.(sql|md)$|^config\.php$|^(seed|migrate|cron)\.php$">
+<FilesMatch "\.(sql|md)$|^config\.php$|^(seed|migrate|cron|campaign_cron|backup|restore)\.php$">
   Require all denied
 </FilesMatch>

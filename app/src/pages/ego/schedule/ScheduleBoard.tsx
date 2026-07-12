@@ -5,7 +5,7 @@ import dayGridPlugin from "@fullcalendar/daygrid"
 import timeGridPlugin from "@fullcalendar/timegrid"
 import interactionPlugin from "@fullcalendar/interaction"
 import type { DateSelectArg } from "@fullcalendar/core"
-import { CalendarDays, Loader2, Plus, Clock, UserPlus } from "lucide-react"
+import { Loader2, Plus, Clock, UserPlus } from "lucide-react"
 
 import { toast } from "sonner"
 

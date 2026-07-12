@@ -18,7 +18,7 @@ const initials = (n: string) => n.split(" ").map((p) => p[0]).slice(0, 2).join("
 interface HistItem { id: number; reference: string; title: string; status: EgoStatus; completed_at: string | null; scheduled_start: string | null; customer_name: string }
 interface Stats { total: number; today: number; week: number }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 type InstallEvent = Event & { prompt: () => void }
 
 export default function EngineerProfile() {

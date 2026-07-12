@@ -19,7 +19,7 @@ interface LegalDoc {
   sections: LegalSection[]
 }
 
-const UPDATED = "18 June 2026"
+const UPDATED = "12 July 2026"
 
 const docs: Record<Kind, LegalDoc> = {
   privacy: {
@@ -44,7 +44,7 @@ const docs: Record<Kind, LegalDoc> = {
         list: [
           "Identity and contact details: your name, email address, phone number, and the property or billing address.",
           "Enquiry and job details: a description of the work, photos you choose to send us, access notes, and your scheduling preferences.",
-          "Financial information: the invoices we raise and the payments you make. Card payments are handled by our payment provider; we do not store your full card number.",
+          "Financial information: the invoices we raise and the bank transfers you make against them. We are paid by bank transfer only — we do not take card payments, so we never hold card details.",
           "Account information: the secure, time-limited link we email you to view your jobs, quotes, and invoices in the customer portal.",
           "Communications: the emails, messages, and notes from calls we exchange about your work.",
           "Technical and usage data: limited information such as your IP address, browser type, and the pages you visit, collected through cookies (see our Cookie policy).",
@@ -72,7 +72,7 @@ const docs: Record<Kind, LegalDoc> = {
         ],
         list: [
           "The engineers and vetted subcontractors who carry out your work.",
-          "Our payment provider, to process card and online payments securely.",
+          "Our bank, to receive and reconcile the payments you make against your invoice.",
           "Our accountant and professional advisers, where reasonably required.",
           "IT, hosting, and software providers who process data on our instructions under a contract that requires them to keep it secure.",
           "Insurers, regulators, or authorities where we are legally required to disclose, or to establish or defend legal claims.",
@@ -196,7 +196,7 @@ const docs: Record<Kind, LegalDoc> = {
         h: "Prices, invoicing, and payment",
         p: [
           "Prices are stated as inclusive or exclusive of VAT as shown on your quote. We invoice on completion unless we have agreed a different arrangement, and invoices are due within the period stated on them.",
-          "You can pay by bank transfer or by card using the details or link on your invoice. For business customers, we may charge interest on overdue invoices in line with the Late Payment of Commercial Debts (Interest) Act 1998.",
+          "Payment is by bank transfer, using the account details and payment reference shown on your invoice. We do not take card payments. For business customers, we may charge interest on overdue invoices in line with the Late Payment of Commercial Debts (Interest) Act 1998.",
         ],
       },
       {
@@ -269,7 +269,7 @@ const docs: Record<Kind, LegalDoc> = {
       {
         h: "Third-party cookies",
         p: [
-          "A few trusted third parties may set cookies when their service is in use, for example our payment provider during checkout, or a privacy-respecting analytics provider. These providers act under their own privacy terms, and we only work with providers that handle data responsibly.",
+          "We do not currently run any third-party advertising, tracking, or analytics cookies on this site, and there is no card checkout to set them. If that ever changes we will ask for your consent first and update this policy before the cookie is set.",
         ],
       },
       {

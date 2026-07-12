@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { Switch } from "@/components/ui/switch"
@@ -111,7 +110,7 @@ export default function CampaignsPage() {
     load()
     loadLeadCounts()
     api<{ templates: Template[] }>("/email-templates").then((r) => setTemplates(r.templates)).catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load templates"))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [])
 
   function useTemplate(id: string) {
@@ -210,7 +209,7 @@ export default function CampaignsPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load leads"))
       .finally(() => setLeadsLoading(false))
   }
-  useEffect(() => { loadLeads(leadStatus) /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [leadStatus])
+  useEffect(() => { loadLeads(leadStatus)   }, [leadStatus])
 
   async function runLeadSearch() {
     if (!searchQuery.trim()) { toast.error("Describe the kind of business to look for"); return }
@@ -269,7 +268,7 @@ export default function CampaignsPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load automation"))
       .finally(() => setAutoLoading(false))
   }
-  useEffect(() => { loadAutomation() /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [])
+  useEffect(() => { loadAutomation()   }, [])
 
   function reloadSteps() {
     setAddingStep(false)

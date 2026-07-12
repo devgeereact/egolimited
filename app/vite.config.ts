@@ -23,4 +23,9 @@ export default defineConfig({
     // Rollup's automatic (and correctly ordered) algorithm.
     chunkSizeWarningLimit: 900,
   },
+  test: {
+    // Default to node so the pure-logic specs (invoicing, jobStatus, roles) stay fast;
+    // component specs opt into a DOM with a `@vitest-environment jsdom` docblock.
+    environment: "node",
+  },
 })

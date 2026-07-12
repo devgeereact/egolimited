@@ -50,7 +50,7 @@ export default function ReviewsPage() {
       .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load reviews"))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() /* eslint-disable-next-line */ }, [page])
+  useEffect(() => { load()   }, [page])
 
   async function ack(id: number) {
     try { await api("/messages/ack", { method: "POST", body: { id } }); toast.success("Marked read"); load() }

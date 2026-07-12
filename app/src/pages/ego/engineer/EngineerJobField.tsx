@@ -69,7 +69,7 @@ export default function EngineerJobField() {
     if (!id) return
     return api<{ job: FieldDetail }>(`/me/jobs/get?id=${id}`).then((r) => setJob(r.job)).catch(() => toast.error("Job not found")).finally(() => setLoading(false))
   }
-  useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
+  useEffect(() => { load()   }, [id])
 
   async function move(to: JobStatus, extra: Record<string, unknown> = {}) {
     if (!job) return

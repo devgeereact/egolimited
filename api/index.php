@@ -45,9 +45,28 @@ function bearer(): ?string {
 
 /* ---------- db (mysqli) — throw on error so failed writes roll back (no gaps) ---------- */
 mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);
+
+// Correlates a server-side log line with the "ref" the client is shown, so a user can
+// quote it and we can find the exact failure. Cheap enough to mint on every request.
+define("EGO_RID", bin2hex(random_bytes(6)));
+
+/** Everything unhandled lands here. It MUST leave a trace — a silent 500 means a failed
+ *  invoice, a half-applied payment or a dead cron is invisible until a customer complains. */
 set_exception_handler(function (Throwable $e) {
+    $route = ($_SERVER["REQUEST_METHOD"] ?? "?") . " " . (parse_url($_SERVER["REQUEST_URI"] ?? "/", PHP_URL_PATH) ?? "/");
+    error_log(sprintf(
+        "[ego %s] UNCAUGHT %s: %s @ %s:%d | route=%s\n%s",
+        EGO_RID, get_class($e), $e->getMessage(), $e->getFile(), $e->getLine(), $route, $e->getTraceAsString()
+    ));
     http_response_code(500);
-    echo json_encode(["error" => "Server error"]);
+    echo json_encode(["error" => "Server error", "ref" => EGO_RID]);
+});
+// PHP fatals (OOM, timeout) never reach the exception handler — catch them on shutdown.
+register_shutdown_function(function () {
+    $e = error_get_last();
+    if ($e && in_array($e["type"], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+        error_log(sprintf("[ego %s] FATAL %s @ %s:%d", EGO_RID, $e["message"], $e["file"], $e["line"]));
+    }
 });
 try {
     $db = new mysqli($cfg["db_host"], $cfg["db_user"], $cfg["db_pass"], $cfg["db_name"]);
@@ -159,7 +178,10 @@ function cache_put(mysqli $db, string $k, string $v, int $ttlSec): void {
 /** Return a user-safe error. DB internals (mysqli_sql_exception) are logged, never echoed;
  *  our own RuntimeExceptions carry deliberate, safe messages and pass through. */
 function client_error(Throwable $e, string $fallback = "Something went wrong", int $code = 400): never {
-    if ($e instanceof mysqli_sql_exception) { error_log("[ego-db] " . $e->getMessage()); fail($fallback, $code); }
+    if ($e instanceof mysqli_sql_exception) {
+        error_log(sprintf("[ego %s] DB %s @ %s:%d", EGO_RID, $e->getMessage(), $e->getFile(), $e->getLine()));
+        fail($fallback, $code);
+    }
     fail($e->getMessage(), $code);
 }
 
@@ -507,6 +529,26 @@ function ensure_message_attachments(mysqli $db): void {
 /** Links an auto-created invoice back to the quote it came from (idempotent conversion). */
 function ensure_invoice_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_invoices ADD COLUMN IF NOT EXISTS converted_from_quote_id INT NULL");
+}
+
+/** Payments are a financial ledger: rows are NEVER erased, only marked reversed. Every read of
+ *  ego_payments must therefore filter `deleted_at IS NULL`. Self-heals pre-migration databases. */
+function ensure_payment_cols(mysqli $db): void {
+    static $done = false; if ($done) return; $done = true;
+    $db->query("ALTER TABLE ego_payments ADD COLUMN IF NOT EXISTS deleted_at DATETIME NULL");
+    $db->query("ALTER TABLE ego_payments ADD COLUMN IF NOT EXISTS deleted_by INT NULL");
+    // MySQL has no ADD INDEX IF NOT EXISTS, and mysqli_report(STRICT) turns the resulting
+    // "Duplicate key name" into a THROWN exception that `@` does not suppress — so a bare
+    // ALTER here would 500 every payments request after the first one. Ask the catalogue
+    // instead and only add what's actually missing.
+    foreach ([
+        "idx_ego_pay_invoice" => "(invoice_id, deleted_at)",
+        "idx_ego_pay_paid_on"  => "(paid_on)",
+    ] as $name => $cols) {
+        $has = db_one($db, "SELECT 1 x FROM information_schema.statistics
+                            WHERE table_schema = DATABASE() AND table_name = 'ego_payments' AND index_name = ?", "s", $name);
+        if (!$has) $db->query("ALTER TABLE ego_payments ADD INDEX $name $cols");
+    }
 }
 
 /** Task-board done/archive timestamps — self-heal so the board works even before migrate.php runs. */
@@ -1732,6 +1774,7 @@ switch ("$method $route") {
     }
 
     case "GET /invoices/get": {
+        ensure_payment_cols($db);
         require_role($db, "admin");
         $id = (int)($_GET["id"] ?? 0);
         $inv = db_one($db,
@@ -1742,7 +1785,7 @@ switch ("$method $route") {
         if (!$inv) fail("Not found", 404);
         $inv["id"] = (int)$inv["id"];
         $inv["lines"] = db_all($db, "SELECT description,quantity,unit_price,line_total FROM ego_invoice_lines WHERE invoice_id=? ORDER BY sort,id", "i", $id);
-        $inv["payments"] = db_all($db, "SELECT amount,paid_on,reference,note FROM ego_payments WHERE invoice_id=? ORDER BY id", "i", $id);
+        $inv["payments"] = db_all($db, "SELECT id,amount,paid_on,reference,note FROM ego_payments WHERE invoice_id=? AND deleted_at IS NULL ORDER BY id", "i", $id);
         $cust = db_one($db, "SELECT a.line1,a.line2,a.city,a.postcode FROM ego_addresses a WHERE a.customer_id=? AND a.is_primary=1", "i", (int)$inv["customer_id"]);
         $inv["customer_address"] = $cust;
         $inv["company"] = db_one($db, "SELECT company_name,address,phone,email,vat_number,logo_url,bank_account_name,bank_sort_code,bank_account_number,payment_terms_days FROM ego_company_settings ORDER BY id LIMIT 1");
@@ -1844,14 +1887,20 @@ switch ("$method $route") {
         $inv = db_one($db, "SELECT id,kind,status,job_id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$inv) fail("Not found", 404);
         if (in_array($inv["status"], ["paid", "void"], true)) fail("A paid or already-void document can't be voided", 409);
-        db_exec($db, "UPDATE ego_invoices SET status='void' WHERE id=?", "i", $id);
-        if ($inv["kind"] === "invoice") {
-            $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
-            if ($job && $job["status"] === "invoiced") {
-                db_exec($db, "UPDATE ego_jobs SET status='completed' WHERE id=?", "i", (int)$inv["job_id"]);
-                log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "invoiced", "to" => "completed"]);
+        // Voiding touches the invoice AND walks the job back a state. Atomic: a partial
+        // failure here leaves a voided invoice against a job still marked 'invoiced'.
+        $db->begin_transaction();
+        try {
+            db_exec($db, "UPDATE ego_invoices SET status='void' WHERE id=?", "i", $id);
+            if ($inv["kind"] === "invoice") {
+                $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=? FOR UPDATE", "i", (int)$inv["job_id"]);
+                if ($job && $job["status"] === "invoiced") {
+                    db_exec($db, "UPDATE ego_jobs SET status='completed' WHERE id=?", "i", (int)$inv["job_id"]);
+                    log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "invoiced", "to" => "completed"]);
+                }
             }
-        }
+            $db->commit();
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not void this document"); }
         send(["ok" => true]);
     }
 
@@ -1914,9 +1963,11 @@ switch ("$method $route") {
     }
 
     // Reverse a payment mistake (manager+): flip a paid invoice back to sent and reopen the
-    // job it closed. Payment records are kept (delete them separately if they were wrong).
+    // job it closed. The payment rows are soft-reversed, never erased — HMRC requires the
+    // financial trail (incl. the mistake and its correction) to survive for 6 years.
     case "POST /invoices/unpay": {
         $actor = require_min($db, "manager");
+        ensure_payment_cols($db);
         $id = (int)(body()["id"] ?? 0);
         $inv = db_one($db, "SELECT id,kind,status,job_id FROM ego_invoices WHERE id=? AND deleted_at IS NULL", "i", $id);
         if (!$inv) fail("Not found", 404);
@@ -1924,10 +1975,10 @@ switch ("$method $route") {
         if ($inv["status"] !== "paid") fail("Only a paid invoice can be reversed", 409);
         $db->begin_transaction();
         try {
-            // Remove the (mistaken) payment records, flip back to 'sent' — GET computes 'overdue'
-            // on the fly if past due — and reopen the job if this payment had closed it.
-            $reversed = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=?", "i", $id)["s"] ?? 0), 2);
-            db_exec($db, "DELETE FROM ego_payments WHERE invoice_id=?", "i", $id);
+            // Soft-reverse the (mistaken) payment records, flip back to 'sent' — GET computes
+            // 'overdue' on the fly if past due — and reopen the job if this payment had closed it.
+            $reversed = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=? AND deleted_at IS NULL", "i", $id)["s"] ?? 0), 2);
+            db_exec($db, "UPDATE ego_payments SET deleted_at=NOW(), deleted_by=? WHERE invoice_id=? AND deleted_at IS NULL", "ii", (int)$actor["id"], $id);
             db_exec($db, "UPDATE ego_invoices SET status='sent', paid_at=NULL WHERE id=?", "i", $id);
             $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
             if ($job && $job["status"] === "closed") {
@@ -1941,6 +1992,7 @@ switch ("$method $route") {
     }
 
     case "POST /invoices/pay": {
+        ensure_payment_cols($db);
         $actor = require_role($db, "admin");
         $b = body();
         $id = (int)($b["id"] ?? 0);
@@ -1958,7 +2010,7 @@ switch ("$method $route") {
         // 'closed') once the summed payments cover the total. Record + update atomically.
         $db->begin_transaction();
         try {
-            $already = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=?", "i", $id)["s"] ?? 0), 2);
+            $already = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=? AND deleted_at IS NULL", "i", $id)["s"] ?? 0), 2);
             if ($amount > $total - $already + 0.01) throw new RuntimeException("That's more than the outstanding balance of £" . number_format(max(0, $total - $already), 2));
             db_exec($db, "INSERT INTO ego_payments (invoice_id,amount,paid_on,reference,note,recorded_by) VALUES (?,?,?,?,?,?)",
                 "idsssi", $id, $amount, $paidOn, $ref, $note, (int)$actor["id"]);
@@ -1981,6 +2033,7 @@ switch ("$method $route") {
 
     /* ===================== M7: DASHBOARD ===================== */
     case "GET /dashboard": {
+        ensure_payment_cols($db);
         require_role($db, "admin");
         $todayJobs = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL AND DATE(scheduled_start)=CURDATE() AND status NOT IN ('closed','cancelled')")["c"] ?? 0);
         $toSchedule = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_jobs WHERE deleted_at IS NULL AND status='new'")["c"] ?? 0);
@@ -1993,7 +2046,7 @@ switch ("$method $route") {
         // Money
         $unpaid = (float)(db_one($db, "SELECT COALESCE(SUM(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='sent'")["s"] ?? 0);
         $overdue = (float)(db_one($db, "SELECT COALESCE(SUM(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='sent' AND due_date < CURDATE()")["s"] ?? 0);
-        $collected30 = (float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE paid_on >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")["s"] ?? 0);
+        $collected30 = (float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE deleted_at IS NULL AND paid_on >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")["s"] ?? 0);
         // Customer satisfaction
         $rev = db_one($db, "SELECT COUNT(*) n, AVG(rating) avg FROM ego_messages WHERE channel='review'");
         $reviewCount = (int)($rev["n"] ?? 0);
@@ -2041,6 +2094,7 @@ switch ("$method $route") {
 
     /* ===================== ANALYTICS + REPORTING (office+) ===================== */
     case "GET /analytics": {
+        ensure_payment_cols($db);
         require_role($db, "admin");
 
         // 12-month spine (oldest → newest), zero-filled, in the server's London tz.
@@ -2050,7 +2104,7 @@ switch ("$method $route") {
 
         $colMap = [];
         foreach (db_all($db, "SELECT DATE_FORMAT(paid_on,'%Y-%m') m, COALESCE(SUM(amount),0) s
-                              FROM ego_payments WHERE paid_on >= ? GROUP BY m", "s", $since) as $r) $colMap[$r["m"]] = (float) $r["s"];
+                              FROM ego_payments WHERE deleted_at IS NULL AND paid_on >= ? GROUP BY m", "s", $since) as $r) $colMap[$r["m"]] = (float) $r["s"];
         $invMap = [];
         foreach (db_all($db, "SELECT DATE_FORMAT(issue_date,'%Y-%m') m, COALESCE(SUM(total),0) s
                               FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND issue_date IS NOT NULL AND issue_date >= ? GROUP BY m", "s", $since) as $r) $invMap[$r["m"]] = (float) $r["s"];
@@ -2079,7 +2133,7 @@ switch ("$method $route") {
         $topCust = array_map(fn($r) => ["name" => $r["name"], "revenue" => round((float) $r["revenue"], 2), "jobs" => (int) $r["jobs"]],
             db_all($db, "SELECT c.name,
                             (SELECT COALESCE(SUM(p.amount),0) FROM ego_payments p JOIN ego_invoices i ON i.id=p.invoice_id
-                             WHERE i.customer_id=c.id AND i.deleted_at IS NULL) revenue,
+                             WHERE i.customer_id=c.id AND i.deleted_at IS NULL AND p.deleted_at IS NULL) revenue,
                             (SELECT COUNT(*) FROM ego_jobs j WHERE j.customer_id=c.id AND j.deleted_at IS NULL) jobs
                          FROM ego_customers c WHERE c.deleted_at IS NULL
                          HAVING revenue > 0 ORDER BY revenue DESC LIMIT 8"));
@@ -2106,7 +2160,7 @@ switch ("$method $route") {
             "invoiced_12m"       => round(array_sum(array_column($series, "invoiced")), 2),
             "outstanding"        => round($one("SELECT COALESCE(SUM(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='sent'"), 2),
             "overdue"            => round($one("SELECT COALESCE(SUM(total),0) s FROM ego_invoices WHERE deleted_at IS NULL AND kind='invoice' AND status='sent' AND due_date < CURDATE()"), 2),
-            "collected_30d"      => round($one("SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE paid_on >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"), 2),
+            "collected_30d"      => round($one("SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE deleted_at IS NULL AND paid_on >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)"), 2),
             "jobs_completed_30d" => (int) (db_one($db, "SELECT COUNT(*) s FROM ego_jobs WHERE deleted_at IS NULL AND completed_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")["s"] ?? 0),
             "jobs_open"          => (int) (db_one($db, "SELECT COUNT(*) s FROM ego_jobs WHERE deleted_at IS NULL AND status NOT IN ('closed','cancelled','paid')")["s"] ?? 0),
             "new_customers_30d"  => (int) (db_one($db, "SELECT COUNT(*) s FROM ego_customers WHERE deleted_at IS NULL AND created_at >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)")["s"] ?? 0),
@@ -2122,6 +2176,7 @@ switch ("$method $route") {
 
     // CSV export of a chosen report. Streams text/csv as an attachment (authed fetch → blob).
     case "GET /analytics/export": {
+        ensure_payment_cols($db);
         require_role($db, "admin");
         $report = preg_replace('/[^a-z]/', '', strtolower((string) ($_GET["report"] ?? "invoices")));
         $reports = [
@@ -2133,7 +2188,8 @@ switch ("$method $route") {
             "payments" => [
                 ["Date", "Amount", "Reference", "Invoice", "Customer"],
                 "SELECT p.paid_on d, p.amount a, p.reference r, COALESCE(i.number, i.payment_reference) inv, c.name cust
-                 FROM ego_payments p LEFT JOIN ego_invoices i ON i.id=p.invoice_id LEFT JOIN ego_customers c ON c.id=i.customer_id ORDER BY p.id DESC",
+                 FROM ego_payments p LEFT JOIN ego_invoices i ON i.id=p.invoice_id LEFT JOIN ego_customers c ON c.id=i.customer_id
+                 WHERE p.deleted_at IS NULL ORDER BY p.id DESC",
             ],
             "jobs" => [
                 ["Reference", "Title", "Status", "Priority", "Customer", "Engineer", "Quoted", "Created"],
@@ -3984,27 +4040,37 @@ switch ("$method $route") {
         log_activity($db, null, (int)$actor["id"], "invoice_deleted", ["id" => $id]);
         send(["ok" => true]);
     }
+    // Remove a mis-keyed payment (manager+). This is a SOFT delete: the row is retained with
+    // deleted_at/deleted_by so the financial trail survives (HMRC: 6 years) and an erroneous
+    // deletion is itself recoverable. Removing a payment can walk BOTH the invoice and the job
+    // backwards, so the whole cascade is one transaction — a partial failure would otherwise
+    // leave an invoice marked 'paid' with no payment behind it.
     case "POST /payments/delete": {
         $actor = require_min($db, "manager");
+        ensure_payment_cols($db);
         $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
-        $p = db_one($db, "SELECT id, invoice_id FROM ego_payments WHERE id=?", "i", $id);
-        if (!$p) fail("Payment not found", 404);
-        db_exec($db, "DELETE FROM ego_payments WHERE id=?", "i", $id);
-        // Recalc: if removing this payment drops the invoice below its total, un-mark it paid
-        // and reopen the job it closed — otherwise a deleted payment leaves a false 'paid'.
-        $inv = db_one($db, "SELECT id,total,status,job_id FROM ego_invoices WHERE id=?", "i", (int)$p["invoice_id"]);
-        if ($inv && $inv["status"] === "paid") {
-            $paid = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=?", "i", (int)$inv["id"])["s"] ?? 0), 2);
-            if ($paid < round((float)$inv["total"], 2) - 0.01) {
-                db_exec($db, "UPDATE ego_invoices SET status='sent', paid_at=NULL WHERE id=?", "i", (int)$inv["id"]);
-                $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=?", "i", (int)$inv["job_id"]);
-                if ($job && $job["status"] === "closed") {
-                    db_exec($db, "UPDATE ego_jobs SET status='invoiced' WHERE id=?", "i", (int)$inv["job_id"]);
-                    log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "closed", "to" => "invoiced", "note" => "payment deleted"]);
+        $db->begin_transaction();
+        try {
+            $p = db_one($db, "SELECT id, invoice_id FROM ego_payments WHERE id=? AND deleted_at IS NULL FOR UPDATE", "i", $id);
+            if (!$p) { $db->rollback(); fail("Payment not found", 404); }
+            db_exec($db, "UPDATE ego_payments SET deleted_at=NOW(), deleted_by=? WHERE id=?", "ii", (int)$actor["id"], $id);
+            // Recalc: if removing this payment drops the invoice below its total, un-mark it paid
+            // and reopen the job it closed — otherwise a deleted payment leaves a false 'paid'.
+            $inv = db_one($db, "SELECT id,total,status,job_id FROM ego_invoices WHERE id=? FOR UPDATE", "i", (int)$p["invoice_id"]);
+            if ($inv && $inv["status"] === "paid") {
+                $paid = round((float)(db_one($db, "SELECT COALESCE(SUM(amount),0) s FROM ego_payments WHERE invoice_id=? AND deleted_at IS NULL", "i", (int)$inv["id"])["s"] ?? 0), 2);
+                if ($paid < round((float)$inv["total"], 2) - 0.01) {
+                    db_exec($db, "UPDATE ego_invoices SET status='sent', paid_at=NULL WHERE id=?", "i", (int)$inv["id"]);
+                    $job = db_one($db, "SELECT status FROM ego_jobs WHERE id=? FOR UPDATE", "i", (int)$inv["job_id"]);
+                    if ($job && $job["status"] === "closed") {
+                        db_exec($db, "UPDATE ego_jobs SET status='invoiced' WHERE id=?", "i", (int)$inv["job_id"]);
+                        log_activity($db, (int)$inv["job_id"], (int)$actor["id"], "status_changed", ["from" => "closed", "to" => "invoiced", "note" => "payment deleted"]);
+                    }
                 }
             }
-        }
-        log_activity($db, null, (int)$actor["id"], "payment_deleted", ["id" => $id, "invoice_id" => (int)$p["invoice_id"]]);
+            log_activity($db, null, (int)$actor["id"], "payment_deleted", ["id" => $id, "invoice_id" => (int)$p["invoice_id"]]);
+            $db->commit();
+        } catch (Throwable $e) { $db->rollback(); client_error($e, "Could not remove the payment"); }
         send(["ok" => true]);
     }
 

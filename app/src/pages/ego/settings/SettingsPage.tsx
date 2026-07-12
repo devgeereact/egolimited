@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
-  Loader2, Users, Bell, Palette, UserRound, Building2, ShieldCheck, Mail, Phone,
-  MapPin, Receipt, Landmark, Pencil, Lock, Hash, Timer,
+  Loader2, Users, Bell, Palette, UserRound, Building2, ShieldCheck, Mail, Phone, Receipt, Landmark, Pencil, Lock, Hash, Timer,
 } from "lucide-react"
 import { toast } from "sonner"
 

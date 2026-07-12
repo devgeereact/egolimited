@@ -1,4 +1,4 @@
-import { Outlet } from "react-router-dom"
+import { Outlet, useLocation } from "react-router-dom"
 import { AppSidebar } from "@/components/app-sidebar"
 import { NotificationDropdown } from "@/components/notification-dropdown"
 
@@ -17,12 +17,14 @@ import { Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { UserDropdown } from "@/components/UserDropdown"
 import { ConfirmHost } from "@/components/ego/confirm"
+import ErrorBoundary from "@/components/ego/ErrorBoundary"
 import { useAuth } from "@/store/auth.store"
 
 export default function AppLayout() {
   const [scrolled, setScrolled] = useState(false)
   const [open, setOpen] = useState(true)
   const [hovered, setHovered] = useState(false)
+  const { pathname } = useLocation()
 
   // Load the signed-in user for the WHOLE shell (nav + header), not just guarded
   // routes. Without this, an unmatched URL (a stale link, an old bookmark, a refresh
@@ -85,11 +87,16 @@ export default function AppLayout() {
                 </div>
               </header>
 
-        {/* PAGE CONTENT */}
+        {/* PAGE CONTENT
+            Keyed on the pathname so a crashed page's boundary resets when the user navigates
+            away — otherwise the error state would persist across every subsequent route.
+            The boundary sits INSIDE <main> so the sidebar and header survive a page crash. */}
         <main className="flex-1 p-6">
-          <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>}>
-            <Outlet />
-          </Suspense>
+          <ErrorBoundary key={pathname} label={pathname}>
+            <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>}>
+              <Outlet />
+            </Suspense>
+          </ErrorBoundary>
         </main>
 
         <Footer />

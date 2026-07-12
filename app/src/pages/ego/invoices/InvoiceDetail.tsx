@@ -70,7 +70,7 @@ export default function InvoiceDetail() {
       .catch(() => toast.error("Not found"))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
+  useEffect(() => { load()   }, [id])
 
   const totals = useMemo(() => computeTotals(lines, vatRate), [lines, vatRate])
   const isDraft = inv?.status === "draft"

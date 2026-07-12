@@ -1,7 +1,8 @@
 import { Suspense, useEffect, useState } from "react"
-import { NavLink, Outlet } from "react-router-dom"
+import { NavLink, Outlet, useLocation } from "react-router-dom"
 import { CalendarClock, ListChecks, CircleUserRound, Wrench, WifiOff, Loader2 } from "lucide-react"
 
+import ErrorBoundary from "@/components/ego/ErrorBoundary"
 import { cn } from "@/lib/utils"
 
 const TABS = [
@@ -12,6 +13,7 @@ const TABS = [
 
 /** Mobile-first shell for the engineer PWA — top brand bar + bottom tab bar. */
 export default function EngineerLayout() {
+  const { pathname } = useLocation()
   const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true)
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false)
@@ -37,11 +39,14 @@ export default function EngineerLayout() {
         </div>
       )}
 
-      {/* Content */}
+      {/* Content — boundary inside <main> so the bottom tab bar survives a page crash and the
+          engineer can still navigate. Keyed on pathname so it resets when they move on. */}
       <main className="flex-1 pb-20">
-        <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>}>
-          <Outlet />
-        </Suspense>
+        <ErrorBoundary key={pathname} label={pathname}>
+          <Suspense fallback={<div className="flex min-h-[60vh] items-center justify-center text-muted-foreground"><Loader2 className="size-5 animate-spin" /></div>}>
+            <Outlet />
+          </Suspense>
+        </ErrorBoundary>
       </main>
 
       {/* Bottom tab bar */}

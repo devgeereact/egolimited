@@ -258,6 +258,9 @@ CREATE TABLE IF NOT EXISTS ego_integrations (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Financial ledger. Rows are NEVER hard-deleted — a mis-keyed payment is soft-reversed
+-- (deleted_at/deleted_by) so the trail of the mistake AND its correction survives the
+-- 6-year HMRC retention window. EVERY read must filter `deleted_at IS NULL`.
 CREATE TABLE IF NOT EXISTS ego_payments (
   id          INT AUTO_INCREMENT PRIMARY KEY,
   invoice_id  INT NOT NULL,
@@ -266,9 +269,16 @@ CREATE TABLE IF NOT EXISTS ego_payments (
   reference   VARCHAR(120) NULL,
   note        VARCHAR(255) NULL,
   recorded_by INT NULL,
+  deleted_at  DATETIME NULL,
+  deleted_by  INT NULL,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ego_pay_invoice (invoice_id, deleted_at),
+  INDEX idx_ego_pay_paid_on (paid_on),
   CONSTRAINT fk_ego_pay_invoice FOREIGN KEY (invoice_id) REFERENCES ego_invoices(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+-- Existing databases (pre 2026-07-12): add the ledger's soft-delete columns in place.
+ALTER TABLE ego_payments ADD COLUMN IF NOT EXISTS deleted_at DATETIME NULL;
+ALTER TABLE ego_payments ADD COLUMN IF NOT EXISTS deleted_by INT NULL;
 
 -- ============================================================================
 -- Roles & permissions (Founder > Manager > Office (Employee Admin) > Engineer)

@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import {
-  Briefcase, CalendarPlus, PoundSterling, AlertTriangle, Loader2, Sparkles, Droplets, Wind, FileText,
-  Thermometer, Clock, ArrowRight, CloudSun, MapPin, Truck, BadgePoundSterling,
-  Star, CheckCircle2, type LucideIcon,
+  Briefcase, CalendarPlus, PoundSterling, AlertTriangle, Loader2, Sparkles, FileText, Clock, ArrowRight, Truck, BadgePoundSterling,
+  Star, CheckCircle2,
 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"

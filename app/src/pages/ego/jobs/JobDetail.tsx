@@ -151,7 +151,7 @@ export default function JobDetail() {
       .catch(() => toast.error("Job not found"))
       .finally(() => setLoading(false))
   }
-  useEffect(() => { load() /* eslint-disable-next-line */ }, [id])
+  useEffect(() => { load()   }, [id])
   useEffect(() => { api<{ engineers: { id: number; name: string; available: number }[] }>("/engineers").then((r) => setEngineers(r.engineers)).catch(() => {}) }, [])
 
   // Swap the assigned engineer without deleting/unscheduling the job.

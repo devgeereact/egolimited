@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
-import { ArrowLeft, Mail, MapPin, Phone, Pencil, Plus, Trash2, Loader2 } from "lucide-react"
+import { ArrowLeft, Mail, MapPin, Phone, Pencil, Plus, Trash2 } from "lucide-react"
 import EmailDialog from "@/components/ego/EmailDialog"
 import { toast } from "sonner"
 

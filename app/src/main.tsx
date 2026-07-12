@@ -4,6 +4,7 @@ import { RouterProvider } from "react-router-dom"
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "sonner"
 
+import ErrorBoundary from "@/components/ego/ErrorBoundary"
 import UIThemeProvider from "@/providers/ui-theme-provider"
 
 import { router } from "@/routes"
@@ -31,7 +32,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     >
       
       <UIThemeProvider>
-        <RouterProvider router={router} />
+        <ErrorBoundary label="app root">
+          <RouterProvider router={router} />
+        </ErrorBoundary>
       </UIThemeProvider>
     </ThemeProvider>
     <Toaster position="top-right" richColors closeButton />

@@ -209,16 +209,20 @@ export const router = createBrowserRouter (
     },
 
     // 🏗️ EGO LIMITED — public landing + login + customer portal (no app chrome)
-    { path: "welcome", element: <EgoLanding /> },
-    { path: "ego/login", element: <EgoLogin /> },
-    { path: "ego/invite/:token", element: <InviteAccept /> },
-    { path: "track/:token", element: s(<TrackJob />) },
-    { path: "ego/account/security", element: s(<div className="mx-auto w-full max-w-3xl p-4 md:p-6"><AccountSecurity /></div>) },
-    { path: "ego/lock", element: s(<LockScreen />) },
+    // Every one of these carries errorElement: without it react-router shows its own raw
+    // "Unexpected Application Error!" stack-trace page. These are the routes a CUSTOMER and a
+    // locked-out user hit, so they are the last place that should leak a stack trace.
+    { path: "welcome", element: <EgoLanding />, errorElement: <ErrorPage /> },
+    { path: "ego/login", element: <EgoLogin />, errorElement: <ErrorPage /> },
+    { path: "ego/invite/:token", element: <InviteAccept />, errorElement: <ErrorPage /> },
+    { path: "track/:token", element: s(<TrackJob />), errorElement: <ErrorPage /> },
+    { path: "ego/account/security", element: s(<div className="mx-auto w-full max-w-3xl p-4 md:p-6"><AccountSecurity /></div>), errorElement: <ErrorPage /> },
+    { path: "ego/lock", element: s(<LockScreen />), errorElement: <ErrorPage /> },
 
     // 🏗️ EGO LIMITED — engineer PWA (mobile shell, role-guarded)
     {
       element: <RequireRole role="engineer" />,
+      errorElement: <ErrorPage />,
       children: [
         {
           element: <EngineerLayout />,

@@ -23,18 +23,42 @@ jobs:
         with:
           node-version: 20
 
+      # ---- quality gates: nothing reaches production that fails these ----
+      # This workflow deploys straight to the LIVE site with no staging step, so CI is the
+      # only gate that exists. A failing step here stops the upload — that is the point.
+      - name: PHP syntax check (api)
+        run: find api -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Install deps
+        run: |
+          npm ci --prefix app
+          npm ci --prefix landing
+
+      - name: Test app (blocking)
+        run: npm test --prefix app
+
+      - name: Lint (report only — see note)
+        # NOT blocking yet: the app carries ~43 pre-existing eslint errors, most of them
+        # react-hooks/set-state-in-effect + exhaustive-deps thrown by the hand-rolled
+        # `useEffect`-fetch pattern in ~50 pages. That pattern is being replaced wholesale
+        # by TanStack Query in Phase 1, which deletes the violations rather than papering
+        # over them — so fixing them by hand now is throwaway work. Flip this to blocking
+        # (drop `continue-on-error`) the moment that migration lands.
+        continue-on-error: true
+        run: |
+          npm run lint --prefix app
+          npm run lint --prefix landing
+
       # ---- build the two SPAs ----
       - name: Build app (base /app/)
         working-directory: app
         run: |
-          npm ci
           npx tsc -b
           npx vite build --base=/app/
 
       - name: Build landing (base /)
         working-directory: landing
         run: |
-          npm ci
           npx tsc -b
           npx vite build --base=/
 
@@ -100,3 +124,25 @@ jobs:
             .htaccess
             uploads/**
             .impeccable/**
+
+      # ---- prove the deploy actually landed ----
+      # We have shipped a white screen to production twice (2026-07-08). A green build is
+      # not evidence the live site works — only the live site is. Fail loudly if it doesn't.
+      # NOTE: hits the origin through Cloudflare; index.html is uncached/dynamic so a stale
+      # edge copy is not expected to mask a bad deploy here.
+      - name: Smoke test the live site
+        run: |
+          set -euo pipefail
+          echo "→ API health"
+          curl -fsS --retry 5 --retry-delay 5 --retry-all-errors https://egolimited.com/api/health | tee /dev/stderr | grep -q '"ok":true'
+
+          echo "→ App shell references a real hashed bundle"
+          app_html=$(curl -fsS --retry 5 --retry-delay 5 --retry-all-errors https://egolimited.com/app/)
+          bundle=$(printf '%s' "$app_html" | grep -oE '/app/assets/index-[A-Za-z0-9_-]+\.js' | head -1)
+          test -n "$bundle" || { echo "::error::no hashed app bundle in /app/ index.html"; printf '%s' "$app_html" | head -40; exit 1; }
+          echo "   bundle: $bundle"
+          curl -fsS -o /dev/null "https://egolimited.com${bundle}"
+
+          echo "→ Landing responds"
+          curl -fsS -o /dev/null https://egolimited.com/
+          echo "✅ smoke test passed"
