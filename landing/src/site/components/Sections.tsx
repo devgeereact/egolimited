@@ -103,9 +103,13 @@ function AnimatedNumber({
   const reduce = useReducedMotion()
   const [display, setDisplay] = useState(0)
 
+  // The count-up animation IS a setState-driven effect — it must start when the element scrolls
+  // into view, which is not knowable at render. Reduced-motion users jump straight to the value.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     if (!inView) return
     if (reduce) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDisplay(value)
       return
     }

@@ -29,6 +29,17 @@ const schema = z.object({
 })
 type Values = z.infer<typeof schema>
 
+/** What GET /jobs/get returns. Only the fields this form actually reads. */
+interface JobRecord {
+  customer_id: number | null
+  customer_name: string | null
+  title: string | null
+  description: string | null
+  priority: string | null
+  quoted_amount: string | number | null
+  address?: { line1?: string | null; city?: string | null; postcode?: string | null } | null
+}
+
 export default function JobForm() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
@@ -48,7 +59,7 @@ export default function JobForm() {
   const { data: customersData } = useApi<{ customers: { id: number; name: string }[] }>(!editing ? "/customers" : null)
   const customers = useMemo(() => customersData?.customers ?? [], [customersData])
 
-  const { data: jobData, isLoading, error } = useApi<{ job: any }>(id ? `/jobs/get?id=${id}` : null)
+  const { data: jobData, isLoading, error } = useApi<{ job: JobRecord }>(id ? `/jobs/get?id=${id}` : null)
   const loading = isLoading
   const customerName = jobData?.job?.customer_name ?? "" // shown read-only when editing
 
@@ -60,7 +71,7 @@ export default function JobForm() {
       customer_id: String(job.customer_id ?? ""),
       title: job.title ?? "",
       description: job.description ?? "",
-      priority: (["low", "normal", "urgent"].includes(job.priority) ? job.priority : "normal") as Values["priority"],
+      priority: (["low", "normal", "urgent"].includes(job.priority ?? "") ? job.priority : "normal") as Values["priority"],
       quotedAmount: job.quoted_amount != null ? String(job.quoted_amount) : "",
       line1: a.line1 ?? "", city: a.city ?? "", postcode: a.postcode ?? "",
     })

@@ -71,7 +71,11 @@ export default function SiteNav() {
     return () => window.removeEventListener("scroll", onScroll)
   }, [])
 
+  // Close the mobile menu + services flyout whenever the route changes. Reacting to navigation
+  // is exactly what an effect is for; there is nothing to derive at render time.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpen(false)
     setServicesOpen(false)
   }, [location.pathname])

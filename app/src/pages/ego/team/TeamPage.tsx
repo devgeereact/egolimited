@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Users, Loader2, UserPlus, ShieldCheck, Copy, Power, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/store/auth.store"
 import { ROLE_LABEL, type Role } from "@/lib/roles"
@@ -32,10 +33,6 @@ const ROLE_TONE: Record<Role, string> = {
 
 export default function TeamPage() {
   const user = useAuth((s) => s.user)
-  const [team, setTeam] = useState<Member[]>([])
-  const [assignable, setAssignable] = useState<Role[]>([])
-  const [myRole, setMyRole] = useState<Role | null>(null)
-  const [loading, setLoading] = useState(true)
   const [addOpen, setAddOpen] = useState(false)
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -44,13 +41,17 @@ export default function TeamPage() {
   const [busy, setBusy] = useState(false)
   const [invite, setInvite] = useState<string | null>(null)
 
-  function load() {
-    return api<{ team: Member[]; assignable_roles: Role[]; my_role: Role }>("/team").then((r) => {
-      setTeam(r.team); setAssignable(r.assignable_roles); setMyRole(r.my_role)
-      if (r.assignable_roles.length) setRole(r.assignable_roles[r.assignable_roles.length - 1])
-    })
-  }
-  useEffect(() => { load().finally(() => setLoading(false)) }, [])
+  // Cached + deduped + refetched in the background — see lib/query.ts.
+  const { data, isPending: loading } = useApi<{ team: Member[]; assignable_roles: Role[]; my_role: Role }>("/team")
+  const team = useMemo(() => data?.team ?? [], [data])
+  const assignable = useMemo(() => data?.assignable_roles ?? [], [data])
+  const myRole = data?.my_role ?? null
+
+  // Reset the default "add member" role to the lowest assignable role whenever the roster
+  // (re)loads — matches the old load()'s behaviour of resetting it after every write too.
+  useEffect(() => {
+    if (data?.assignable_roles.length) setRole(data.assignable_roles[data.assignable_roles.length - 1])
+  }, [data])
 
   async function add() {
     if (!name.trim() || !email.trim()) { toast.error("Name and email required"); return }
@@ -60,23 +61,23 @@ export default function TeamPage() {
       const link = `${window.location.origin}${import.meta.env.BASE_URL}ego/invite/${r.invite_token}`
       setInvite(link)
       setName(""); setEmail(""); setPhone("")
-      await load()
+      invalidate("/team", "/engineers")
       toast.success("Member added — share the invite link")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
     finally { setBusy(false) }
   }
 
   async function changeRole(m: Member, newRole: string) {
-    try { await api("/team/update", { method: "POST", body: { id: m.id, role: newRole } }); load() }
+    try { await api("/team/update", { method: "POST", body: { id: m.id, role: newRole } }); invalidate("/team", "/engineers") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function toggleActive(m: Member) {
-    try { await api("/team/update", { method: "POST", body: { id: m.id, active: m.active ? 0 : 1 } }); load() }
+    try { await api("/team/update", { method: "POST", body: { id: m.id, active: m.active ? 0 : 1 } }); invalidate("/team", "/engineers") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function remove(m: Member) {
     if (!(await confirmDialog({ title: `Remove ${m.name}?`, body: "They'll lose access immediately.", confirmText: "Remove", danger: true }))) return
-    try { await api("/team/delete", { method: "POST", body: { id: m.id } }); load() }
+    try { await api("/team/delete", { method: "POST", body: { id: m.id } }); invalidate("/team", "/engineers") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
 

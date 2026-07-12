@@ -20,6 +20,11 @@ export function ThemeToggle() {
   const { theme, setTheme: setCustomTheme } = useUIThemeStore()
   const [mounted, setMounted] = useState(false)
 
+  // The canonical next-themes hydration guard: the active theme isn't knowable until we're on the
+  // client, so the first paint renders a placeholder and this flips it. The lint rule objects to
+  // setState-in-effect on principle (it costs one extra render), but that extra render is exactly
+  // the point here — there is no correct value to render before mount.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true) }, [])
 
   if (!mounted) {

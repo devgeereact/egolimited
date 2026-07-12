@@ -6,6 +6,7 @@ import {
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { useAuth } from "@/store/auth.store"
 import { ROLE_LABEL, atLeast, type Role } from "@/lib/roles"
 import { Button } from "@/components/ui/button"
@@ -68,21 +69,29 @@ export default function SettingsPage() {
   // Company (manager+)
   const [s, setS] = useState<Settings>({})
   const [saved, setSaved] = useState<Settings>({})
-  const [loadingCo, setLoadingCo] = useState(canSeeCompany)
   const [savingGroup, setSavingGroup] = useState<string | null>(null)
 
   // Notifications (everyone)
   const [prefs, setPrefs] = useState<Record<string, number>>({})
   const [savingPrefs, setSavingPrefs] = useState(false)
 
+  // Cached + deduped + refetched in the background — see lib/query.ts. The local useState
+  // mirrors below (me/prefs/s+saved) still exist because this page does optimistic edits and
+  // dirty-tracking on top of the fetched value; the effects just (re)seed them whenever the
+  // underlying query data (re)loads, including after a write invalidates it.
+  const { data: meData } = useApi<{ user: { name: string; email: string; phone: string | null } }>("/auth/me")
+  const { data: prefsData } = useApi<{ prefs: Record<string, number> }>("/me/notify-prefs")
+  const { data: settingsData, isPending: loadingCo } = useApi<{ settings: Settings }>(canSeeCompany ? "/settings" : null)
+
   useEffect(() => {
-    api<{ user: { name: string; email: string; phone: string | null } }>("/auth/me")
-      .then((r) => { setMe(r.user); setAcct({ name: r.user.name ?? "", phone: r.user.phone ?? "" }) }).catch(() => {})
-    api<{ prefs: Record<string, number> }>("/me/notify-prefs").then((r) => setPrefs(r.prefs)).catch(() => {})
-    if (canSeeCompany) {
-      api<{ settings: Settings }>("/settings").then((r) => { setS(r.settings); setSaved(r.settings) }).catch(() => {}).finally(() => setLoadingCo(false))
-    }
-  }, [canSeeCompany])
+    if (meData?.user) { setMe(meData.user); setAcct({ name: meData.user.name ?? "", phone: meData.user.phone ?? "" }) }
+  }, [meData])
+  useEffect(() => {
+    if (prefsData?.prefs) setPrefs(prefsData.prefs)
+  }, [prefsData])
+  useEffect(() => {
+    if (settingsData?.settings) { setS(settingsData.settings); setSaved(settingsData.settings) }
+  }, [settingsData])
 
   async function saveAcct() {
     setSavingAcct(true)
@@ -90,13 +99,14 @@ export default function SettingsPage() {
       await api("/me/profile", { method: "POST", body: { name: acct.name, phone: acct.phone } })
       setMe((m) => ({ ...m, name: acct.name, phone: acct.phone }))
       setEditAcct(false); await loadMe(); toast.success("Profile updated")
+      invalidate("/auth/me", "/team")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save") } finally { setSavingAcct(false) }
   }
 
   async function togglePref(key: string, on: boolean) {
     const next = { ...prefs, [key]: on ? 1 : 0 }; const prev = prefs
     setPrefs(next); setSavingPrefs(true)
-    try { await api("/me/notify-prefs", { method: "POST", body: next }) }
+    try { await api("/me/notify-prefs", { method: "POST", body: next }); invalidate("/me/notify-prefs") }
     catch { toast.error("Couldn't save that"); setPrefs(prev) } finally { setSavingPrefs(false) }
   }
 
@@ -110,6 +120,7 @@ export default function SettingsPage() {
     try {
       await api("/settings", { method: "POST", body })
       setSaved((p) => ({ ...p, ...body })); toast.success(`${g} saved`)
+      invalidate("/settings")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") } finally { setSavingGroup(null) }
   }
 

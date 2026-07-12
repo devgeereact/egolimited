@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react"
+import { useMemo, useState } from "react"
 import { Link } from "react-router-dom"
 import { ChevronLeft, ChevronRight, Loader2, MessageSquareQuote, Star, Plus, DownloadCloud } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -32,28 +33,22 @@ function Stars({ n, className }: { n: number; className?: string }) {
 interface Resp { reviews: Review[]; count: number; average: number | null; pages: number; page: number }
 
 export default function ReviewsPage() {
-  const [reviews, setReviews] = useState<Review[]>([])
-  const [average, setAverage] = useState<number | null>(null)
-  const [count, setCount] = useState(0)
-  const [pages, setPages] = useState(1)
   const [page, setPage] = useState(1)
-  const [loading, setLoading] = useState(true)
   const [importing, setImporting] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
   const [g, setG] = useState({ name: "", rating: "5", body: "" })
   const [savingG, setSavingG] = useState(false)
 
-  function load() {
-    setLoading(true)
-    return api<Resp>(`/reviews?page=${page}`)
-      .then((r) => { setReviews(r.reviews); setAverage(r.average); setCount(r.count); setPages(r.pages) })
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load reviews"))
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => { load()   }, [page])
+  // Cached + deduped + refetched in the background — see lib/query.ts. Each page number is
+  // its own querystring segment, so invalidate("/reviews") refreshes every cached page.
+  const { data, isPending: loading } = useApi<Resp>(`/reviews?page=${page}`)
+  const reviews = useMemo(() => data?.reviews ?? [], [data])
+  const average = data?.average ?? null
+  const count = data?.count ?? 0
+  const pages = data?.pages ?? 1
 
   async function ack(id: number) {
-    try { await api("/messages/ack", { method: "POST", body: { id } }); toast.success("Marked read"); load() }
+    try { await api("/messages/ack", { method: "POST", body: { id } }); toast.success("Marked read"); invalidate("/reviews") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function importGoogle() {
@@ -61,7 +56,7 @@ export default function ReviewsPage() {
     try {
       const r = await api<{ imported: number }>("/reviews/import-google", { method: "POST" })
       toast.success(r.imported ? `Imported ${r.imported} Google review(s)` : "No new Google reviews")
-      load()
+      invalidate("/reviews")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Import failed") }
     finally { setImporting(false) }
   }
@@ -70,7 +65,7 @@ export default function ReviewsPage() {
     setSavingG(true)
     try {
       await api("/reviews/add", { method: "POST", body: { ...g, rating: Number(g.rating), source: "google" } })
-      toast.success("Google review added"); setAddOpen(false); setG({ name: "", rating: "5", body: "" }); load()
+      toast.success("Google review added"); setAddOpen(false); setG({ name: "", rating: "5", body: "" }); invalidate("/reviews")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
     finally { setSavingG(false) }
   }

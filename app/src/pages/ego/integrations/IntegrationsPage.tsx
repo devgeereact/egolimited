@@ -3,6 +3,7 @@ import { KeyRound, Loader2, ShieldCheck, Mail, CloudSun, Sparkles, Inbox, Messag
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -69,21 +70,21 @@ const ALL_KEYS = SECTIONS.flatMap((s) => s.fields.map((f) => f.key))
 export default function IntegrationsPage() {
   const [vals, setVals] = useState<Record<string, string>>({})
   const [configured, setConfigured] = useState<Record<string, boolean>>({})
-  const [loading, setLoading] = useState(true)
   const [savingId, setSavingId] = useState<string | null>(null)
 
-  function refresh() {
-    return api<{ fields: Record<string, string>; configured: Record<string, boolean> }>("/integrations").then((r) => {
-      // non-secret values prefill; secret fields stay blank (server never sends them)
-      const v: Record<string, string> = {}
-      for (const k of ALL_KEYS) {
-        const isSecret = SECTIONS.flatMap((s) => s.fields).find((f) => f.key === k)?.secret
-        v[k] = isSecret ? "" : (r.fields[k] ?? "")
-      }
-      setVals(v); setConfigured(r.configured)
-    })
-  }
-  useEffect(() => { refresh().finally(() => setLoading(false)) }, [])
+  // Cached + deduped + refetched in the background — see lib/query.ts.
+  const { data, isPending: loading } = useApi<{ fields: Record<string, string>; configured: Record<string, boolean> }>("/integrations")
+
+  useEffect(() => {
+    if (!data) return
+    // non-secret values prefill; secret fields stay blank (server never sends them)
+    const v: Record<string, string> = {}
+    for (const k of ALL_KEYS) {
+      const isSecret = SECTIONS.flatMap((s) => s.fields).find((f) => f.key === k)?.secret
+      v[k] = isSecret ? "" : (data.fields[k] ?? "")
+    }
+    setVals(v); setConfigured(data.configured)
+  }, [data])
 
   async function saveSection(s: Section) {
     setSavingId(s.id)
@@ -96,7 +97,7 @@ export default function IntegrationsPage() {
     try {
       await api("/integrations", { method: "POST", body })
       toast.success(`${s.title} saved`)
-      await refresh()
+      invalidate("/integrations")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") }
     finally { setSavingId(null) }
   }

@@ -5,6 +5,7 @@ import EmailDialog from "@/components/ego/EmailDialog"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
@@ -32,22 +33,18 @@ export default function CustomerDetail() {
   const [params] = useSearchParams()
   const id = params.get("id")
   const navigate = useNavigate()
-  const [c, setC] = useState<Detail | null>(null)
-  const [loading, setLoading] = useState(true)
   const [emailOpen, setEmailOpen] = useState(false)
 
-  useEffect(() => {
-    if (!id) return
-    api<{ customer: Detail }>(`/customers/get?id=${id}`)
-      .then((r) => setC(r.customer))
-      .catch(() => toast.error("Customer not found"))
-      .finally(() => setLoading(false))
-  }, [id])
+  const { data, isPending: loading, isError } = useApi<{ customer: Detail }>(id ? `/customers/get?id=${id}` : null)
+  const c = data?.customer ?? null
+
+  useEffect(() => { if (isError) toast.error("Customer not found") }, [isError])
 
   async function onDelete() {
     if (!c || !(await confirmDialog({ title: `Delete ${c.name}?`, body: "Soft-delete — the customer and their history can be recovered.", confirmText: "Delete", danger: true }))) return
     await api("/customers/delete", { method: "POST", body: { id: c.id } })
     toast.success("Customer deleted")
+    invalidate("/customers")
     navigate("/ego/customers")
   }
 

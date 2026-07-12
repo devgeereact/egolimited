@@ -5,6 +5,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { useAuth } from "@/store/auth.store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -24,7 +25,6 @@ export default function AccountSecurity() {
   const [savingPw, setSavingPw] = useState(false)
 
   const [enabled, setEnabled] = useState(false)
-  const [loaded, setLoaded] = useState(false)
   const [secret, setSecret] = useState<string | null>(null)
   const [otpauth, setOtpauth] = useState<string | null>(null)
   const [code, setCode] = useState("")
@@ -33,11 +33,13 @@ export default function AccountSecurity() {
   const [disablePw, setDisablePw] = useState("")
   const [setupPw, setSetupPw] = useState("")
 
+  // Cached + deduped + refetched in the background — see lib/query.ts.
+  const { data: meData, isPending } = useApi<{ user: { totp_enabled?: number } }>("/auth/me")
+  const loaded = !isPending
+
   useEffect(() => {
-    api<{ user: { totp_enabled?: number } }>("/auth/me")
-      .then((r) => setEnabled(Number(r.user.totp_enabled) === 1))
-      .finally(() => setLoaded(true))
-  }, [])
+    if (meData) setEnabled(Number(meData.user.totp_enabled) === 1)
+  }, [meData])
 
   async function changePassword() {
     if (nw.length < 8) return toast.error("New password must be at least 8 characters")
@@ -68,6 +70,7 @@ export default function AccountSecurity() {
       toast.success("Two-factor authentication enabled")
       setEnabled(true); setSecret(null); setOtpauth(null); setCode("")
       await loadMe()
+      invalidate("/auth/me")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Invalid code") } finally { setBusy(false) }
   }
   async function disable() {
@@ -77,6 +80,7 @@ export default function AccountSecurity() {
       toast.success("Two-factor authentication disabled")
       setEnabled(false); setDisablePw("")
       await loadMe()
+      invalidate("/auth/me")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Password incorrect") } finally { setBusy(false) }
   }
 

@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -26,7 +27,8 @@ interface Props {
 }
 
 export default function ScheduleDialog({ open, onOpenChange, onDone, jobId, pickJobs, defaults }: Props) {
-  const [engineers, setEngineers] = useState<{ id: number; name: string; available: number }[]>([])
+  const { data } = useApi<{ engineers: { id: number; name: string; available: number }[] }>(open ? "/engineers" : null)
+  const engineers = data?.engineers ?? []
   const [selectedJob, setSelectedJob] = useState<string>("")
   const [engineerId, setEngineerId] = useState<string>(defaults?.engineer_id ? String(defaults.engineer_id) : "")
   const [date, setDate] = useState(defaults?.date ?? "")
@@ -36,7 +38,6 @@ export default function ScheduleDialog({ open, onOpenChange, onDone, jobId, pick
 
   useEffect(() => {
     if (!open) return
-    api<{ engineers: { id: number; name: string; available: number }[] }>("/engineers").then((r) => setEngineers(r.engineers))
     // refresh prefilled date/time when reopened from a calendar selection
     if (defaults?.date) setDate(defaults.date)
     if (defaults?.start) setStart(defaults.start)

@@ -7,6 +7,7 @@ import {
 import DOMPurify from "dompurify"
 import { toast } from "sonner"
 import { api, apiForm } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -69,8 +70,6 @@ function inFolder(m: MsgRow, f: Folder): boolean {
 }
 
 export default function InboxPage() {
-  const [rows, setRows] = useState<MsgRow[]>([])
-  const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [folder, setFolder] = useState<Folder>("inbox")
   const [q, setQ] = useState("")
@@ -87,17 +86,11 @@ export default function InboxPage() {
   const [sel, setSel] = useState<Set<number>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
 
-  function load(silent = false) {
-    if (!silent) setLoading(true)
-    api<{ messages: MsgRow[] }>("/inbox").then((r) => setRows(r.messages)).catch((e) => { if (!silent) toast.error(e instanceof Error ? e.message : "Couldn't load mail") }).finally(() => { if (!silent) setLoading(false) })
-  }
-  useEffect(() => {
-    load()
-    const t = setInterval(() => load(true), 30000)
-    const onFocus = () => load(true)
-    window.addEventListener("focus", onFocus)
-    return () => { clearInterval(t); window.removeEventListener("focus", onFocus) }
-  }, [])
+  // Cached + deduped + refetched in the background. 30s poll matches the previous hand-rolled
+  // interval; window-focus refetch is handled globally (see lib/query.ts defaultOptions).
+  const { data, isPending } = useApi<{ messages: MsgRow[] }>("/inbox", { refetchInterval: 30000 })
+  const rows = useMemo(() => data?.messages ?? [], [data])
+  const loading = isPending
   useEffect(() => { setPage(1); setSel(new Set()) }, [folder, q])
 
   const counts = useMemo(() => ({
@@ -117,16 +110,16 @@ export default function InboxPage() {
     setBulkBusy(true)
     try {
       await api("/messages/bulk", { method: "POST", body: { action, ids } })
-      setSel(new Set()); load(true)
+      setSel(new Set()); invalidate("/inbox")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Action failed") }
     finally { setBulkBusy(false) }
   }
   async function setFlag(id: number, flagged: boolean) {
-    setRows((p) => p.map((m) => (m.id === id ? { ...m, flagged: flagged ? 1 : 0 } : m)))
-    try { await api("/messages/flag", { method: "POST", body: { id, flagged: flagged ? 1 : 0 } }) } catch { load(true) }
+    try { await api("/messages/flag", { method: "POST", body: { id, flagged: flagged ? 1 : 0 } }) }
+    finally { invalidate("/inbox") }
   }
   async function setArchive(id: number, archived: boolean) {
-    try { await api("/messages/archive", { method: "POST", body: { id, archived: archived ? 1 : 0 } }); setReadOpen(false); load(true) }
+    try { await api("/messages/archive", { method: "POST", body: { id, archived: archived ? 1 : 0 } }); setReadOpen(false); invalidate("/inbox") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
 
@@ -156,26 +149,25 @@ export default function InboxPage() {
       const r = await api<{ message: MsgFull }>(`/inbox/get?id=${m.id}`)
       setMsg(r.message)
       if (r.message.direction === "inbound" && r.message.channel !== "note" && !r.message.acknowledged) {
-        api("/messages/ack", { method: "POST", body: { id: m.id } }).then(() =>
-          setRows((prev) => prev.map((x) => (x.id === m.id ? { ...x, acknowledged: 1 } : x)))).catch(() => {})
+        api("/messages/ack", { method: "POST", body: { id: m.id } }).then(() => invalidate("/inbox")).catch(() => {})
       }
     } catch { toast.error("Could not open message") }
   }
 
   async function sync() {
     setSyncing(true)
-    try { const r = await api<{ synced: number }>("/inbox/sync", { method: "POST" }); toast.success(`Synced — ${r.synced} new`); load() }
+    try { const r = await api<{ synced: number }>("/inbox/sync", { method: "POST" }); toast.success(`Synced — ${r.synced} new`); invalidate("/inbox") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Sync failed") } finally { setSyncing(false) }
   }
   async function sendReply() {
     if (!msg || !reply.trim()) return
     setSendingReply(true)
-    try { await api("/messages/reply", { method: "POST", body: { id: msg.id, body: reply } }); toast.success("Reply sent"); setReadOpen(false); load() }
+    try { await api("/messages/reply", { method: "POST", body: { id: msg.id, body: reply } }); toast.success("Reply sent"); setReadOpen(false); invalidate("/inbox") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Reply failed") } finally { setSendingReply(false) }
   }
   async function deleteMsg(id: number) {
     if (!(await confirmDialog({ title: "Delete this item?", confirmText: "Delete", danger: true }))) return
-    try { await api("/messages/delete", { method: "POST", body: { id } }); toast.success("Deleted"); setReadOpen(false); load() }
+    try { await api("/messages/delete", { method: "POST", body: { id } }); toast.success("Deleted"); setReadOpen(false); invalidate("/inbox") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed") }
   }
 
@@ -368,8 +360,8 @@ export default function InboxPage() {
         </DialogContent>
       </Dialog>
 
-      <ComposeDialog open={composeOpen} onOpenChange={setComposeOpen} draft={draft} onSaved={load} />
-      <NoteDialog open={noteOpen} onOpenChange={setNoteOpen} onSaved={load} />
+      <ComposeDialog open={composeOpen} onOpenChange={setComposeOpen} draft={draft} onSaved={() => invalidate("/inbox")} />
+      <NoteDialog open={noteOpen} onOpenChange={setNoteOpen} onSaved={() => invalidate("/inbox")} />
     </div>
   )
 }

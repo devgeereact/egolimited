@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Link } from "react-router-dom"
 
 // GDPR/PECR cookie notice. The site uses only essential cookies + local storage by
@@ -7,15 +7,15 @@ import { Link } from "react-router-dom"
 const KEY = "ego_cookie_consent" // "accepted" | "essential"
 
 export default function CookieConsent() {
-  const [show, setShow] = useState(false)
-
-  useEffect(() => {
+  // Lazy initialiser rather than a mount effect: the answer is knowable on the very first render,
+  // so reading it in an effect only bought an extra render and a visible banner flash.
+  const [show, setShow] = useState(() => {
     try {
-      if (!localStorage.getItem(KEY)) setShow(true)
+      return !localStorage.getItem(KEY)
     } catch {
-      /* storage blocked — don't nag */
+      return false // storage blocked — don't nag
     }
-  }, [])
+  })
 
   function choose(value: "accepted" | "essential") {
     try {

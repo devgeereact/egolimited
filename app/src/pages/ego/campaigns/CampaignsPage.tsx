@@ -3,6 +3,7 @@ import { Loader2, Send, Sparkles, Plus, Trash2, Users, UserRound, Mail, ImageIco
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { confirmDialog } from "@/components/ego/confirm"
 import { Button } from "@/components/ui/button"
@@ -55,11 +56,6 @@ interface Step { id: number; step_no: number; delay_days: number; subject: strin
 interface AutomationResponse { automation: AutomationConfig | null; steps: Step[]; approved_leads: number; completed_leads: number }
 
 export default function CampaignsPage() {
-  const [data, setData] = useState<SubsResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [leadCounts, setLeadCounts] = useState<Record<string, number>>({})
-
   // compose
   const [audience, setAudience] = useState<Audience>("subscribers")
   const [subject, setSubject] = useState("")
@@ -78,9 +74,7 @@ export default function CampaignsPage() {
   const [adding, setAdding] = useState(false)
 
   // leads (M17: prospecting)
-  const [leads, setLeads] = useState<Lead[]>([])
   const [leadStatus, setLeadStatus] = useState<Lead["status"]>("found")
-  const [leadsLoading, setLeadsLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [searchLocation, setSearchLocation] = useState("")
   const [searching, setSearching] = useState(false)
@@ -89,31 +83,40 @@ export default function CampaignsPage() {
   const [outreachOpen, setOutreachOpen] = useState(false)
 
   // automation (M17: multi-step drip sequence via campaign_cron.php)
-  const [auto, setAuto] = useState<AutomationResponse | null>(null)
-  const [autoLoading, setAutoLoading] = useState(false)
   const [autoEnabled, setAutoEnabled] = useState(false)
   const [steps, setSteps] = useState<Step[]>([])
   const [addingStep, setAddingStep] = useState(false)
   const [autoBatch, setAutoBatch] = useState(25)
   const [autoSaving, setAutoSaving] = useState(false)
 
-  function load() {
-    return api<SubsResponse>("/subscribers")
-      .then(setData)
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load subscribers"))
-      .finally(() => setLoading(false))
-  }
-  function loadLeadCounts() {
-    api<LeadsResponse>("/leads").then((r) => setLeadCounts(r.counts)).catch(() => {})
-  }
-  useEffect(() => {
-    load()
-    loadLeadCounts()
-    api<{ templates: Template[] }>("/email-templates").then((r) => setTemplates(r.templates)).catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load templates"))
-     
-  }, [])
+  const { data, isPending: loading } = useApi<SubsResponse>("/subscribers")
 
-  function useTemplate(id: string) {
+  const { data: templatesData } = useApi<{ templates: Template[] }>("/email-templates")
+  const templates = useMemo(() => templatesData?.templates ?? [], [templatesData])
+
+  // Global lead counts (tab badges/audience picker) — independent of whichever status the
+  // Leads list below is filtered to. invalidate("/leads") refreshes both this and the
+  // filtered list, since TanStack matches key prefixes (see lib/query.ts).
+  const { data: leadCountsData } = useApi<LeadsResponse>("/leads")
+  const leadCounts = useMemo(() => leadCountsData?.counts ?? {}, [leadCountsData])
+
+  const { data: leadsData, isPending: leadsLoading } = useApi<LeadsResponse>(`/leads?status=${leadStatus}`)
+  const leads = useMemo(() => leadsData?.leads ?? [], [leadsData])
+  useEffect(() => { setSelected(new Set()) }, [leadStatus])
+
+  const { data: autoData, isPending: autoLoading } = useApi<AutomationResponse>("/campaigns/automation")
+  const auto = autoData ?? null
+  // Sync the locally-editable batch/enabled/steps fields whenever fresh automation data
+  // arrives (initial load, or after invalidate() from a save/step edit below).
+  useEffect(() => {
+    if (autoData) {
+      setAutoEnabled(!!autoData.automation?.enabled)
+      setSteps(autoData.steps ?? [])
+      setAutoBatch(autoData.automation?.batch_size ?? 25)
+    }
+  }, [autoData])
+
+  function applyTemplate(id: string) {
     const t = templates.find((x) => String(x.id) === id)
     if (!t) return
     setSubject(t.subject ?? "")
@@ -129,8 +132,7 @@ export default function CampaignsPage() {
     if (!name?.trim()) return
     try {
       await api("/email-templates", { method: "POST", body: { name: name.trim(), subject, body: bodyText, kind: "campaign" } })
-      const r = await api<{ templates: Template[] }>("/email-templates")
-      setTemplates(r.templates)
+      invalidate("/email-templates")
       toast.success(`Saved "${name.trim()}" to your templates`)
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save template") }
   }
@@ -178,7 +180,7 @@ export default function CampaignsPage() {
       })
       toast.success(`Sent to ${r.sent} of ${r.recipients}${r.failed ? ` · ${r.failed} failed` : ""}`)
       setSubject(""); setBodyText(""); setBrief(""); setImageUrl(""); setImagePrompt("")
-      if (audience === "leads") loadLeadCounts()
+      if (audience === "leads") invalidate("/leads")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Send failed") }
     finally { setSending(false) }
   }
@@ -189,28 +191,18 @@ export default function CampaignsPage() {
     try {
       await api("/subscribers", { method: "POST", body: { email: newEmail, name: newName || null } })
       setNewEmail(""); setNewName("")
-      await load()
+      invalidate("/subscribers")
       toast.success("Contact added")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't add") }
     finally { setAdding(false) }
   }
 
   async function removeSubscriber(id: number) {
-    try { await api("/subscribers/delete", { method: "POST", body: { id } }); await load() }
+    try { await api("/subscribers/delete", { method: "POST", body: { id } }); invalidate("/subscribers") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't remove") }
   }
 
   // ---- Leads (M17) ----
-  function loadLeads(status: Lead["status"]) {
-    setLeadsLoading(true)
-    setSelected(new Set())
-    api<LeadsResponse>(`/leads?status=${status}`)
-      .then((r) => { setLeads(r.leads); setLeadCounts(r.counts) })
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load leads"))
-      .finally(() => setLeadsLoading(false))
-  }
-  useEffect(() => { loadLeads(leadStatus)   }, [leadStatus])
-
   async function runLeadSearch() {
     if (!searchQuery.trim()) { toast.error("Describe the kind of business to look for"); return }
     setSearching(true)
@@ -219,7 +211,7 @@ export default function CampaignsPage() {
         method: "POST", body: { query: searchQuery, location: searchLocation || undefined },
       })
       toast.success(`Found ${r.found} new prospect${r.found === 1 ? "" : "s"}${r.skipped ? ` · ${r.skipped} skipped` : ""} — review before approving`)
-      if (leadStatus === "found") loadLeads("found"); else loadLeadCounts()
+      invalidate("/leads")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Search failed") }
     finally { setSearching(false) }
   }
@@ -237,7 +229,7 @@ export default function CampaignsPage() {
     try {
       const r = await api<{ ok: boolean; count: number }>(`/leads/${action}`, { method: "POST", body: { ids: Array.from(selected) } })
       toast.success(`${action === "approve" ? "Approved" : "Rejected"} ${r.count}`)
-      loadLeads(leadStatus)
+      setSelected(new Set()); invalidate("/leads")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't update") }
   }
 
@@ -247,32 +239,18 @@ export default function CampaignsPage() {
     try {
       const r = await api<{ count: number }>("/leads/delete", { method: "POST", body: { ids: Array.from(selected) } })
       toast.success(`Deleted ${r.count}`)
-      setSelected(new Set()); loadLeads(leadStatus)
+      setSelected(new Set()); invalidate("/leads")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't delete") }
   }
   async function deleteLead(id: number) {
-    try { await api("/leads/delete", { method: "POST", body: { id } }); loadLeads(leadStatus) }
+    try { await api("/leads/delete", { method: "POST", body: { id } }); setSelected(new Set()); invalidate("/leads") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't remove") }
   }
 
   // ---- Automation (M17): multi-step sequence ----
-  function loadAutomation() {
-    setAutoLoading(true)
-    api<AutomationResponse>("/campaigns/automation")
-      .then((r) => {
-        setAuto(r)
-        setAutoEnabled(!!r.automation?.enabled)
-        setSteps(r.steps ?? [])
-        setAutoBatch(r.automation?.batch_size ?? 25)
-      })
-      .catch((e) => toast.error(e instanceof Error ? e.message : "Couldn't load automation"))
-      .finally(() => setAutoLoading(false))
-  }
-  useEffect(() => { loadAutomation()   }, [])
-
   function reloadSteps() {
     setAddingStep(false)
-    api<AutomationResponse>("/campaigns/automation").then((r) => { setAuto(r); setSteps(r.steps ?? []) }).catch(() => {})
+    invalidate("/campaigns/automation")
   }
   async function saveAutomation(nextEnabled: boolean) {
     if (nextEnabled && steps.length === 0) { toast.error("Add at least one step before turning the sequence on"); return }
@@ -280,6 +258,7 @@ export default function CampaignsPage() {
     try {
       await api("/campaigns/automation", { method: "POST", body: { enabled: nextEnabled, batch_size: autoBatch } })
       setAutoEnabled(nextEnabled)
+      invalidate("/campaigns/automation")
       toast.success(nextEnabled ? "Sequence on — the cron drips approved leads (8am–6pm, weekdays)" : "Sequence off")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't save") }
     finally { setAutoSaving(false) }
@@ -348,7 +327,7 @@ export default function CampaignsPage() {
                 {templates.length > 0 && (
                   <div className="space-y-2">
                     <Label>Start from a template</Label>
-                    <TemplateSelect templates={templates} onPick={(t) => useTemplate(String(t.id))} placeholder="Pick a saved brand template…" />
+                    <TemplateSelect templates={templates} onPick={(t) => applyTemplate(String(t.id))} placeholder="Pick a saved brand template…" />
                   </div>
                 )}
 
@@ -593,7 +572,7 @@ export default function CampaignsPage() {
         templates={templates}
         open={outreachOpen}
         onOpenChange={setOutreachOpen}
-        onSent={() => { loadLeads(leadStatus); loadLeadCounts() }}
+        onSent={() => { setSelected(new Set()); invalidate("/leads") }}
       />
     </div>
   )

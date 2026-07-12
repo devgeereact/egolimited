@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { useQueryClient } from "@tanstack/react-query"
 import { Bell, CheckCircle2, Mail, MessageSquare, Star, type LucideIcon } from "lucide-react"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate, queryKeyFor } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
@@ -24,29 +25,30 @@ const TONE: Record<string, string> = {
   danger: "bg-red-500/15 text-red-600 dark:text-red-400",
 }
 
+const NOTIFICATIONS = "/notifications"
+
 export function NotificationDropdown() {
   const navigate = useNavigate()
-  const [items, setItems] = useState<Note[]>([])
-  const [count, setCount] = useState(0)
+  const qc = useQueryClient()
 
-  function load() {
-    api<{ items: Note[]; count: number }>("/notifications")
-      .then((r) => { setItems(r.items); setCount(r.count) })
-      .catch(() => {})
-  }
-  useEffect(() => {
-    load()
-    const t = setInterval(load, 30000) // live-ish: refresh every 30s
-    return () => clearInterval(t)
-  }, [])
+  // Cached + deduped + polled every 30s in the background — see lib/query.ts.
+  const { data } = useApi<{ items: Note[]; count: number }>(NOTIFICATIONS, { refetchInterval: 30000 })
+  // Derived straight from the cache — no mirror copy in local state. Copying it into useState
+  // meant a setState inside an effect on every poll: an extra render pass, and a second source
+  // of truth that could drift from the cache.
+  const items = data?.items ?? []
+  const count = data?.count ?? 0
 
-  // Opening the bell marks everything shown as seen → badge clears.
+  // Opening the bell marks everything shown as seen → badge clears. Write the cleared state
+  // straight into the cache so the badge clears instantly, then confirm with the server.
   function onOpenChange(open: boolean) {
-    if (open && count > 0) {
-      setCount(0)
-      setItems((xs) => xs.map((x) => ({ ...x, unread: 0 })))
-      api("/notifications/seen", { method: "POST" }).catch(() => {})
-    }
+    if (!open || count === 0) return
+    qc.setQueryData(queryKeyFor(NOTIFICATIONS), (old: { items: Note[]; count: number } | undefined) =>
+      old ? { items: old.items.map((x) => ({ ...x, unread: 0 })), count: 0 } : old
+    )
+    api("/notifications/seen", { method: "POST" })
+      .then(() => invalidate(NOTIFICATIONS))
+      .catch(() => invalidate(NOTIFICATIONS)) // failed? re-sync rather than lie about the badge
   }
 
   return (

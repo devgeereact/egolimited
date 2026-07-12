@@ -4,6 +4,7 @@ import { LogOut, Mail, CheckCircle2, CalendarCheck, TrendingUp, Loader2, Downloa
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/store/auth.store"
 import { Button } from "@/components/ui/button"
@@ -26,16 +27,11 @@ export default function EngineerProfile() {
   const { user, logout, setAvailable } = useAuth()
   const available = (user?.available ?? 1) === 1
   const [savingAvail, setSavingAvail] = useState(false)
-  const [history, setHistory] = useState<HistItem[]>([])
-  const [stats, setStats] = useState<Stats>({ total: 0, today: 0, week: 0 })
-  const [loading, setLoading] = useState(true)
   const [installEvt, setInstallEvt] = useState<InstallEvent | null>(null)
 
-  useEffect(() => {
-    api<{ history: HistItem[]; stats: Stats }>("/me/history")
-      .then((r) => { setHistory(r.history); setStats(r.stats) })
-      .finally(() => setLoading(false))
-  }, [])
+  const { data, isPending: loading } = useApi<{ history: HistItem[]; stats: Stats }>("/me/history")
+  const history = data?.history ?? []
+  const stats = data?.stats ?? { total: 0, today: 0, week: 0 }
 
   // PWA install affordance — capture the browser's deferred prompt.
   useEffect(() => {
@@ -50,6 +46,7 @@ export default function EngineerProfile() {
     setAvailable(next) // optimistic
     try {
       await api("/me/availability", { method: "POST", body: { available: v } })
+      invalidate("/auth/me")
       toast.success(v ? "You're available for jobs" : "Marked unavailable")
     } catch (e) {
       setAvailable(v ? 0 : 1) // revert

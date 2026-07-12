@@ -7,6 +7,7 @@ import {
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { confirmDialog } from "@/components/ego/confirm"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/store/auth.store"
@@ -28,6 +29,15 @@ import {
 } from "@/components/ui/table"
 
 interface Customer { id: number; name: string; phone: string | null; email: string | null; ref_code: string | null }
+
+/** The fuller record GET /customers/get returns (the list rows above carry no address/notes). */
+interface ContactCustomer {
+  name: string | null
+  phone: string | null
+  email: string | null
+  notes: string | null
+  addresses?: { line1?: string | null; city?: string | null; postcode?: string | null }[]
+}
 interface Member {
   id: number; name: string; email: string; phone: string | null
   role: Role; active: number; available?: number; pending?: number
@@ -60,11 +70,6 @@ export default function ContactsPage() {
   const { user } = useAuth()
   const canManageTeam = atLeast(user?.role, "manager")
 
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [team, setTeam] = useState<Member[]>([])
-  const [assignable, setAssignable] = useState<Role[]>([])
-  const [myRole, setMyRole] = useState<Role | null>(null)
-  const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>("customers")
   const [q, setQ] = useState("")
 
@@ -82,24 +87,23 @@ export default function ContactsPage() {
   const [teamBusy, setTeamBusy] = useState(false)
   const [invite, setInvite] = useState<string | null>(null)
 
-  function loadCustomers() {
-    return api<{ customers: Customer[] }>("/customers").then((r) => setCustomers(r.customers))
-  }
-  function loadTeam() {
-    // Managers+ get the rich team endpoint (roles, active, invite). Office view engineers only.
-    if (canManageTeam) {
-      return api<{ team: Member[]; assignable_roles: Role[]; my_role: Role }>("/team").then((r) => {
-        setTeam(r.team); setAssignable(r.assignable_roles); setMyRole(r.my_role)
-        if (r.assignable_roles.length) setTRole(r.assignable_roles[r.assignable_roles.length - 1])
-      })
-    }
-    return api<{ engineers: Member[] }>("/engineers").then((r) => setTeam(r.engineers))
-  }
+  const { data: customersData, isPending: customersLoading } = useApi<{ customers: Customer[] }>("/customers")
+  const customers = useMemo(() => customersData?.customers ?? [], [customersData])
+
+  // Managers+ get the rich team endpoint (roles, active, invite). Office view engineers only.
+  const teamPath = canManageTeam ? "/team" : "/engineers"
+  const { data: teamData, isPending: teamLoading } = useApi<
+    { team: Member[]; assignable_roles: Role[]; my_role: Role } | { engineers: Member[] }
+  >(teamPath)
+  const team = useMemo(() => (teamData ? ("team" in teamData ? teamData.team : teamData.engineers) : []), [teamData])
+  const assignable = useMemo(() => (teamData && "assignable_roles" in teamData ? teamData.assignable_roles : []), [teamData])
+  const myRole = useMemo(() => (teamData && "my_role" in teamData ? teamData.my_role : null), [teamData])
+  const loading = customersLoading || teamLoading
 
   useEffect(() => {
-    Promise.all([loadCustomers(), loadTeam()]).finally(() => setLoading(false))
+    if (assignable.length) setTRole(assignable[assignable.length - 1])
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [assignable.join(",")])
 
   const custRows = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -119,7 +123,7 @@ export default function ContactsPage() {
     setCust({ ...EMPTY_CUST, id })
     setCustOpen(true)
     try {
-      const { customer } = await api<{ customer: any }>(`/customers/get?id=${id}`)
+      const { customer } = await api<{ customer: ContactCustomer }>(`/customers/get?id=${id}`)
       const a = customer.addresses?.[0] ?? {}
       setCust({
         id, name: customer.name ?? "", phone: customer.phone ?? "", email: customer.email ?? "",
@@ -139,13 +143,13 @@ export default function ContactsPage() {
       await api(cust.id ? "/customers/update" : "/customers", { method: "POST", body: payload })
       toast.success(cust.id ? "Customer updated" : "Customer created")
       setCustOpen(false)
-      await loadCustomers()
+      invalidate("/customers")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Save failed") }
     finally { setCustBusy(false) }
   }
   async function deleteCustomer(c: Customer) {
     if (!(await confirmDialog({ title: `Delete ${c.name}?`, body: "This archives the customer and their history.", confirmText: "Delete", danger: true }))) return
-    try { await api("/customers/delete", { method: "POST", body: { id: c.id } }); await loadCustomers(); toast.success("Customer deleted") }
+    try { await api("/customers/delete", { method: "POST", body: { id: c.id } }); invalidate("/customers"); toast.success("Customer deleted") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
 
@@ -157,22 +161,22 @@ export default function ContactsPage() {
       const r = await api<{ invite_token: string }>("/team", { method: "POST", body: { name: tName.trim(), email: tEmail.trim(), phone: tPhone.trim(), role: tRole } })
       setInvite(`${window.location.origin}${import.meta.env.BASE_URL}ego/invite/${r.invite_token}`)
       setTName(""); setTEmail(""); setTPhone("")
-      await loadTeam()
+      invalidate("/team", "/engineers")
       toast.success("Member added — share the invite link")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
     finally { setTeamBusy(false) }
   }
   async function changeRole(m: Member, role: string) {
-    try { await api("/team/update", { method: "POST", body: { id: m.id, role } }); await loadTeam() }
+    try { await api("/team/update", { method: "POST", body: { id: m.id, role } }); invalidate("/team", "/engineers") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function toggleActive(m: Member) {
-    try { await api("/team/update", { method: "POST", body: { id: m.id, active: m.active ? 0 : 1 } }); await loadTeam() }
+    try { await api("/team/update", { method: "POST", body: { id: m.id, active: m.active ? 0 : 1 } }); invalidate("/team", "/engineers") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function removeMember(m: Member) {
     if (!(await confirmDialog({ title: `Remove ${m.name}?`, body: "They'll lose access immediately.", confirmText: "Remove", danger: true }))) return
-    try { await api("/team/delete", { method: "POST", body: { id: m.id } }); await loadTeam() }
+    try { await api("/team/delete", { method: "POST", body: { id: m.id } }); invalidate("/team", "/engineers") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   // Founder can manage anyone but self; others manage strictly-lower ranks only.

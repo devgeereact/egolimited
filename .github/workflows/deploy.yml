@@ -39,14 +39,13 @@ jobs:
       - name: Test app (blocking)
         run: npm test --prefix app
 
-      - name: Lint (report only — see note)
-        # NOT blocking yet: the app carries ~43 pre-existing eslint errors, most of them
-        # react-hooks/set-state-in-effect + exhaustive-deps thrown by the hand-rolled
-        # `useEffect`-fetch pattern in ~50 pages. That pattern is being replaced wholesale
-        # by TanStack Query in Phase 1, which deletes the violations rather than papering
-        # over them — so fixing them by hand now is throwaway work. Flip this to blocking
-        # (drop `continue-on-error`) the moment that migration lands.
-        continue-on-error: true
+      - name: Lint (blocking)
+        # Now blocking. It was report-only while the app carried ~43 eslint errors thrown by the
+        # hand-rolled useEffect-fetch pattern; the TanStack Query migration deleted that pattern
+        # (and its violations) rather than papering over them, and the residue — components
+        # declared during render, Math.random() during render, a mirror copy of the query cache
+        # in useState — turned out to be real bugs worth fixing. Errors are now 0.
+        # Warnings are still allowed through; only errors fail the build.
         run: |
           npm run lint --prefix app
           npm run lint --prefix landing

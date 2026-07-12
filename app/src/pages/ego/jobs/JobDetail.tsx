@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import {
   ArrowLeft, CalendarClock, CircleUserRound, Copy, Download, FileText, Mail, MapPin, Phone, Loader2, Package, PauseCircle,
@@ -8,6 +8,7 @@ import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { useAuth } from "@/store/auth.store"
 import { isOffice, atLeast } from "@/lib/roles"
 import { allowedTargets, STATUS_LABEL, type JobStatus } from "@/lib/jobStatus"
@@ -125,7 +126,6 @@ export default function JobDetail() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [job, setJob] = useState<JobDetailData | null>(null)
-  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [schedOpen, setSchedOpen] = useState(false)
   const [summary, setSummary] = useState("")
@@ -137,22 +137,27 @@ export default function JobDetail() {
   const [replyTo, setReplyTo] = useState<number | null>(null)
   const [replyText, setReplyText] = useState("")
   const [replyBusy, setReplyBusy] = useState(false)
-  const [engineers, setEngineers] = useState<{ id: number; name: string; available: number }[]>([])
+  const JOB_PATH = id ? `/jobs/get?id=${id}` : null
+  const { data: jobData, isPending, isError } = useApi<{ job: JobDetailData }>(JOB_PATH)
+  const { data: engData } = useApi<{ engineers: { id: number; name: string; available: number }[] }>("/engineers")
+  const engineers = useMemo(() => engData?.engineers ?? [], [engData])
 
-  function load() {
-    if (!id) return
-    return api<{ job: JobDetailData }>(`/jobs/get?id=${id}`)
-      .then((r) => {
-        setJob(r.job)
-        setSummary(r.job.summary ?? "")
-        setBrief(r.job.engineer_brief ?? "")
-        setChecklist(r.job.checklist?.map((c) => c.label) ?? [])
-      })
-      .catch(() => toast.error("Job not found"))
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => { load()   }, [id])
-  useEffect(() => { api<{ engineers: { id: number; name: string; available: number }[] }>("/engineers").then((r) => setEngineers(r.engineers)).catch(() => {}) }, [])
+  const loading = !!id && isPending
+  useEffect(() => { if (isError) toast.error("Job not found") }, [isError])
+
+  // The brief/summary/checklist are EDITABLE — they stay local state, seeded from the server
+  // each time the job is (re)fetched. Reading them straight off the query would fight the user's
+  // typing on every background refetch.
+  useEffect(() => {
+    if (!jobData) return
+    setJob(jobData.job)
+    setSummary(jobData.job.summary ?? "")
+    setBrief(jobData.job.engineer_brief ?? "")
+    setChecklist(jobData.job.checklist?.map((c) => c.label) ?? [])
+  }, [jobData])
+
+  /** Refetch this job + everything a job change makes stale (lists, schedule, dashboard, activity). */
+  const load = () => { if (JOB_PATH) invalidate(JOB_PATH, "/jobs", "/schedule", "/dashboard", "/activity") }
 
   // Swap the assigned engineer without deleting/unscheduling the job.
   async function reassign(value: string) {

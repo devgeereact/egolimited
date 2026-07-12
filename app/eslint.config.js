@@ -20,6 +20,13 @@ export default defineConfig([
       'unused-imports': unusedImports, // ✅ ADD THIS
     },
     rules: {
+      // Fast-Refresh ergonomics, NOT correctness: it fires when a file exports something next to
+      // a component (shadcn does this by design — `buttonVariants` beside `Button`; so do our
+      // Pager/usePager and confirm/ConfirmHost pairs, and routes/index.tsx which exports a router
+      // and no component at all). Violating it costs a full HMR reload during dev and nothing at
+      // runtime. Kept visible as a warning; it must not be able to block a deploy.
+      'react-refresh/only-export-components': 'warn',
+
       // ❌ disable default rule
       '@typescript-eslint/no-unused-vars': 'off',
 

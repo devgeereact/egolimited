@@ -654,16 +654,24 @@ const SidebarMenuBadge = React.forwardRef<
 ))
 SidebarMenuBadge.displayName = "SidebarMenuBadge"
 
+/** Deterministic stand-in for the old Math.random() width (50-90%). */
+const SKELETON_WIDTHS = ["52%", "61%", "70%", "78%", "87%"]
+
 const SidebarMenuSkeleton = React.forwardRef<
   HTMLDivElement,
   React.ComponentProps<"div"> & {
     showIcon?: boolean
   }
 >(({ className, showIcon = false, ...props }, ref) => {
-  // Random width between 50 to 90%.
+  // Varied widths so the skeleton rows don't read as a barcode. Was Math.random(), an impure call
+  // during render — it produced a different width on every remount, and React flags it. Hashing
+  // React's own per-instance id keeps the variety but makes it deterministic and stable.
+  const id = React.useId()
   const width = React.useMemo(() => {
-    return `${Math.floor(Math.random() * 40) + 50}%`
-  }, [])
+    let h = 0
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0
+    return SKELETON_WIDTHS[h % SKELETON_WIDTHS.length]
+  }, [id])
 
   return (
     <div

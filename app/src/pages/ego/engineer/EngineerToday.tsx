@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { Link } from "react-router-dom"
 import { Clock, MapPin, ChevronRight, Loader2, Sun } from "lucide-react"
 
-import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/store/auth.store"
 import { Card, CardContent } from "@/components/ui/card"
@@ -30,9 +30,6 @@ const win = (j: FieldJob) =>
 
 export default function EngineerToday() {
   const { user } = useAuth()
-  const [jobs, setJobs] = useState<FieldJob[]>([])
-  const [loading, setLoading] = useState(true)
-  const [weather, setWeather] = useState<Weather | null>(null)
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 15000); return () => clearInterval(t) }, [])
   // Always UK time regardless of the device's timezone.
@@ -40,19 +37,30 @@ export default function EngineerToday() {
   const clock = now.toLocaleTimeString("en-GB", { timeZone: "Europe/London", hour: "2-digit", minute: "2-digit" })
 
   const cacheKey = user ? `ego_today_${user.id}` : "ego_today"
+
+  // Cached + deduped + refetched in the background. `initialData` hydrates instantly from the
+  // last saved list (offline-friendly), and — same as the old catch(() => {/* keep cached/offline
+  // data */})) — a failed background refetch just leaves that data in place instead of clearing it.
+  // refetchInterval keeps the "new assignment appears within a minute" behaviour; *InBackground
+  // matches the previous plain setInterval, which kept polling even while the tab wasn't focused.
+  const { data, isPending: loading } = useApi<{ jobs: FieldJob[] }>("/me/jobs/today", {
+    refetchInterval: 60000,
+    refetchIntervalInBackground: true,
+    initialData: () => {
+      try {
+        const c = localStorage.getItem(cacheKey)
+        return c ? { jobs: JSON.parse(c) } : undefined
+      } catch { return undefined }
+    },
+  })
+  const jobs = data?.jobs ?? []
+
   useEffect(() => {
-    // Instant offline-friendly hydrate from the last saved list.
-    try { const c = localStorage.getItem(cacheKey); if (c) { setJobs(JSON.parse(c)); setLoading(false) } } catch { /* ignore */ }
-    const fetchJobs = () =>
-      api<{ jobs: FieldJob[] }>("/me/jobs/today")
-        .then((r) => { setJobs(r.jobs); try { localStorage.setItem(cacheKey, JSON.stringify(r.jobs)) } catch { /* ignore */ } })
-        .catch(() => { /* keep cached/offline data */ })
-        .finally(() => setLoading(false))
-    fetchJobs()
-    api<Weather>("/weather").then(setWeather).catch(() => {}) // hidden if no key
-    const t = setInterval(fetchJobs, 60000) // live-ish: new assignments appear within a minute
-    return () => clearInterval(t)
-  }, [cacheKey])
+    if (!data) return
+    try { localStorage.setItem(cacheKey, JSON.stringify(data.jobs)) } catch { /* ignore */ }
+  }, [data, cacheKey])
+
+  const { data: weather } = useApi<Weather>("/weather") // hidden if no key
 
   return (
     <div className="flex flex-col gap-4 p-4">

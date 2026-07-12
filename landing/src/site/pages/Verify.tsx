@@ -38,8 +38,12 @@ export default function Verify() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
+  // Resets the panel before each lookup. The landing site fetches with a plain client (no
+  // react-query here), so the loading/error reset genuinely belongs in the effect that fetches.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
     let live = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoading(true)
     setError(null)
     api

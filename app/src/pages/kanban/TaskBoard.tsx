@@ -7,6 +7,7 @@ import { KanbanSquare, Plus, Trash2, Loader2, Pencil, GripVertical, Archive, Rot
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -100,26 +101,29 @@ function Column({ col, tasks, onAdd, onEdit, onDelete }: { col: typeof COLUMNS[n
 }
 
 export default function TaskBoard() {
+  // Cached + deduped + refetched in the background. `tasks`/`staff`/`archivedCount` stay as
+  // local state (synced from the query below) rather than reading straight off `data`, because
+  // drag-and-drop needs to mutate them optimistically the instant a card drops — before the
+  // "/tasks/move" POST even resolves. Keeping a query-only source of truth here would mean the
+  // card snaps back until the request completes. See onDragEnd/del below for the write side.
+  const { data, isPending } = useApi<{ tasks: Task[]; staff: Staff[]; archived_count: number }>("/tasks")
   const [tasks, setTasks] = useState<Task[]>([])
   const [staff, setStaff] = useState<Staff[]>([])
-  const [loading, setLoading] = useState(true)
+  const [archivedCount, setArchivedCount] = useState(0)
+  const loading = isPending
+  useEffect(() => {
+    if (data) { setTasks(data.tasks); setStaff(data.staff); setArchivedCount(data.archived_count ?? 0) }
+  }, [data])
+
   const [edit, setEdit] = useState<Task | null>(null)
   const [eTitle, setETitle] = useState("")
   const [eDesc, setEDesc] = useState("")
   const [eAssignee, setEAssignee] = useState<string>(UNASSIGNED)
   const [saving, setSaving] = useState(false)
-  const [archivedCount, setArchivedCount] = useState(0)
   const [archiveOpen, setArchiveOpen] = useState(false)
   const [archived, setArchived] = useState<Task[]>([])
   const [archiveLoading, setArchiveLoading] = useState(false)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-
-  function load() {
-    return api<{ tasks: Task[]; staff: Staff[]; archived_count: number }>("/tasks").then((r) => {
-      setTasks(r.tasks); setStaff(r.staff); setArchivedCount(r.archived_count ?? 0)
-    })
-  }
-  useEffect(() => { load().finally(() => setLoading(false)) }, [])
 
   async function openArchive() {
     setArchiveOpen(true); setArchiveLoading(true)
@@ -131,7 +135,7 @@ export default function TaskBoard() {
     try {
       await api("/tasks/move", { method: "POST", body: { id: t.id, status: "todo", sort: 0 } })
       setArchived((p) => p.filter((x) => x.id !== t.id))
-      await load()
+      invalidate("/tasks")
       toast.success("Restored to To do")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
@@ -139,6 +143,7 @@ export default function TaskBoard() {
     setArchived((p) => p.filter((x) => x.id !== id))
     setArchivedCount((n) => Math.max(0, n - 1))
     await api("/tasks/delete", { method: "POST", body: { id } })
+    invalidate("/tasks")
   }
 
   const byCol = useMemo(() => {
@@ -161,6 +166,7 @@ export default function TaskBoard() {
       await api("/tasks/update", { method: "POST", body: { id: edit.id, title: eTitle.trim(), description: eDesc.trim(), assignee_id: assignee_id ?? "" } })
       setTasks((p) => p.map((t) => (t.id === edit.id ? { ...t, title: eTitle.trim(), description: eDesc.trim() || null, assignee_id, assignee_name } : t)))
       setEdit(null)
+      invalidate("/tasks")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
     finally { setSaving(false) }
   }
@@ -174,15 +180,17 @@ export default function TaskBoard() {
     const sort = (byCol[status]?.length ?? 0)
     setTasks((prev) => prev.map((x) => (x.id === id ? { ...x, status, sort } : x))) // optimistic
     try { await api("/tasks/move", { method: "POST", body: { id, status, sort } }) }
-    catch { toast.error("Couldn't move"); load() }
+    catch { toast.error("Couldn't move") }
+    finally { invalidate("/tasks") }
   }
   async function add(status: string, title: string) {
-    try { await api("/tasks", { method: "POST", body: { title, status } }); load() }
+    try { await api("/tasks", { method: "POST", body: { title, status } }); invalidate("/tasks") }
     catch (e) { toast.error(e instanceof Error ? e.message : "Failed") }
   }
   async function del(id: number) {
     setTasks((p) => p.filter((t) => t.id !== id))
     await api("/tasks/delete", { method: "POST", body: { id } })
+    invalidate("/tasks")
   }
 
   return (

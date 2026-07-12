@@ -17,18 +17,23 @@ interface Company {
 
 const initials = (s: string) => s.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()
 
-export default function UserProfile() {
-  const { user } = useAuth()
-  const { data, isPending } = useApi<{ settings: Company }>("/settings")
-  const co = data?.settings ?? null
-  const loading = isPending
-
-  const Row = ({ icon: Icon, label, value }: { icon: typeof User; label: string; value?: string | null }) => (
+/** Hoisted OUT of UserProfile: a component declared inside another component's body is a brand
+ *  new component type on every render, so React unmounts and remounts the whole subtree each
+ *  time the parent re-renders — losing DOM state and defeating memoisation for no benefit. */
+function Row({ icon: Icon, label, value }: { icon: typeof User; label: string; value?: string | null }) {
+  return (
     <div className="flex items-start gap-3 text-sm">
       <Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
       <span><span className="font-medium">{label}:</span> {value || <span className="text-muted-foreground">—</span>}</span>
     </div>
   )
+}
+
+export default function UserProfile() {
+  const { user } = useAuth()
+  const { data, isPending } = useApi<{ settings: Company }>("/settings")
+  const co = data?.settings ?? null
+  const loading = isPending
 
   return (
     <div className="space-y-6">

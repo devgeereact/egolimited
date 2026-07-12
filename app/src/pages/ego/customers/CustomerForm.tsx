@@ -25,6 +25,15 @@ const schema = z.object({
 })
 type Values = z.infer<typeof schema>
 
+/** What GET /customers/get returns. Only the fields this form actually reads. */
+interface CustomerRecord {
+  name: string | null
+  phone: string | null
+  email: string | null
+  notes: string | null
+  addresses?: { line1?: string | null; city?: string | null; postcode?: string | null }[]
+}
+
 export default function CustomerForm() {
   const navigate = useNavigate()
   const [params] = useSearchParams()
@@ -36,7 +45,7 @@ export default function CustomerForm() {
     defaultValues: { name: "", phone: "", email: "", notes: "", line1: "", city: "", postcode: "" },
   })
 
-  const { data, isLoading } = useApi<{ customer: any }>(id ? `/customers/get?id=${id}` : null)
+  const { data, isLoading } = useApi<{ customer: CustomerRecord }>(id ? `/customers/get?id=${id}` : null)
   const loading = isLoading
 
   useEffect(() => {

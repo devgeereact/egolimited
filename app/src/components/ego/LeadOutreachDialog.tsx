@@ -67,7 +67,7 @@ export default function LeadOutreachDialog({ lead, templates, open, onOpenChange
   // Fresh slate each time the dialog opens for a lead.
   useEffect(() => { if (open) { setSubject(""); setBody(""); setBrief(""); setPreview(false) } }, [open, lead?.id])
 
-  function usePreset(id: string) {
+  function applyPreset(id: string) {
     const t = templates.find((x) => String(x.id) === id)
     if (!t) return
     setSubject(t.subject ?? "")
@@ -115,7 +115,7 @@ export default function LeadOutreachDialog({ lead, templates, open, onOpenChange
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label className="text-xs">Start from a preset</Label>
-              <TemplateSelect templates={templates} onPick={(t) => usePreset(String(t.id))} />
+              <TemplateSelect templates={templates} onPick={(t) => applyPreset(String(t.id))} />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">…or let AI draft it</Label>

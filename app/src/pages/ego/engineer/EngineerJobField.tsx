@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -52,7 +53,6 @@ export default function EngineerJobField() {
   const id = params.get("id")
   const fileRef = useRef<HTMLInputElement>(null)
   const [job, setJob] = useState<FieldDetail | null>(null)
-  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [noteOpen, setNoteOpen] = useState(false)
   const [note, setNote] = useState("")
@@ -65,11 +65,16 @@ export default function EngineerJobField() {
   const [partsNeeded, setPartsNeeded] = useState(false)
   const [partsNote, setPartsNote] = useState("")
 
-  function load() {
-    if (!id) return
-    return api<{ job: FieldDetail }>(`/me/jobs/get?id=${id}`).then((r) => setJob(r.job)).catch(() => toast.error("Job not found")).finally(() => setLoading(false))
+  const JOB_PATH = id ? `/me/jobs/get?id=${id}` : null
+  const { data, isPending, isError } = useApi<{ job: FieldDetail }>(JOB_PATH)
+  const loading = !!id && isPending
+  useEffect(() => { if (isError) toast.error("Job not found") }, [isError])
+  useEffect(() => { if (data) setJob(data.job) }, [data])
+
+  /** An engineer's field action changes their own job list AND the office's view of it. */
+  const load = () => {
+    if (JOB_PATH) invalidate(JOB_PATH, "/me/jobs", "/jobs", "/schedule", "/dashboard")
   }
-  useEffect(() => { load()   }, [id])
 
   async function move(to: JobStatus, extra: Record<string, unknown> = {}) {
     if (!job) return

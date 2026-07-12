@@ -8,10 +8,11 @@ import { toast } from "sonner"
 
 import QRCode from "qrcode"
 import { api, apiForm } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { useAuth } from "@/store/auth.store"
 import { atLeast } from "@/lib/roles"
 import { computeTotals, gbp } from "@/lib/invoicing"
-import { buildInvoicePdf, addressLines } from "@/lib/invoicePdf"
+import { buildInvoicePdf, addressLines, type InvoiceDoc } from "@/lib/invoicePdf"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -52,25 +53,35 @@ export default function InvoiceDetail() {
   const [inv, setInv] = useState<Invoice | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [vatRate, setVatRate] = useState(0)
-  const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [payOpen, setPayOpen] = useState(false)
   const [emailOpen, setEmailOpen] = useState(false)
   const [emailTo, setEmailTo] = useState("")
   const [emailBusy, setEmailBusy] = useState(false)
 
-  function load() {
-    if (!id) return
-    return api<{ invoice: Invoice }>(`/invoices/get?id=${id}`)
-      .then(({ invoice }) => {
-        setInv(invoice)
-        setLines(invoice.lines.length ? invoice.lines : [{ description: "", quantity: 1, unit_price: 0 }])
-        setVatRate(Number(invoice.vat_rate))
-      })
-      .catch(() => toast.error("Not found"))
-      .finally(() => setLoading(false))
+  const INV_PATH = id ? `/invoices/get?id=${id}` : null
+  const { data, isPending, isError } = useApi<{ invoice: Invoice }>(INV_PATH)
+  const loading = !!id && isPending
+  useEffect(() => { if (isError) toast.error("Not found") }, [isError])
+
+  // The line items are an EDITABLE grid, so they stay local state seeded from the server on each
+  // (re)fetch — reading them straight from the query cache would wipe a half-typed line the moment
+  // a background refetch landed. Money is computed from these local lines, then re-checked
+  // server-side on save (api/lib/invoicing.php is the authority; lib/invoicing.ts is a mirror).
+  useEffect(() => {
+    if (!data) return
+    const { invoice } = data
+    setInv(invoice)
+    setLines(invoice.lines.length ? invoice.lines : [{ description: "", quantity: 1, unit_price: 0 }])
+    setVatRate(Number(invoice.vat_rate))
+  }, [data])
+
+  /** Refetch this document + everything an invoice change makes stale.
+   *  "/invoices" covers the Payments page too — it fetches "/invoices?kind=invoice&status=…",
+   *  and keys are [pathname, querystring], so the collection prefix matches every filtered view. */
+  const load = () => {
+    if (INV_PATH) invalidate(INV_PATH, "/invoices", "/dashboard", "/jobs", "/activity")
   }
-  useEffect(() => { load()   }, [id])
 
   const totals = useMemo(() => computeTotals(lines, vatRate), [lines, vatRate])
   const isDraft = inv?.status === "draft"
@@ -114,7 +125,9 @@ export default function InvoiceDetail() {
     try {
       // Invoice draft → finalise first so the ATTACHED PDF carries its real number.
       let current = inv
-      let pdfObj: any = { ...inv, lines, vat_rate: vatRate }
+      // buildInvoicePdf already declares exactly what it needs (InvoiceDoc) — the `any` here was
+      // bypassing that, so a shape mismatch would have surfaced as a broken PDF, not a type error.
+      let pdfObj: InvoiceDoc = { ...inv, lines, vat_rate: vatRate }
       if (inv.kind === "invoice" && isDraft) {
         await api("/invoices/update", { method: "POST", body: { id: inv.id, vat_rate: vatRate, lines } })
         await api("/invoices/send", { method: "POST", body: { id: inv.id } })

@@ -10,6 +10,7 @@ import { Loader2, Plus, Clock, UserPlus } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -41,12 +42,7 @@ const colorFor = (id: number | null) =>
 
 export default function ScheduleBoard() {
   const navigate = useNavigate()
-  const [jobs, setJobs] = useState<SchedJob[]>([])
-  const [waitlist, setWaitlist] = useState<WaitItem[]>([])
-  const [pickJobs, setPickJobs] = useState<{ id: number; reference: string; title: string }[]>([])
-  const [engineers, setEngineers] = useState<{ id: number; name: string }[]>([])
   const [filter, setFilter] = useState<number | "all">("all")
-  const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [fixedJob, setFixedJob] = useState<number>()
   const [slot, setSlot] = useState<{ date: string; start: string; end: string }>()
@@ -69,19 +65,27 @@ export default function ScheduleBoard() {
     } finally { setRemoving(false) }
   }
 
-  function load() {
-    return Promise.all([
-      api<{ jobs: SchedJob[]; waitlist: WaitItem[] }>("/schedule"),
-      api<{ engineers: { id: number; name: string }[] }>("/engineers"),
-      api<{ jobs: { id: number; reference: string; title: string; status: string }[] }>("/jobs"),
-    ]).then(([s, e, j]) => {
-      setJobs(s.jobs)
-      setWaitlist(s.waitlist ?? [])
-      setEngineers(e.engineers)
-      setPickJobs(j.jobs.filter((x) => !["closed", "cancelled", "paid"].includes(x.status)).map(({ id, reference, title }) => ({ id, reference, title })))
-    })
-  }
-  useEffect(() => { load().finally(() => setLoading(false)) }, [])
+  // Three independent queries instead of one Promise.all: each is cached and refetched on its
+  // own, so returning to the board no longer re-pulls the whole jobs list just to redraw a
+  // calendar that hasn't changed.
+  const schedQ = useApi<{ jobs: SchedJob[]; waitlist: WaitItem[] }>("/schedule")
+  const engQ = useApi<{ engineers: { id: number; name: string }[] }>("/engineers")
+  const jobsQ = useApi<{ jobs: { id: number; reference: string; title: string; status: string }[] }>("/jobs")
+
+  const jobs = useMemo(() => schedQ.data?.jobs ?? [], [schedQ.data])
+  const waitlist = useMemo(() => schedQ.data?.waitlist ?? [], [schedQ.data])
+  const engineers = useMemo(() => engQ.data?.engineers ?? [], [engQ.data])
+  // The "pick a job to schedule" list must exclude jobs that are already finished with.
+  const pickJobs = useMemo(
+    () => (jobsQ.data?.jobs ?? [])
+      .filter((x) => !["closed", "cancelled", "paid"].includes(x.status))
+      .map(({ id, reference, title }) => ({ id, reference, title })),
+    [jobsQ.data]
+  )
+  const loading = schedQ.isPending || engQ.isPending || jobsQ.isPending
+
+  /** Scheduling a job changes the board, the job itself and the dashboard's counts. */
+  const load = () => invalidate("/schedule", "/jobs", "/dashboard")
 
   const events = useMemo(
     () =>

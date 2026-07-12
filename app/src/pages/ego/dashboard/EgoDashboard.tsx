@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Link } from "react-router-dom"
 import {
   Briefcase, CalendarPlus, PoundSterling, AlertTriangle, Loader2, Sparkles, FileText, Clock, ArrowRight, Truck, BadgePoundSterling,
@@ -8,6 +8,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 
 import { api } from "@/lib/api"
+import { useApi } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { gbp } from "@/lib/invoicing"
 import { useAuth } from "@/store/auth.store"
@@ -48,12 +49,10 @@ const dayPart = () => {
 
 export default function EgoDashboard() {
   const { user } = useAuth()
-  const [d, setD] = useState<Dash | null>(null)
   const [ai, setAi] = useState<string | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
-  useEffect(() => {
-    api<Dash>("/dashboard").then(setD)
-  }, [])
+  const { data } = useApi<Dash>("/dashboard")
+  const d = data ?? null
 
   async function digest() {
     if (!d) return
