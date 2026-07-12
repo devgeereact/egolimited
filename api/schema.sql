@@ -656,3 +656,37 @@ CREATE TABLE IF NOT EXISTS ego_campaign_automation (
   updated_by INT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 INSERT IGNORE INTO ego_campaign_automation (id, enabled) VALUES (1, 0);
+
+-- ============================================================================
+-- Added 2026-07-12 (transformation review, Phase 1).
+-- MUST stay at the END of this file: every index below depends on a column that
+-- an earlier ALTER adds (e.g. ego_tasks.assignee_id), so ordering is load-bearing.
+--
+-- NOTE: `ADD INDEX IF NOT EXISTS` is MariaDB-only. Plain MySQL throws "Duplicate key
+-- name", and under mysqli_report(STRICT) that is a thrown exception, not a warning —
+-- so runtime self-heal helpers must query information_schema instead of relying on
+-- this syntax (see ensure_payment_cols() in index.php).
+-- ============================================================================
+
+-- Close a schema drift: `archived`/`flagged` existed ONLY as a lazy self-heal inside
+-- index.php (ensure_message_cols), never here — so a DB built from schema.sql alone was
+-- missing them, and the index below would fail. schema.sql is the source of truth.
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS archived TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS flagged  TINYINT(1) NOT NULL DEFAULT 0;
+
+-- Indexes backing queries that were filesorting or full-scanning.
+-- GET /invoices does `ORDER BY i.created_at DESC` with no index on it → filesort every load.
+ALTER TABLE ego_invoices        ADD INDEX IF NOT EXISTS idx_ego_inv_created (created_at);
+ALTER TABLE ego_invoices        ADD INDEX IF NOT EXISTS idx_ego_inv_customer (customer_id);
+-- The inbox filters by channel + archived; the kanban board filters by status. Neither indexed.
+ALTER TABLE ego_messages        ADD INDEX IF NOT EXISTS idx_ego_msg_channel (channel, archived);
+ALTER TABLE ego_tasks           ADD INDEX IF NOT EXISTS idx_ego_task_status (status);
+ALTER TABLE ego_tasks           ADD INDEX IF NOT EXISTS idx_ego_task_assignee (assignee_id);
+-- cron.php runs `WHERE active=1 AND next_due<=CURDATE()` on every tick → full scan.
+ALTER TABLE ego_recurring_plans ADD INDEX IF NOT EXISTS idx_ego_recur_due (active, next_due);
+-- Append-only audit log, queried by time and by actor; neither column was indexed.
+ALTER TABLE ego_activity_log    ADD INDEX IF NOT EXISTS idx_ego_act_created (created_at);
+ALTER TABLE ego_activity_log    ADD INDEX IF NOT EXISTS idx_ego_act_actor (actor_id);
+-- ego_payments is a ledger: every read filters `deleted_at IS NULL`.
+ALTER TABLE ego_payments        ADD INDEX IF NOT EXISTS idx_ego_pay_invoice (invoice_id, deleted_at);
+ALTER TABLE ego_payments        ADD INDEX IF NOT EXISTS idx_ego_pay_paid_on (paid_on);

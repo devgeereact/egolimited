@@ -3,7 +3,6 @@ import { createBrowserRouter, Navigate } from "react-router-dom"
 import { Loader2 } from "lucide-react"
 
 import AppLayout from "@/layouts/AppLayout"
-import AuthLayout from "@/layouts/AuthLayout"
 import EngineerLayout from "@/layouts/EngineerLayout"
 
 // Eager — guards + entry/auth screens: small, and needed on first paint.
@@ -14,19 +13,6 @@ import EgoLogin from "@/pages/ego/auth/EgoLogin"
 import EgoLanding from "@/pages/ego/auth/EgoLanding"
 import HomeRedirect from "@/pages/ego/auth/HomeRedirect"
 import InviteAccept from "@/pages/ego/auth/InviteAccept"
-
-import LoginPage from "@/auth/basic/LoginPage"
-import RegisterPage from "@/auth/basic/RegisterPage"
-import ForgotPasswordPage from "@/auth/basic/ForgotPasswordPage"
-import { ResetPasswordForm } from "@/auth/basic/ResetPasswordForm"
-import { VerifyEmailForm } from "@/auth/basic/VerifyEmailForm"
-import { PasswordResetSuccess } from "@/auth/basic/PasswordResetSuccess"
-import CoverLoginPage from "@/auth/cover/CoverLoginPage"
-import CoverForgotPasswordPage from "@/auth/cover/CoverForgotPasswordPage"
-import CoverRegisterPage from "@/auth/cover/CoverRegisterPage"
-import CoverResetPasswordPage from "@/auth/cover/CoverResetPasswordPage"
-import CoverVerifyEmailPage from "@/auth/cover/CoverVerifyEmailPage"
-import CoverPasswordResetSuccessPage from "@/auth/cover/CoverPasswordResetSuccessPage"
 
 // Lazy — EGO feature pages. Each becomes its own chunk, pulling heavy deps
 // (FullCalendar, jsPDF, dnd-kit, qrcode, recharts) out of the initial bundle.
@@ -93,26 +79,12 @@ const s = (node: ReactNode) => <Suspense fallback={<PageFallback />}>{node}</Sus
 
 export const router = createBrowserRouter (
   [
-    // 🔐 AUTH ROUTES
-    {
-      element: <AuthLayout />,
-      errorElement: <ErrorPage />,
-      children: [
-        {path: "auth/basic/login", element: <LoginPage /> },
-        {path: "auth/basic/register", element: <RegisterPage /> },
-        {path: "auth/basic/forgot-password", element: <ForgotPasswordPage /> },
-        {path: "auth/basic/reset-password", element: <ResetPasswordForm /> },
-        {path: "auth/basic/verify-email", element: <VerifyEmailForm /> },
-        {path: "auth/basic/password-reset-success", element: <PasswordResetSuccess /> },
-
-        {path: "auth/cover/login", element: <CoverLoginPage /> },
-        {path: "auth/cover/register", element: <CoverRegisterPage /> },
-        {path: "auth/cover/forgot-password", element: <CoverForgotPasswordPage /> },
-        {path: "auth/cover/new-password", element: <CoverResetPasswordPage /> },
-        {path: "auth/cover/password-reset-success", element: <CoverPasswordResetSuccessPage /> },
-        {path: "auth/cover/verify-email", element: <CoverVerifyEmailPage /> },
-      ],
-    },
+    // 🔐 AUTH — the PULSE template shipped two unbranded "Acme Inc." auth skins (basic/cover,
+    // 12 pages) that were never wired to auth.store or lib/api.ts: the login form collected an
+    // email and password and did nothing with them. They were LIVE in production. Deleted
+    // 2026-07-12; anything under /auth/* now redirects to the one real login so old bookmarks
+    // don't dead-end. EGO's real auth is pages/ego/auth/* (login, invite, lock).
+    { path: "auth/*", element: <Navigate to="/ego/login" replace /> },
 
     // 📊 APP ROUTES
     {
