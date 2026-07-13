@@ -264,6 +264,23 @@ function inbox_sync(mysqli $db): int {
                 } else {
                     // A human replied. Stop every sequence they're in — and say why.
                     camp_stop_email($db, $fromEmail, "replied", "replied to us");
+
+                    /* A reply is the most valuable event in this business, and until now it did
+                     * nothing except stop the drip: no owner, no deadline, nobody told. Someone had
+                     * to happen to notice an email. THIS is the hole the audit found.
+                     * Now the reply makes them HOT — owned, deadlined, and on Today until dealt with. */
+                    require_once __DIR__ . "/pipeline.php";
+                    $rid = $cid ?: contact_upsert_by_email($db, [
+                        "email" => $fromEmail, "name" => $fromName, "source" => "cold",
+                    ]);
+                    if ($rid) {
+                        contact_log($db, $rid, "reply", "They replied: " . mb_substr(($subject ?: $body), 0, 180));
+                        // Someone must deal with this within one working day.
+                        db_exec($db, "UPDATE ego_customers SET next_action_at = DATE_ADD(NOW(), INTERVAL 1 DAY)
+                                      WHERE id=? AND (next_action_at IS NULL OR next_action_at > DATE_ADD(NOW(), INTERVAL 1 DAY))",
+                                "i", $rid);
+                        stage_recompute($db, $rid);   // an inbound message exists -> 'interested'
+                    }
                 }
             }
         } catch (Throwable $e) { /* never let campaign bookkeeping break the mail sync */ }
