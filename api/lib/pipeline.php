@@ -29,7 +29,11 @@ declare(strict_types=1);
 function stage_for(array $f): string {
     $now = strtotime((string)($f["now"] ?? "now"));
 
-    if (!empty($f["has_paid_invoice"])) {
+    // A business we have actually DONE WORK FOR is a customer — whether or not an invoice was ever
+    // marked paid. Deriving "customer" from a paid invoice alone would demote every real customer
+    // who was invoiced but hasn't paid yet, or who paid in cash and nobody recorded it. Caught
+    // during the migration dry-run, where an existing customer was silently downgraded to prospect.
+    if (!empty($f["has_paid_invoice"]) || !empty($f["has_job"])) {
         // Dormancy is the only time-dependent rule. The clock is injected so a test never depends
         // on what day it happens to be run.
         $last = !empty($f["last_job_at"]) ? strtotime((string)$f["last_job_at"]) : null;
@@ -53,6 +57,7 @@ function stage_facts(mysqli $db, int $id): array {
     $job  = db_one($db, "SELECT MAX(created_at) j FROM ego_jobs WHERE customer_id=? AND deleted_at IS NULL", "i", $id);
 
     return [
+        "has_job"          => !empty($job["j"]),
         "has_paid_invoice" => (bool) $paid,
         "has_open_quote"   => (bool) $open,
         "quote_declined"   => (bool) $dead,

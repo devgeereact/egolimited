@@ -247,6 +247,15 @@ eq("dormant", stage_for(array_merge($base, [
 eq("customer", stage_for(array_merge($base, [
     "has_paid_invoice" => true, "last_job_at" => "2026-01-01 00:00:00", "now" => "2026-07-13 00:00:00",
 ])), "customer with a recent job stays a customer");
+// A business we have done work for is a customer even if no invoice was ever marked paid — they may
+// have been invoiced and not paid yet, or paid cash. Deriving from the invoice alone would demote
+// every real customer in the database. Caught by the migration dry-run, not by reading the code.
+eq("customer", stage_for(array_merge($base, [
+    "has_job" => true, "last_job_at" => "2026-06-01 00:00:00", "now" => "2026-07-13 00:00:00",
+])), "a business we did a job for is a customer, paid invoice or not");
+eq("dormant", stage_for(array_merge($base, [
+    "has_job" => true, "last_job_at" => "2024-06-01 00:00:00", "now" => "2026-07-13 00:00:00",
+])), "…and goes dormant on the same 12-month rule");
 
 // ---------------------------------------------------------------- report
 printf("\n  %d passed, %d failed\n", $T["pass"], $T["fail"]);
