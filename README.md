@@ -31,8 +31,46 @@ The build pack (`docs/05-TECH-STACK.md`) recommends Next.js + Vercel + Supabase.
 | app | 5051 | http://localhost:5051 | `cd app && npm install && npm run dev` |
 | api | 8080 | http://localhost:8080 | PHP backend (runs on server) |
 
-Ports pinned with `strictPort: true` in each `vite.config.ts`. The dev frontends call the live API at
-`https://egolimited.com/api` (CORS allows `localhost:5050/5051`).
+Ports are pinned with `strictPort: true` in each `vite.config.ts`, so a busy port **fails loudly**
+(`Port 5051 is already in use`) rather than drifting to a random one. If `npm run dev` won't start,
+something is already holding the port — `lsof -iTCP:5051 -sTCP:LISTEN` will name it.
+
+The dev frontends call the **live production API** at `https://egolimited.com/api` (CORS allows
+`localhost:5050/5051`). There is no local PHP server. Two consequences worth internalising:
+
+- A local screen shows **real customer data**, and its writes are **real writes**.
+- A screen that assumes the server already has its new fields will crash locally while passing every
+  build. **New API fields must be optional on the client** until the API is deployed.
+
+## Tests & quality gates
+No root `package.json` — each surface owns its own scripts.
+
+```bash
+cd app && npm test                          # vitest — frontend unit tests
+cd app && npx vitest run src/lib/query.test.ts   # one file
+cd app && npx vitest run -t "prefix"        # tests whose NAME matches (a substring, not a filename)
+cd app && npx tsc -b && npm run lint
+
+php api/tests/run.php               # API suite: pure domain logic + static guards. Needs no DB.
+php -l api/index.php                # syntax check (CI lints every .php file)
+```
+
+The API suite is **zero-dependency** (no Composer, no `vendor/` — a virtue on shared hosting: nothing
+to CVE-patch). It covers the pure domain modules in `api/lib/*` — invoicing, VAT, job-status
+transitions, pipeline stage derivation, tender matching — plus two *static* guards that read
+`index.php` itself and fail the build on a class of bug rather than an instance of one.
+
+## Automation (cron, on the server)
+Five jobs, all CLI-only. **Automation drafts and prompts; a human sends and decides** — no cron ever
+emails a prospect.
+
+| Job | When | Does |
+|-----|------|------|
+| `cron.php` | */15 | job/invoice reminders, recurring jobs, SLA escalation |
+| `campaign_worker.php` | */15, Mon–Fri business hours | drains the queued-send queue (skips UK bank holidays) |
+| `pipeline_cron.php` | hourly | re-derives contact stages, raises chases, flags dormancy |
+| `tenders_cron.php` | 06:15 daily | pulls Contracts Finder notices (`docs/TENDERS.md`) |
+| `backup.php` | 03:17 daily | DB backup outside the web root |
 
 ## Domain & routing
 - Landing → `https://egolimited.com/`
@@ -47,10 +85,28 @@ via `.htaccess` in each deployed folder.
 SSH alias. PHP API is rsynced manually (see `CLAUDE.md` → Deploy mechanics). `config.php` lives
 server-side only — never deployed from the repo. Source folders + `docs/` stay in the repo, not deployed.
 
+> **GitHub Actions is billing-blocked — pushing to `main` deploys NOTHING.** Every deploy is a manual
+> rsync. Don't assume a green push means a live change; verify over SSH, not curl (Cloudflare fronts
+> the site).
+
+**The app build MUST set its base:** `cd app && npx vite build --base=/app/`. A plain `npm run build`
+uses base `/`, producing an `index.html` under `/app/` that points at `/assets/*` — 404s, blank app.
+Verify with `grep assets app/dist/index.html`.
+
 ## Database
 Dedicated MySQL DB **`devgeereact_egolimited`** (`ego_`-prefixed tables). Schema: `api/schema.sql`.
 All money, numbering and job-status logic is **server-owned** — the client renders, never re-implements.
 
+## Where work comes from
+Two directions, and only one of them is new:
+
+- **Outbound** — the **Pipeline** (`/ego/pipeline`) is the one place a business exists, from stranger
+  to paying customer. Stages are **derived from facts**, never hand-set. Sequences are a tool applied
+  to contacts, not a place you go.
+- **Inbound** — **Tenders** (`/ego/tenders`) reads the official Contracts Finder OCDS API, where public
+  bodies are legally required to publish work they need doing. Open API, no scraping, no personal data.
+  See `docs/TENDERS.md` for why this exists instead of harvesting contacts from LinkedIn.
+
 ## Status
 Near-complete multi-role app. All in-scope milestones (M1–M9, M11–M16) done; M10 (SMS) dropped
-(email-only). See `CLAUDE.md` for the full status + deploy mechanics.
+(email-only). See `CLAUDE.md` for the full status, architecture invariants and deploy mechanics.
