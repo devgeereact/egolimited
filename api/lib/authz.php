@@ -208,6 +208,16 @@ const ROUTE_ROLES = [
     "POST /certificates"         => "office",
     "POST /certificates/update"  => "office",
     "POST /certificates/delete"  => "office",
+    // Pipeline — one contact table, derived stages.
+    // docs/superpowers/specs/2026-07-13-pipeline-restructure-design.md
+    "GET /pipeline"           => "office",
+    "GET /pipeline/contacts"  => "office",
+    "GET /pipeline/contact"   => "office",
+    "POST /pipeline/stage"    => "office",
+    "POST /pipeline/unlock"   => "office",
+    "POST /pipeline/note"     => "office",
+    "POST /pipeline/owner"    => "office",
+    "POST /pipeline/done"     => "office",
     // Campaigns v2 (docs/CAMPAIGNS-V2.md). Nothing here sends mail inline — sends are queued and
     // drained by campaign_worker.php, so a killed request can never leave a half-finished broadcast.
     "GET /campaigns"               => "office",

@@ -12,6 +12,7 @@ require __DIR__ . "/lib/invoicing.php";
 require __DIR__ . "/lib/brand.php";
 require __DIR__ . "/lib/authz.php";   // who may call what — enforced in one gate before the switch
 require __DIR__ . "/lib/campaigns.php"; // enrolment, suppression, merge, queueing
+require __DIR__ . "/lib/pipeline.php";  // one contact table; stages derived from facts
 
 /* ---------- CORS ---------- */
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
@@ -3077,6 +3078,47 @@ switch ("$method $route") {
             "INSERT INTO ego_messages (direction,channel,from_name,from_email,subject,body,status)
              VALUES ('inbound','enquiry',?,?,?,?, 'received')",
             "ssss", $name, $email, $subject, $bodyText);
+        $msgId = (int) $db->insert_id;   // captured BEFORE the next insert overwrites insert_id
+
+        /* ---- THE ENQUIRY IS NO LONGER ONLY AN INBOX ROW ----
+         * Before this, the line above was the whole of it: the enquiry WAS an inbox item, and if
+         * nobody opened the inbox, nobody knew. The highest-intent prospect EGO gets was also the
+         * worst handled. Now it becomes a CONTACT with a clock on it, and the inbox keeps its copy
+         * purely as the audit trail and the place a reply threads back to. */
+        $cid = 0;
+        if ($email) {
+            $cid = contact_upsert_by_email($db, [
+                "email" => $email, "name" => $name, "phone" => $phone, "source" => "enquiry",
+            ]);
+        }
+        if ($cid) {
+            // Someone must answer this within one working hour. Until they do, it sits at the top
+            // of Today. Speed of first response is the single biggest predictor of winning the job.
+            db_exec($db, "UPDATE ego_customers SET next_action_at = DATE_ADD(NOW(), INTERVAL 1 HOUR)
+                          WHERE id=? AND next_action_at IS NULL", "i", $cid);
+            contact_log($db, $cid, "enquiry", ($service !== "" ? "$service — " : "") . mb_substr($message, 0, 180));
+            db_exec($db, "UPDATE ego_messages SET customer_id=? WHERE id=?", "ii", $cid, $msgId);
+
+            /* The ONE automatic send in the whole system, and the owner approved it deliberately.
+             * Everything else in EGO drafts and waits for a human — but an acknowledgement sent an
+             * hour later is not an acknowledgement. Suppression is still honoured, and
+             * ego_send_mail_checked reports failure instead of silently falling back. */
+            if (!supp_has($db, $email)) {
+                try {
+                    require_once __DIR__ . "/lib/mailer.php";
+                    $coName = (db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED";
+                    $ack = "<p>Hi " . htmlspecialchars(preg_split('/\s+/', $name)[0] ?? $name) . ",</p>"
+                        . "<p>Thanks for getting in touch with " . htmlspecialchars($coName) . ". We've got your enquiry and "
+                        . "someone will come back to you <strong>within one working hour</strong>.</p>"
+                        . "<p>If it can't wait, just give us a ring.</p>";
+                    ego_send_mail_checked($db, $email, $name, "We've got your enquiry", ego_email_shell($db, "Thanks — we've got it", $ack));
+                    contact_log($db, $cid, "email_out", "Sent the automatic acknowledgement");
+                } catch (Throwable $e) {
+                    // An acknowledgement that fails must never lose the enquiry itself.
+                    error_log("[ego enquiry] ack failed: " . $e->getMessage());
+                }
+            }
+        }
 
         $cs = db_one($db, "SELECT company_name,email,notify_email FROM ego_company_settings ORDER BY id LIMIT 1");
         $to = trim($cs["notify_email"] ?? "") ?: trim($cs["email"] ?? "");
@@ -3974,6 +4016,124 @@ switch ("$method $route") {
     // Newsletter signups (landing) and admin-added contacts live in ego_subscribers;
     // customers come from ego_customers. Admins compose + send bulk email to any
     // audience, with an AI draft helper. Human always approves before send.
+    /* ======================= PIPELINE =======================
+     * One contact table; stages derived from facts (lib/pipeline.php).
+     * See docs/superpowers/specs/2026-07-13-pipeline-restructure-design.md
+     */
+    case "GET /pipeline": {
+        require_role($db, "admin");
+        $rows = db_all($db, "SELECT stage, COUNT(*) c FROM ego_customers WHERE deleted_at IS NULL GROUP BY stage");
+        $counts = [];
+        foreach ($rows as $r) $counts[$r["stage"]] = (int)$r["c"];
+        // Everything whose deadline has passed. This is the number that should make someone anxious.
+        $due = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_customers
+                                  WHERE deleted_at IS NULL AND next_action_at IS NOT NULL AND next_action_at <= NOW()")["c"] ?? 0);
+        send(["counts" => $counts, "due" => $due]);
+    }
+
+    case "GET /pipeline/contacts": {
+        require_role($db, "admin");
+        $stage = (string)($_GET["stage"] ?? "");
+        $valid = ["prospect","contacted","interested","quoted","customer","dormant","lost"];
+        $sql = "SELECT c.id, c.name, c.company, c.email, c.phone, c.stage, c.source, c.owner_id,
+                       c.next_action_at, c.last_activity_at, u.name AS owner_name
+                FROM ego_customers c LEFT JOIN ego_users u ON u.id = c.owner_id
+                WHERE c.deleted_at IS NULL";
+        $order = " ORDER BY (c.next_action_at IS NOT NULL AND c.next_action_at <= NOW()) DESC,
+                            COALESCE(c.next_action_at, c.last_activity_at, c.created_at) DESC LIMIT 500";
+        $rows = in_array($stage, $valid, true)
+            ? db_all($db, $sql . " AND c.stage=?" . $order, "s", $stage)
+            : db_all($db, $sql . $order);
+        foreach ($rows as &$r) {
+            $r["id"] = (int)$r["id"];
+            $r["owner_id"] = $r["owner_id"] !== null ? (int)$r["owner_id"] : null;
+        }
+        unset($r);
+        send(["contacts" => $rows]);
+    }
+
+    /** The screen that does not exist today: the whole story of a business, in one place. */
+    case "GET /pipeline/contact": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $c = db_one($db, "SELECT c.*, u.name AS owner_name FROM ego_customers c
+                          LEFT JOIN ego_users u ON u.id=c.owner_id
+                          WHERE c.id=? AND c.deleted_at IS NULL", "i", $id);
+        if (!$c) fail("Not found", 404);
+        $c["id"] = (int)$c["id"];
+        $events = db_all($db,
+            "SELECT e.kind, e.summary, e.created_at, u.name AS actor_name
+             FROM ego_contact_events e LEFT JOIN ego_users u ON u.id = e.actor_id
+             WHERE e.customer_id=? ORDER BY e.created_at DESC, e.id DESC LIMIT 100", "i", $id);
+        $jobs = db_all($db, "SELECT id, reference, title, status, created_at FROM ego_jobs
+                             WHERE customer_id=? AND deleted_at IS NULL ORDER BY id DESC LIMIT 20", "i", $id);
+        $docs = db_all($db, "SELECT id, kind, number, status, total, created_at FROM ego_invoices
+                             WHERE customer_id=? AND deleted_at IS NULL ORDER BY id DESC LIMIT 20", "i", $id);
+        foreach ($jobs as &$j) $j["id"] = (int)$j["id"];
+        unset($j);
+        foreach ($docs as &$d) $d["id"] = (int)$d["id"];
+        unset($d);
+        send(["contact" => $c, "events" => $events, "jobs" => $jobs, "documents" => $docs]);
+    }
+
+    /** A human override. stage_locked stops the derivation ever fighting someone who knows
+     *  something the database doesn't. */
+    case "POST /pipeline/stage": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $stage = (string)($b["stage"] ?? "");
+        if (!in_array($stage, ["prospect","contacted","interested","quoted","customer","dormant","lost"], true)) fail("Unknown stage");
+        if (!db_one($db, "SELECT id FROM ego_customers WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Not found", 404);
+        db_exec($db, "UPDATE ego_customers SET stage=?, stage_locked=1 WHERE id=?", "si", $stage, $id);
+        contact_log($db, $id, "stage", "Set to {$stage} by " . $actor["name"], (int)$actor["id"]);
+        send(["ok" => true, "stage" => $stage]);
+    }
+
+    /** Let the derivation take over again. */
+    case "POST /pipeline/unlock": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0);
+        if (!db_one($db, "SELECT id FROM ego_customers WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Not found", 404);
+        db_exec($db, "UPDATE ego_customers SET stage_locked=0 WHERE id=?", "i", $id);
+        $stage = stage_recompute($db, $id);
+        send(["ok" => true, "stage" => $stage]);
+    }
+
+    case "POST /pipeline/note": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $note = trim((string)($b["note"] ?? ""));
+        if ($note === "") fail("Write something first");
+        if (!db_one($db, "SELECT id FROM ego_customers WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Not found", 404);
+        contact_log($db, $id, "note", $note, (int)$actor["id"]);
+        send(["ok" => true]);
+    }
+
+    /** Who is chasing this, and by when. An unowned hot lead is a lost hot lead. */
+    case "POST /pipeline/owner": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        if (!db_one($db, "SELECT id FROM ego_customers WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Not found", 404);
+        $owner = (isset($b["owner_id"]) && $b["owner_id"] !== null && $b["owner_id"] !== "") ? (int)$b["owner_id"] : null;
+        $due = trim((string)($b["next_action_at"] ?? "")) ?: null;
+        db_exec($db, "UPDATE ego_customers SET owner_id=?, next_action_at=? WHERE id=?", "isi", $owner, $due, $id);
+        contact_log($db, $id, "note", $owner ? "Someone is now chasing this" : "Owner cleared", (int)$actor["id"]);
+        send(["ok" => true]);
+    }
+
+    /** Done with it — clear the deadline so it leaves the hot queue. */
+    case "POST /pipeline/done": {
+        $actor = require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0);
+        if (!db_one($db, "SELECT id FROM ego_customers WHERE id=? AND deleted_at IS NULL", "i", $id)) fail("Not found", 404);
+        db_exec($db, "UPDATE ego_customers SET next_action_at=NULL WHERE id=?", "i", $id);
+        contact_log($db, $id, "note", "Dealt with", (int)$actor["id"]);
+        send(["ok" => true]);
+    }
+
     /* ======================= CAMPAIGNS v2 (docs/CAMPAIGNS-V2.md) =======================
      * A campaign is a real object: steps, enrollments, sends. Progress lives on the ENROLLMENT,
      * so nothing outside a campaign can clobber it — v1 tracked progress with an enum on the lead,
