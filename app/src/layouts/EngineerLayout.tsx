@@ -1,8 +1,9 @@
 import { Suspense, useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router-dom"
-import { CalendarClock, ListChecks, CircleUserRound, Wrench, WifiOff, Loader2 } from "lucide-react"
+import { CalendarClock, ListChecks, CircleUserRound, Wrench, WifiOff, Loader2, RefreshCw, TriangleAlert } from "lucide-react"
 
 import ErrorBoundary from "@/components/ego/ErrorBoundary"
+import { subscribe } from "@/lib/outbox"
 import { cn } from "@/lib/utils"
 
 const TABS = [
@@ -15,12 +16,18 @@ const TABS = [
 export default function EngineerLayout() {
   const { pathname } = useLocation()
   const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true)
+  const [outbox, setOutbox] = useState({ pending: 0, syncing: false, failed: 0 })
+
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false)
     window.addEventListener("online", on)
     window.addEventListener("offline", off)
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off) }
   }, [])
+
+  // The outbox itself is started once in main.tsx (it must drain on any screen). Here we only
+  // subscribe, so the banner can tell the engineer what is still waiting to sync.
+  useEffect(() => subscribe(setOutbox), [])
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background md:max-w-2xl lg:max-w-3xl">
@@ -33,9 +40,40 @@ export default function EngineerLayout() {
         <span className="ml-auto text-xs text-muted-foreground">Engineer</span>
       </header>
 
+      {/* Status strip. The old version just said "Offline" — a statement of failure that told the
+          engineer nothing about whether their work survived. It now answers the only question they
+          actually have: is what I just did safe? */}
       {!online && (
-        <div className="flex items-center justify-center gap-2 bg-amber-500/15 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400">
-          <WifiOff className="size-3.5" /> Offline — showing saved data; changes sync when you're back
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 bg-amber-500/15 py-1.5 text-xs font-medium text-amber-700 dark:text-amber-400"
+        >
+          <WifiOff className="size-3.5" aria-hidden="true" />
+          {outbox.pending > 0
+            ? `Offline — ${outbox.pending} change${outbox.pending === 1 ? "" : "s"} saved on your phone, will sync automatically`
+            : "Offline — your work is saved on your phone and will sync when you're back"}
+        </div>
+      )}
+
+      {online && outbox.pending > 0 && (
+        <div
+          role="status"
+          className="flex items-center justify-center gap-2 bg-primary/10 py-1.5 text-xs font-medium text-primary"
+        >
+          <RefreshCw className={cn("size-3.5", outbox.syncing && "animate-spin")} aria-hidden="true" />
+          Syncing {outbox.pending} change{outbox.pending === 1 ? "" : "s"}…
+        </div>
+      )}
+
+      {/* A change the SERVER refused (e.g. the office moved the job on while they were underground)
+          can never succeed on retry. Say so, rather than let it vanish. */}
+      {outbox.failed > 0 && (
+        <div
+          role="alert"
+          className="flex items-center justify-center gap-2 bg-destructive/10 py-1.5 text-xs font-medium text-destructive"
+        >
+          <TriangleAlert className="size-3.5" aria-hidden="true" />
+          {outbox.failed} change{outbox.failed === 1 ? "" : "s"} couldn&apos;t be saved — check with the office
         </div>
       )}
 

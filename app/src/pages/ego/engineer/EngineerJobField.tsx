@@ -9,6 +9,7 @@ import { toast } from "sonner"
 
 import { api } from "@/lib/api"
 import { useApi, invalidate } from "@/lib/query"
+import { sendOrQueue } from "@/lib/outbox"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -76,16 +77,23 @@ export default function EngineerJobField() {
     if (JOB_PATH) invalidate(JOB_PATH, "/me/jobs", "/jobs", "/schedule", "/dashboard")
   }
 
+  // Every write below goes through sendOrQueue: online it behaves exactly as before (so a genuine
+  // server rejection — an invalid status transition, say — still surfaces immediately), and with
+  // no signal it lands durably in IndexedDB and replays on reconnect. See lib/outbox.ts.
+  // The engineer's work is never lost, and they never have to think about it.
+
   async function move(to: JobStatus, extra: Record<string, unknown> = {}) {
     if (!job) return
     const prev = job.status
     setJob({ ...job, status: to }) // optimistic
     setBusy(true)
     try {
-      await api("/jobs/status", { method: "POST", body: { id: job.id, to, ...extra } })
-      await load()
+      const { queued } = await sendOrQueue("/jobs/status", { id: job.id, to, ...extra },
+        { label: `Job ${job.reference} → ${to.replace("_", " ")}`, jobId: job.id })
+      if (queued) toast.success("Saved on your phone — will sync when you're back online")
+      else await load()
     } catch (e) {
-      setJob({ ...job, status: prev }) // revert
+      setJob({ ...job, status: prev }) // the SERVER said no (not the network) → revert
       toast.error(e instanceof Error ? e.message : "Couldn't update")
     } finally {
       setBusy(false)
@@ -94,22 +102,33 @@ export default function EngineerJobField() {
 
   async function addNote() {
     if (!job || !note.trim()) return
-    await api("/jobs/note", { method: "POST", body: { id: job.id, body: note.trim() } })
-    setNote(""); setNoteOpen(false); toast.success("Note added"); load()
+    try {
+      const { queued } = await sendOrQueue("/jobs/note", { id: job.id, body: note.trim() },
+        { label: `Note on ${job.reference}`, jobId: job.id })
+      setNote(""); setNoteOpen(false)
+      toast.success(queued ? "Note saved — will sync when you're back online" : "Note added")
+      if (!queued) load()
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't add the note") }
   }
 
   async function toggleCheck(itemId: number, done: boolean) {
     if (!job) return
     setJob({ ...job, checklist: job.checklist.map((c) => (c.id === itemId ? { ...c, done: done ? 1 : 0 } : c)) }) // optimistic
-    try { await api("/jobs/checklist/toggle", { method: "POST", body: { id: itemId, done } }) }
-    catch { toast.error("Couldn't update"); load() }
+    try {
+      const { queued } = await sendOrQueue("/jobs/checklist/toggle", { id: itemId, done },
+        { label: `Checklist item ${done ? "ticked" : "unticked"}`, jobId: job.id })
+      if (!queued) load()
+    } catch { toast.error("Couldn't update"); load() }
   }
 
   async function addCheckItem() {
     if (!job || !newCheck.trim()) return
     try {
-      await api("/jobs/checklist/add", { method: "POST", body: { job_id: job.id, label: newCheck.trim() } })
-      setNewCheck(""); load()
+      const { queued } = await sendOrQueue("/jobs/checklist/add", { job_id: job.id, label: newCheck.trim() },
+        { label: `Checklist: ${newCheck.trim()}`, jobId: job.id })
+      setNewCheck("")
+      if (!queued) load()
+      else toast.success("Saved — will sync when you're back online")
     } catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't add") }
   }
 
@@ -129,8 +148,12 @@ export default function EngineerJobField() {
     const reader = new FileReader()
     reader.onload = async () => {
       try {
-        await api("/jobs/photo", { method: "POST", body: { id: job.id, data: reader.result } })
-        toast.success("Photo added"); load()
+        // The photo is the worst thing to lose — by the time a failed upload is noticed the
+        // engineer has left site and cannot retake it. Queued like everything else.
+        const { queued } = await sendOrQueue("/jobs/photo", { id: job.id, data: reader.result },
+          { label: `Photo on ${job.reference}`, jobId: job.id })
+        toast.success(queued ? "Photo saved — will upload when you're back online" : "Photo added")
+        if (!queued) load()
       } catch (err) { toast.error(err instanceof Error ? err.message : "Upload failed") }
     }
     reader.readAsDataURL(file)

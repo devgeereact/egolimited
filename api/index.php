@@ -533,6 +533,47 @@ function ensure_invoice_cols(mysqli $db): void {
 
 /** Payments are a financial ledger: rows are NEVER erased, only marked reversed. Every read of
  *  ego_payments must therefore filter `deleted_at IS NULL`. Self-heals pre-migration databases. */
+/* ---------- idempotency for the engineer's offline outbox ----------
+ * A phone with no signal queues its writes and replays them when it reconnects. Replay is not
+ * rare — a van driving out of a dead spot will retry mid-flight, and a request that actually
+ * REACHED the server but whose response never made it back looks identical to one that failed.
+ * Without a guard, "add note" and "add photo" would silently duplicate every time that happened.
+ *
+ * So each queued operation carries a client-generated op_id, and the FIRST write wins: the id is
+ * claimed atomically, and any replay of the same id is acknowledged and ignored. This is the
+ * difference between an outbox an engineer trusts and one that quietly corrupts their job record.
+ */
+function ensure_client_ops(mysqli $db): void {
+    static $done = false; if ($done) return; $done = true;
+    $db->query("CREATE TABLE IF NOT EXISTS ego_client_ops (
+        op_id      VARCHAR(64) PRIMARY KEY,
+        user_id    INT NULL,
+        route      VARCHAR(64) NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_ego_ops_created (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+}
+
+/**
+ * Claim an op_id. TRUE = first time we've seen it, caller should do the work.
+ * FALSE = a replay, caller must NOT repeat the write.
+ * INSERT IGNORE makes the claim atomic, so two replays racing each other can't both win.
+ * An empty op_id (an online client that isn't using the outbox) always proceeds.
+ */
+function op_claim(mysqli $db, string $opId, ?int $userId, string $route): bool {
+    if ($opId === "") return true;
+    ensure_client_ops($db);
+    // Read affected_rows from the STATEMENT, not the connection. mysqli::$affected_rows does not
+    // reliably reflect a prepared-statement execute here, and reading it from $db returned 0 for a
+    // successful INSERT — which made op_claim() report "duplicate" on the very FIRST call, so every
+    // engineer write was acknowledged and then silently thrown away. Caught by the offline
+    // end-to-end test; it would have been invisible in production until someone noticed their notes
+    // and photos were never arriving.
+    $st = db_exec($db, "INSERT IGNORE INTO ego_client_ops (op_id, user_id, route) VALUES (?,?,?)",
+        "sis", $opId, $userId, $route);
+    return $st->affected_rows > 0;
+}
+
 function ensure_payment_cols(mysqli $db): void {
     static $done = false; if ($done) return; $done = true;
     $db->query("ALTER TABLE ego_payments ADD COLUMN IF NOT EXISTS deleted_at DATETIME NULL");
@@ -1528,6 +1569,7 @@ switch ("$method $route") {
     case "POST /jobs/status": {
         $actor = require_user($db);
         $b = body();
+        if (!op_claim($db, trim((string)($b["op_id"] ?? "")), (int)($actor["id"] ?? 0), "POST /jobs/status")) send(["ok" => true, "duplicate" => true]);
         $id = (int)($b["id"] ?? 0);
         $to = trim($b["to"] ?? "");
         $note = trim($b["note"] ?? "") ?: null;
@@ -1674,6 +1716,7 @@ switch ("$method $route") {
     case "POST /jobs/checklist/toggle": {
         $me = require_user($db);
         $b = body();
+        if (!op_claim($db, trim((string)($b["op_id"] ?? "")), (int)($me["id"] ?? 0), "POST /jobs/checklist/toggle")) send(["ok" => true, "duplicate" => true]);
         $itemId = (int)($b["id"] ?? 0);
         if (!$itemId) fail("id required");
         $row = db_one($db, "SELECT c.id, c.job_id FROM ego_job_checklist c WHERE c.id=?", "i", $itemId);
@@ -1689,6 +1732,7 @@ switch ("$method $route") {
     case "POST /jobs/checklist/add": {
         $me = require_user($db);
         $b = body();
+        if (!op_claim($db, trim((string)($b["op_id"] ?? "")), (int)($me["id"] ?? 0), "POST /jobs/checklist/add")) send(["ok" => true, "duplicate" => true]);
         $jobId = (int)($b["job_id"] ?? 0);
         $label = trim($b["label"] ?? "");
         if (!$jobId || $label === "") fail("job_id and label required");
@@ -1717,6 +1761,7 @@ switch ("$method $route") {
     case "POST /jobs/note": {
         $me = require_user($db);
         $b = body();
+        if (!op_claim($db, trim((string)($b["op_id"] ?? "")), (int)($me["id"] ?? 0), "POST /jobs/note")) send(["ok" => true, "duplicate" => true]);
         $job = load_owned_job($db, $me, (int)($b["id"] ?? 0));
         $bodyTxt = trim($b["body"] ?? "");
         if ($bodyTxt === "") fail("Note is empty");
@@ -1728,6 +1773,7 @@ switch ("$method $route") {
     case "POST /jobs/photo": {
         $me = require_user($db);
         $b = body();
+        if (!op_claim($db, trim((string)($b["op_id"] ?? "")), (int)($me["id"] ?? 0), "POST /jobs/photo")) send(["ok" => true, "duplicate" => true]);
         $job = load_owned_job($db, $me, (int)($b["id"] ?? 0));
         $data = $b["data"] ?? "";
         if (!preg_match('#^data:image/(png|jpe?g|webp);base64,(.+)$#', $data, $m)) fail("Invalid image");

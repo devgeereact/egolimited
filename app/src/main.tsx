@@ -10,8 +10,14 @@ import ErrorBoundary from "@/components/ego/ErrorBoundary"
 import UIThemeProvider from "@/providers/ui-theme-provider"
 
 import { queryClient } from "@/lib/query"
+import { startOutbox } from "@/lib/outbox"
 import { router } from "@/routes"
 import "@/index.css"
+
+// Drain any work an engineer queued while offline, from app start, on ANY screen. This lives here
+// rather than in EngineerLayout because the queue must sync even if they never navigate back to a
+// job — e.g. they reopen the app on the Today tab, or land on the login screen.
+startOutbox()
 
 // Register the engineer-PWA service worker (prod only; dev path 404s harmlessly).
 // The ?v= query is part of the registration URL — bump it whenever sw.js's logic
@@ -21,7 +27,7 @@ import "@/index.css"
 // 2026-07-08 white-screen: sw.js sat at Cloudflare's edge for ~9 days unrevalidated).
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js?v=2`).catch(() => {})
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js?v=3`).catch(() => {})
   })
 }
 

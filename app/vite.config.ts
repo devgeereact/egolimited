@@ -12,8 +12,19 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  server: { port: 5051, strictPort: true },
-  preview: { port: 5051, strictPort: true },
+  // Proxy /api so a LOCAL production preview (`vite preview`) can talk to a local PHP API — the
+  // only way to exercise the service worker, which is disabled in dev. Target is overridable:
+  //   VITE_API_PROXY=http://127.0.0.1:8099 npx vite preview
+  server: {
+    port: 5051,
+    strictPort: true,
+    proxy: { "/api": { target: process.env.VITE_API_PROXY || "http://127.0.0.1:8080", changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, "") } },
+  },
+  preview: {
+    port: 5051,
+    strictPort: true,
+    proxy: { "/api": { target: process.env.VITE_API_PROXY || "http://127.0.0.1:8080", changeOrigin: true, rewrite: (p) => p.replace(/^\/api/, "") } },
+  },
   build: {
     // A hand-rolled manualChunks() grouping (react/router/radix/charts into separate
     // vendor chunks) previously shipped here and broke chunk load ordering — it threw
