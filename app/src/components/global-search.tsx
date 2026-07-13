@@ -21,40 +21,38 @@ type Section = { heading: string; items: Item[] }
 // Real EGO destinations (mirrors the sidebar). Each carries the minimum role that may see it.
 const SECTIONS: Section[] = [
   { heading: "Overview", items: [
-    { label: "Today", to: "/ego/dashboard", icon: Gauge },
-    { label: "Analytics", to: "/ego/analytics", icon: BarChart3, keywords: "reports export revenue charts" },
+    { label: "Today", to: "/ego/dashboard", icon: Gauge, keywords: "dashboard home" },
+    { label: "Analytics", to: "/ego/analytics", icon: BarChart3, keywords: "reports export revenue charts kpi" },
   ]},
   { heading: "Operations", items: [
     { label: "Jobs", to: "/ego/jobs", icon: Briefcase },
-    { label: "Schedule", to: "/ego/schedule", icon: CalendarDays },
-    { label: "Contacts", to: "/ego/contacts", icon: Contact, keywords: "customers team" },
-    { label: "Task Board", to: "/ego/tasks", icon: KanbanSquare, keywords: "kanban" },
+    { label: "Task board", to: "/ego/tasks", icon: KanbanSquare, keywords: "kanban tasks" },
+    { label: "Schedule", to: "/ego/schedule", icon: CalendarDays, keywords: "calendar diary" },
+    { label: "Customers", to: "/ego/customers", icon: Contact, keywords: "contacts clients" },
   ]},
-  { heading: "Finance", items: [
-    { label: "Invoices", to: "/ego/invoices", icon: FileText },
-    { label: "Quotes", to: "/ego/quotes", icon: ScrollText },
-    { label: "Payments", to: "/ego/payments", icon: CreditCard },
+  { heading: "Money", items: [
+    { label: "Invoices & quotes", to: "/ego/invoices", icon: FileText, keywords: "billing" },
+    { label: "Quotes", to: "/ego/invoices?kind=quote", icon: ScrollText, keywords: "estimate" },
+    { label: "Payments", to: "/ego/payments", icon: CreditCard, keywords: "paid bank transfer" },
   ]},
   { heading: "Workspace", items: [
-    { label: "Email", to: "/ego/inbox", icon: Inbox, keywords: "inbox mail" },
-    { label: "Campaigns", to: "/ego/campaigns", icon: Send, min: "manager" },
+    { label: "Inbox", to: "/ego/inbox", icon: Inbox, keywords: "email mail" },
     { label: "Reviews", to: "/ego/reviews", icon: Quote },
-    { label: "Announcements", to: "/ego/announcements", icon: Megaphone, min: "manager" },
+    { label: "Campaigns", to: "/ego/campaigns", icon: Send, min: "manager" },
   ]},
-  { heading: "Subcontractors", items: [
-    { label: "Subcontractors", to: "/ego/subcontractors", icon: HardHat },
-  ]},
-  { heading: "Assets & Compliance", items: [
-    { label: "Assets", to: "/ego/assets", icon: Boxes },
-    { label: "Contracts & PPM", to: "/ego/contracts", icon: FileSignature },
-    { label: "Incidents", to: "/ego/incidents", icon: ShieldAlert },
-    { label: "RAMS", to: "/ego/rams", icon: FileCheck2 },
-    { label: "Certificates", to: "/ego/certificates", icon: BadgeCheck },
+  { heading: "Service delivery", items: [
+    { label: "Contracts & PPM", to: "/ego/contracts", icon: FileSignature, keywords: "planned maintenance" },
+    { label: "Assets", to: "/ego/assets", icon: Boxes, keywords: "equipment plant" },
+    { label: "RAMS", to: "/ego/rams", icon: FileCheck2, keywords: "risk assessment method statement compliance" },
+    { label: "Certificates", to: "/ego/certificates", icon: BadgeCheck, keywords: "compliance qualification" },
+    { label: "Incidents", to: "/ego/incidents", icon: ShieldAlert, keywords: "accident compliance" },
+    { label: "Subcontractors", to: "/ego/subcontractors", icon: HardHat, keywords: "insurance compliance" },
   ]},
   { heading: "Admin", items: [
-    { label: "Team", to: "/ego/team", icon: Users, min: "manager" },
-    { label: "Settings", to: "/ego/settings", icon: Settings2, min: "office" },
-    { label: "Integrations", to: "/ego/integrations", icon: KeyRound, min: "founder" },
+    { label: "Team", to: "/ego/team", icon: Users, min: "manager", keywords: "people staff" },
+    { label: "Settings", to: "/ego/settings", icon: Settings2, min: "office", keywords: "company security" },
+    { label: "Announcements", to: "/ego/announcements", icon: Megaphone, min: "manager" },
+    { label: "Integrations", to: "/ego/integrations", icon: KeyRound, min: "founder", keywords: "smtp imap api keys" },
   ]},
 ]
 

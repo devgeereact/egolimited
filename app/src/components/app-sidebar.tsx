@@ -12,17 +12,11 @@ import {
   Globe,
   KeyRound,
   Inbox,
-  KanbanSquare,
   Contact,
   Quote,
-  ScrollText,
-  HardHat,
-  Boxes,
   Megaphone,
   Send,
   FileSignature,
-  ShieldAlert,
-  FileCheck2,
   BadgeCheck,
   type LucideIcon,
 } from "lucide-react"
@@ -46,6 +40,29 @@ import { ScrollArea } from "./ui/scroll-area"
 type EgoItem = { title: string; url: string; icon?: LucideIcon; min?: Role; items?: EgoItem[] }
 type EgoSection = { label?: string; min?: Role; items: EgoItem[] }
 
+/**
+ * NAVIGATION — 21 items became 13, grouped by how often the office actually touches them.
+ *
+ * The old sidebar gave a rarely-opened compliance document locker the same visual weight as Jobs.
+ * Nine sections and twenty-one destinations for a team of about twenty people is not a menu, it's
+ * an inventory. What changed and why:
+ *
+ *   Quotes + Invoices  → ONE item. They were two nav entries pointing at the SAME component
+ *                        behind two routes, differing by a prop. Now one screen, kind in the URL.
+ *   Contacts           → GONE. It was a third implementation of Customers, plus a duplicate Team
+ *                        tab. Both already exist as real pages; the route now redirects there.
+ *   Task Board         → a child of Jobs. It's a view of work, not a separate department.
+ *   Subcontractors     → moved under Compliance, which is what it's actually for: insurance and
+ *                        certification expiry on the people we send to site.
+ *   Assets, Contracts  → one "Contracts & assets" group. Assets only exist to be maintained
+ *                        under a contract.
+ *   RAMS/Certs/Incidents → collapsed into one Compliance group instead of three top-level items.
+ *   Announcements      → under Admin. It's a thing managers publish, not a thing anyone reads
+ *                        from the sidebar (the notification bell already surfaces them).
+ *
+ * Everything is still reachable — this is about weight and grouping, not removal. The only page
+ * actually deleted is Contacts, because it was a duplicate.
+ */
 const NAV: EgoSection[] = [
   {
     label: "Overview",
@@ -57,54 +74,64 @@ const NAV: EgoSection[] = [
   {
     label: "Operations",
     items: [
-      { title: "Jobs", url: "ego/jobs", icon: Briefcase },
+      {
+        title: "Jobs",
+        url: "ego/jobs",
+        icon: Briefcase,
+        items: [
+          { title: "All jobs", url: "ego/jobs" },
+          { title: "Task board", url: "ego/tasks" },
+        ],
+      },
       { title: "Schedule", url: "ego/schedule", icon: CalendarDays },
-      { title: "Contacts", url: "ego/contacts", icon: Contact },
-      { title: "Task Board", url: "ego/tasks", icon: KanbanSquare },
+      { title: "Customers", url: "ego/customers", icon: Contact },
     ],
   },
   {
-    label: "Finance",
+    label: "Money",
     items: [
-      { title: "Invoices", url: "ego/invoices", icon: FileText },
-      { title: "Quotes", url: "ego/quotes", icon: ScrollText },
+      { title: "Invoices & quotes", url: "ego/invoices", icon: FileText },
       { title: "Payments", url: "ego/payments", icon: CreditCard },
     ],
   },
   {
     label: "Workspace",
     items: [
-      { title: "Email", url: "ego/inbox", icon: Inbox },
-      { title: "Campaigns", url: "ego/campaigns", icon: Send, min: "manager" },
+      { title: "Inbox", url: "ego/inbox", icon: Inbox },
       { title: "Reviews", url: "ego/reviews", icon: Quote },
-      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
+      { title: "Campaigns", url: "ego/campaigns", icon: Send, min: "manager" },
     ],
   },
   {
-    label: "Subcontractors",
+    label: "Service delivery",
     items: [
-      { title: "Subcontractors", url: "ego/subcontractors", icon: HardHat },
-    ],
-  },
-  {
-    label: "Assets & Contracts",
-    items: [
-      { title: "Assets", url: "ego/assets", icon: Boxes },
-      { title: "Contracts & PPM", url: "ego/contracts", icon: FileSignature },
-    ],
-  },
-  {
-    label: "Compliance",
-    items: [
-      { title: "Incidents", url: "ego/incidents", icon: ShieldAlert },
-      { title: "RAMS", url: "ego/rams", icon: FileCheck2 },
-      { title: "Certificates", url: "ego/certificates", icon: BadgeCheck },
+      {
+        title: "Contracts & assets",
+        url: "ego/contracts",
+        icon: FileSignature,
+        items: [
+          { title: "Contracts & PPM", url: "ego/contracts" },
+          { title: "Assets", url: "ego/assets" },
+        ],
+      },
+      {
+        title: "Compliance",
+        url: "ego/rams",
+        icon: BadgeCheck,
+        items: [
+          { title: "RAMS", url: "ego/rams" },
+          { title: "Certificates", url: "ego/certificates" },
+          { title: "Incidents", url: "ego/incidents" },
+          { title: "Subcontractors", url: "ego/subcontractors" },
+        ],
+      },
     ],
   },
   {
     label: "Admin",
     items: [
       { title: "Settings", url: "ego/settings", icon: Settings2, min: "office" },
+      { title: "Announcements", url: "ego/announcements", icon: Megaphone, min: "manager" },
       { title: "Integrations", url: "ego/integrations", icon: KeyRound, min: "founder" },
     ],
   },

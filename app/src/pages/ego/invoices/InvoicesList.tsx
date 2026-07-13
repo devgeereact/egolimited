@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useSearchParams } from "react-router-dom"
 import { FileText, Loader2, Download, Eye } from "lucide-react"
 import { toast } from "sonner"
 
@@ -26,10 +26,18 @@ interface Row {
 const STATUS_FILTERS = ["all", "draft", "sent", "overdue", "paid"]
 
 export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?: "invoice" | "quote" } = {}) {
-  // Kind is fixed by the route (Invoices vs Quotes are separate pages). Driving it
-  // straight from the prop (no local toggle) means switching routes always reloads
-  // the right list instead of sticking on whichever loaded first.
-  const kind = defaultKind
+  // Quotes and invoices were two nav items pointing at THIS SAME component behind two routes —
+  // the only difference was a prop. They are one screen with two views of the same document, so
+  // the kind now lives in the URL (?kind=quote) and switches in place. One nav item, one mental
+  // model, and a quote→invoice conversion no longer means "go and find it on the other page".
+  const [params, setParams] = useSearchParams()
+  const kind: "invoice" | "quote" = params.get("kind") === "quote" ? "quote" : defaultKind
+  const setKind = (k: string) => {
+    const next = new URLSearchParams(params)
+    if (k === "quote") next.set("kind", "quote")
+    else next.delete("kind")
+    setParams(next, { replace: true })
+  }
   const [status, setStatus] = useState("all")
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
   const [previewingId, setPreviewingId] = useState<number | null>(null)
@@ -80,7 +88,14 @@ export default function InvoicesList({ defaultKind = "invoice" }: { defaultKind?
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-end gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Invoices ⇄ Quotes — the same documents, two views. Was two sidebar entries. */}
+        <Tabs value={kind} onValueChange={setKind}>
+          <TabsList>
+            <TabsTrigger value="invoice">Invoices</TabsTrigger>
+            <TabsTrigger value="quote">Quotes</TabsTrigger>
+          </TabsList>
+        </Tabs>
         <Tabs value={status} onValueChange={setStatus}>
           <TabsList>
             {STATUS_FILTERS.map((s) => <TabsTrigger key={s} value={s} className="capitalize">{s}</TabsTrigger>)}

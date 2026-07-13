@@ -21,7 +21,6 @@ const EgoIntegrations = lazy(() => import("@/pages/ego/integrations/Integrations
 const EgoInvoicesList = lazy(() => import("@/pages/ego/invoices/InvoicesList"))
 const EgoInvoiceDetail = lazy(() => import("@/pages/ego/invoices/InvoiceDetail"))
 const EgoPayments = lazy(() => import("@/pages/ego/finance/PaymentsPage"))
-const EgoContacts = lazy(() => import("@/pages/ego/comms/ContactsPage"))
 const EgoInbox = lazy(() => import("@/pages/ego/comms/InboxPage"))
 const AccountSecurity = lazy(() => import("@/pages/ego/account/AccountSecurity"))
 const LockScreen = lazy(() => import("@/pages/ego/account/LockScreen"))
@@ -121,11 +120,11 @@ export const router = createBrowserRouter (
             {path: "ego/dashboard", element: <EgoToday /> },
             {path: "ego/analytics", element: <EgoAnalytics /> },
             {path: "ego/invoices", element: <EgoInvoicesList key="invoices" /> },
-            {path: "ego/quotes", element: <EgoInvoicesList key="quotes" defaultKind="quote" /> },
+            {path: "ego/quotes", element: <Navigate to="/ego/invoices?kind=quote" replace /> },
             {path: "ego/invoices/detail", element: <EgoInvoiceDetail /> },
             {path: "ego/quotes/detail", element: <EgoInvoiceDetail /> },
             {path: "ego/payments", element: <EgoPayments /> },
-            {path: "ego/contacts", element: <EgoContacts /> },
+            {path: "ego/contacts", element: <Navigate to="/ego/customers" replace /> },
             {path: "ego/inbox", element: <EgoInbox /> },
             {path: "ego/tasks", element: <TaskBoard /> },
             {path: "ego/account/profile", element: <Navigate to="/ego/settings" replace /> },
