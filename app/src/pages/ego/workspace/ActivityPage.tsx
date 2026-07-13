@@ -6,6 +6,7 @@ import {
 } from "lucide-react"
 
 import { useApi } from "@/lib/query"
+import { TimeStamp } from "@/components/ego/TimeStamp"
 import { STATUS_LABEL, type JobStatus } from "@/lib/jobStatus"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -149,7 +150,7 @@ export default function ActivityPage({ embedded = false }: { embedded?: boolean 
                     </span>
                     <p className="text-sm">{describe(e.action, e.detail)}</p>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      <span className="font-mono">{e.created_at}</span>
+                      <TimeStamp value={e.created_at} />
                       {e.job_reference && (
                         <> · <Link to={`/ego/jobs/detail?id=${e.job_id}`} className="font-mono text-primary hover:underline">{e.job_reference}</Link></>
                       )}

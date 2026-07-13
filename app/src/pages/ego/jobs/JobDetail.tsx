@@ -7,6 +7,8 @@ import {
 import { toast } from "sonner"
 
 import { cn } from "@/lib/utils"
+import { TimeStamp } from "@/components/ego/TimeStamp"
+import { formatShort } from "@/lib/time"
 import { api } from "@/lib/api"
 import { useApi, invalidate } from "@/lib/query"
 import { useAuth } from "@/store/auth.store"
@@ -77,8 +79,9 @@ const STEP_INDEX: Record<string, number> = {
   completed: 4, invoiced: 5, paid: 6, closed: 6,
 }
 
-const fmtStamp = (s: string | null | undefined) =>
-  s ? new Date(s.replace(" ", "T")).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""
+// The job timeline uses the same formatter as everything else, so the stamps under the progress
+// steps and the times on the messages below can never disagree about how a date looks.
+const fmtStamp = (s: string | null | undefined) => (s ? formatShort(s) : "")
 
 function JobProgress({ status, stamps }: { status: JobStatus; stamps: Record<string, string | null> }) {
   if (status === "cancelled") {
@@ -440,7 +443,7 @@ export default function JobDetail() {
                         {m.direction === "inbound" ? (m.from_name || m.from_email || "Customer") : "You"}
                         {m.channel === "portal" && <span className="ml-2 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">portal</span>}
                       </p>
-                      <span className="text-xs text-muted-foreground">{m.created_at?.slice(5, 16)}</span>
+                      <TimeStamp value={m.created_at} className="text-xs text-muted-foreground" />
                     </div>
                     {m.subject && <p className="text-xs text-muted-foreground">{m.subject}</p>}
                     <p className="mt-1 whitespace-pre-wrap text-sm">{m.body}</p>

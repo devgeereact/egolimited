@@ -41,6 +41,7 @@ export interface Enrollment {
   next_due_at: string | null
   stop_reason: string | null
   sent_count: number
+  last_sent_at: string | null
 }
 
 export interface Lead {

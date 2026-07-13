@@ -4099,7 +4099,10 @@ switch ("$method $route") {
         require_role($db, "admin");
         $id = (int)($_GET["id"] ?? 0);
         $state = (string)($_GET["state"] ?? "");
-        $sql = "SELECT e.*, (SELECT COUNT(*) FROM ego_campaign_sends_v2 s WHERE s.enrollment_id=e.id AND s.status='sent') sent_count
+        // last_sent_at so the office can see WHEN each person was last emailed, not just that they were.
+        $sql = "SELECT e.*,
+                   (SELECT COUNT(*) FROM ego_campaign_sends_v2 s WHERE s.enrollment_id=e.id AND s.status='sent') sent_count,
+                   (SELECT MAX(s.sent_at) FROM ego_campaign_sends_v2 s WHERE s.enrollment_id=e.id AND s.status='sent') last_sent_at
                 FROM ego_campaign_enrollments e WHERE e.campaign_id=?";
         $rows = in_array($state, ["active","completed","replied","bounced","unsubscribed","stopped"], true)
             ? db_all($db, $sql . " AND e.state=? ORDER BY e.id DESC LIMIT 500", "is", $id, $state)

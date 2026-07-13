@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Loader2, MessageSquareQuote, Star, Plus, Dow
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { TimeStamp } from "@/components/ego/TimeStamp"
 import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -114,7 +115,7 @@ export default function ReviewsPage() {
                     <Stars n={r.rating ?? 0} className="gap-0.5" />
                     {r.source === "google" && <Badge variant="secondary" className="text-[10px]">Google</Badge>}
                   </div>
-                  <span className="font-mono text-xs text-muted-foreground">{r.created_at?.slice(0, 16)}</span>
+                  <TimeStamp value={r.created_at} className="text-xs text-muted-foreground" />
                 </div>
                 {r.body ? <p className="text-sm">{r.body}</p> : <p className="text-sm italic text-muted-foreground">No comment left.</p>}
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-2 text-xs text-muted-foreground">

@@ -7,6 +7,7 @@ import {
 import DOMPurify from "dompurify"
 import { toast } from "sonner"
 import { api, apiForm } from "@/lib/api"
+import { TimeStamp } from "@/components/ego/TimeStamp"
 import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -54,11 +55,6 @@ const fmtBytes = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 102
 
 type Folder = "inbox" | "sent" | "drafts" | "notes" | "archived"
 const initials = (s: string) => s.split(/[\s@.]+/).filter(Boolean).map((p) => p[0]).slice(0, 2).join("").toUpperCase() || "?"
-const fmtDate = (d: string) => {
-  if (!d) return ""
-  return d.slice(0, 10) === new Date().toISOString().slice(0, 10) ? d.slice(11, 16) : d.slice(0, 10)
-}
-
 function inFolder(m: MsgRow, f: Folder): boolean {
   if (f === "archived") return !!m.archived
   if (m.archived) return false // archived items live only in the Archive folder
@@ -272,7 +268,7 @@ export default function InboxPage() {
                         {!!m.attachment_count && <Paperclip className="ml-1 inline size-3.5 text-muted-foreground align-[-2px]" />}
                       </TableCell>
                       <TableCell className="hidden text-muted-foreground md:table-cell">{m.customer_name || m.job_reference || "—"}</TableCell>
-                      <TableCell className="text-right tabular-nums text-muted-foreground">{fmtDate(m.created_at)}</TableCell>
+                      <TableCell className="text-right text-muted-foreground"><TimeStamp value={m.created_at} variant="short" /></TableCell>
                     </TableRow>
                   )
                 })
@@ -307,7 +303,10 @@ export default function InboxPage() {
                   </AvatarFallback></Avatar>
                   <div className="min-w-0 text-left text-sm">
                     <p className="font-medium">{msg.channel === "note" ? `Note · ${msg.from_name ?? ""}` : msg.direction === "inbound" ? (msg.from_name || msg.from_email) : `To: ${msg.to_email}`}</p>
-                    <p className="text-xs text-muted-foreground">{msg.created_at}{msg.customer_name ? ` · ${msg.customer_name}` : ""}{msg.job_reference ? ` · ${msg.job_reference}` : ""}</p>
+                    <p className="text-xs text-muted-foreground">
+                      <TimeStamp value={msg.created_at} />
+                      {msg.customer_name ? ` · ${msg.customer_name}` : ""}{msg.job_reference ? ` · ${msg.job_reference}` : ""}
+                    </p>
                   </div>
                   <div className="ml-auto flex items-center gap-1">
                     {!!msg.acknowledged && msg.channel !== "note" && <Badge variant="outline"><Check className="size-3" /> Read</Badge>}

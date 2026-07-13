@@ -2,6 +2,7 @@ import { useMemo } from "react"
 import { Link } from "react-router-dom"
 import { Megaphone, Plus, Loader2, Pin } from "lucide-react"
 import { useApi } from "@/lib/query"
+import { TimeStamp } from "@/components/ego/TimeStamp"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -77,7 +78,7 @@ export default function AnnouncementsList() {
                       {!!a.pinned && <Pin className="ml-2 inline size-3.5 text-primary" />}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{AUDIENCE_LABEL[a.audience]}</TableCell>
-                    <TableCell className="text-muted-foreground tabular-nums">{a.created_at?.slice(0, 10)}</TableCell>
+                    <TableCell className="text-muted-foreground"><TimeStamp value={a.created_at} variant="short" /></TableCell>
                     <TableCell className="text-right">
                       <Badge variant={a.active ? "default" : "secondary"}>{a.active ? "Live" : "Hidden"}</Badge>
                     </TableCell>

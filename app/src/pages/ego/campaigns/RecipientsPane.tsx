@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { confirmDialog } from "@/components/ego/confirm"
+import { TimeStamp } from "@/components/ego/TimeStamp"
 
 import { STATE_META, type Campaign, type Enrollment, type EnrollState } from "./types"
 
@@ -148,6 +149,11 @@ export default function RecipientsPane({ campaign }: { campaign: Campaign }) {
                     </span>
                     <span className="truncate text-[11px] text-muted-foreground">{dueLabel(e, campaign.steps)}</span>
                   </p>
+                  {e.last_sent_at && (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/80">
+                      <TimeStamp value={e.last_sent_at} prefix="Last emailed" />
+                    </p>
+                  )}
                 </div>
                 {e.state === "active" && (
                   <Button

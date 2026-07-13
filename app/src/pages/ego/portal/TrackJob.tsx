@@ -6,6 +6,7 @@ import {
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
+import { TimeStamp } from "@/components/ego/TimeStamp"
 import { cn } from "@/lib/utils"
 import { buildInvoicePdf, type InvoiceDoc } from "@/lib/invoicePdf"
 import { Button } from "@/components/ui/button"
@@ -252,7 +253,7 @@ export default function TrackJob() {
                       mine ? "rounded-br-sm bg-primary text-primary-foreground" : "rounded-bl-sm bg-muted text-foreground")}>
                       <p className="whitespace-pre-wrap">{m.body}</p>
                       <p className={cn("mt-1 flex items-center gap-1 text-[11px]", mine ? "justify-end text-primary-foreground/70" : "text-muted-foreground")}>
-                        {mine ? "You" : (m.from_name || t.company.company_name)} · {m.created_at?.slice(5, 16)}
+                        {mine ? "You" : (m.from_name || t.company.company_name)} · <TimeStamp value={m.created_at} />
                         {mine && (
                           <span title={m.acknowledged ? "Seen by the office" : "Delivered — awaiting the office"} className="ml-0.5">
                             {m.acknowledged ? "✓✓" : "✓"}
