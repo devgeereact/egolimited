@@ -2198,7 +2198,17 @@ switch ("$method $route") {
         foreach ($overdueList as &$o) { $o["id"] = (int)$o["id"]; $o["days_overdue"] = (int)$o["days_overdue"]; }
         unset($o);
 
+        // The pipeline's hot queue belongs on the first screen of the day, not behind a nav click.
+        // Someone said "yes, quote me" — every hour it sits there, it cools.
+        $needsReply = db_all($db,
+            "SELECT id, name, company, stage, source, next_action_at FROM ego_customers
+             WHERE deleted_at IS NULL AND next_action_at IS NOT NULL AND next_action_at <= NOW()
+             ORDER BY next_action_at ASC LIMIT 8");
+        foreach ($needsReply as &$nr) { $nr["id"] = (int)$nr["id"]; }
+        unset($nr);
+
         send([
+            "needs_reply" => $needsReply,
             "today_jobs" => $todayJobs, "to_schedule" => $toSchedule, "awaiting_invoice" => $awaitingInvoice,
             "in_progress" => $inProgress, "completed_today" => $completedToday, "open_jobs" => $openJobs,
             "unpaid_total" => $unpaid, "overdue_total" => $overdue, "collected_30d" => $collected30,

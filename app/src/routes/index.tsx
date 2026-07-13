@@ -39,6 +39,7 @@ const AssetForm = lazy(() => import("@/pages/ego/assets/AssetForm"))
 const AnnouncementsList = lazy(() => import("@/pages/ego/announcements/AnnouncementsList"))
 const AnnouncementForm = lazy(() => import("@/pages/ego/announcements/AnnouncementForm"))
 const CampaignsPage = lazy(() => import("@/pages/ego/campaigns/CampaignsPage"))
+const PipelinePage = lazy(() => import("@/pages/ego/pipeline/PipelinePage"))
 const ContractsList = lazy(() => import("@/pages/ego/contracts/ContractsList"))
 const ContractForm = lazy(() => import("@/pages/ego/contracts/ContractForm"))
 const IncidentsList = lazy(() => import("@/pages/ego/compliance/IncidentsList"))
@@ -141,6 +142,7 @@ export const router = createBrowserRouter (
             {path: "ego/announcements", element: <AnnouncementsList /> },
             {path: "ego/announcements/new", element: <AnnouncementForm /> },
             {path: "ego/announcements/edit", element: <AnnouncementForm /> },
+            {path: "ego/pipeline", element: <PipelinePage /> },
             {path: "ego/campaigns", element: <CampaignsPage /> },
           ],
         },

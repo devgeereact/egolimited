@@ -2,7 +2,7 @@ import { useState } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import {
   AlertTriangle, ArrowRight, BadgePoundSterling, CalendarPlus, CheckCircle2, Clock, FileText,
-  Loader2, Mail, Sparkles, Truck, UserPlus, Wrench,
+  Loader2, Mail, MessageSquare, Sparkles, Truck, UserPlus, Wrench,
 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -10,6 +10,7 @@ import { api } from "@/lib/api"
 import { useApi, invalidate } from "@/lib/query"
 import { cn } from "@/lib/utils"
 import { gbp } from "@/lib/invoicing"
+import { TimeStamp } from "@/components/ego/TimeStamp"
 import { useAuth } from "@/store/auth.store"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -50,6 +51,7 @@ interface Dash {
   today_jobs: number; in_progress: number; completed_today: number
   unpaid_total: number; overdue_total: number; collected_30d: number
   open_jobs: number; review_avg: number | null; review_count: number
+  needs_reply?: { id: number; name: string; company: string | null; stage: string; source: string; next_action_at: string }[]
   today?: { id: number; reference: string; title: string; status: EgoStatus; scheduled_start: string | null; customer_name: string }[]
   waitlist?: { id: number; reference: string; title: string; priority: string; customer_name: string; reason: "schedule" | "assign" }[]
   at_risk?: { id: number; reference: string; title: string; priority: string; status: EgoStatus; customer_name: string; engineer_name: string | null; sla_state: "at_risk" | "breached"; sla_due: string | null }[]
@@ -109,6 +111,7 @@ export default function TodayPage() {
 
   // Every queue defaults to empty. An older API (mid-deploy) simply shows no queues rather than
   // taking the whole screen down. See the note on the Dash interface.
+  const needsReply = d?.needs_reply ?? []
   const waitlist = d?.waitlist ?? []
   const atRisk = d?.at_risk ?? []
   const toInvoice = d?.to_invoice ?? []
@@ -162,7 +165,7 @@ export default function TodayPage() {
   if (!d) return <DashboardSkeleton />
 
   const needsAttention =
-    waitlist.length + atRisk.length + toInvoice.length + overdueInvoices.length
+    needsReply.length + waitlist.length + atRisk.length + toInvoice.length + overdueInvoices.length
 
   return (
     <div className="flex flex-1 flex-col gap-5 p-4 md:p-6">
@@ -208,6 +211,41 @@ export default function TodayPage() {
                 Every job is scheduled and assigned, nothing is late, and every invoice is out and in date.
               </p>
             </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 0. SOMEONE IS WAITING ON US. An enquiry, or a reply to a cold email. This outranks every
+             other queue in the building: it is the only one where a person is sitting there,
+             right now, deciding whether to ring someone else instead. */}
+      {needsReply.length > 0 && (
+        <Card className="border-emerald-500/30">
+          <CardContent className="p-0">
+            <div className="flex items-center gap-2.5 border-b px-4 py-3">
+              <span className="flex size-8 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-600">
+                <MessageSquare className="size-4" />
+              </span>
+              <h2 className="text-sm font-semibold">Waiting on us</h2>
+              <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-xs font-semibold tabular-nums">
+                {needsReply.length}
+              </span>
+            </div>
+            <ul className="divide-y">
+              {needsReply.map((c) => (
+                <li key={c.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <Link to="/ego/pipeline" className="min-w-0 flex-1 hover:underline">
+                    <p className="truncate text-sm font-medium">{c.company || c.name}</p>
+                    <p className="truncate text-xs text-muted-foreground">
+                      {c.source === "enquiry" ? "Website enquiry" : c.stage === "interested" ? "They replied" : "Needs a reply"}
+                      {" · "}<span className="font-medium text-red-600">waiting since <TimeStamp value={c.next_action_at} /></span>
+                    </p>
+                  </Link>
+                  <Button asChild size="sm" variant="secondary">
+                    <Link to="/ego/pipeline">Open</Link>
+                  </Button>
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       )}

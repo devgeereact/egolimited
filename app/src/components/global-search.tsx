@@ -38,7 +38,8 @@ const SECTIONS: Section[] = [
   { heading: "Workspace", items: [
     { label: "Inbox", to: "/ego/inbox", icon: Inbox, keywords: "email mail" },
     { label: "Reviews", to: "/ego/reviews", icon: Quote },
-    { label: "Campaigns", to: "/ego/campaigns", icon: Send, min: "manager" },
+    { label: "Pipeline", to: "/ego/pipeline", icon: Send, min: "manager", keywords: "leads prospects enquiries crm" },
+    { label: "Sequences", to: "/ego/campaigns", icon: Send, min: "manager", keywords: "campaigns cold email outreach" },
   ]},
   { heading: "Service delivery", items: [
     { label: "Contracts & PPM", to: "/ego/contracts", icon: FileSignature, keywords: "planned maintenance" },

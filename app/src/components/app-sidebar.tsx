@@ -99,7 +99,18 @@ const NAV: EgoSection[] = [
     items: [
       { title: "Inbox", url: "ego/inbox", icon: Inbox },
       { title: "Reviews", url: "ego/reviews", icon: Quote },
-      { title: "Campaigns", url: "ego/campaigns", icon: Send, min: "manager" },
+      {
+        // Campaigns/Leads/Automation were three fragments of ONE process: turning a stranger into
+        // a paying job. Sequences are a TOOL you apply to contacts, not a place you go.
+        title: "Pipeline",
+        url: "ego/pipeline",
+        icon: Send,
+        min: "manager",
+        items: [
+          { title: "Pipeline", url: "ego/pipeline" },
+          { title: "Sequences", url: "ego/campaigns" },
+        ],
+      },
     ],
   },
   {
