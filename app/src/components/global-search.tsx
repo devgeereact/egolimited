@@ -21,7 +21,7 @@ type Section = { heading: string; items: Item[] }
 // Real EGO destinations (mirrors the sidebar). Each carries the minimum role that may see it.
 const SECTIONS: Section[] = [
   { heading: "Overview", items: [
-    { label: "Dashboard", to: "/ego/dashboard", icon: Gauge },
+    { label: "Today", to: "/ego/dashboard", icon: Gauge },
     { label: "Analytics", to: "/ego/analytics", icon: BarChart3, keywords: "reports export revenue charts" },
   ]},
   { heading: "Operations", items: [

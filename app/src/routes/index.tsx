@@ -27,7 +27,7 @@ const AccountSecurity = lazy(() => import("@/pages/ego/account/AccountSecurity")
 const LockScreen = lazy(() => import("@/pages/ego/account/LockScreen"))
 const EgoActivity = lazy(() => import("@/pages/ego/workspace/ActivityPage"))
 const EgoReviews = lazy(() => import("@/pages/ego/workspace/ReviewsPage"))
-const EgoDashboard = lazy(() => import("@/pages/ego/dashboard/EgoDashboard"))
+const EgoToday = lazy(() => import("@/pages/ego/dashboard/TodayPage"))
 const EgoAnalytics = lazy(() => import("@/pages/ego/analytics/AnalyticsPage"))
 const EgoScheduleBoard = lazy(() => import("@/pages/ego/schedule/ScheduleBoard"))
 const EgoCustomersList = lazy(() => import("@/pages/ego/customers/CustomersList"))
@@ -118,7 +118,7 @@ export const router = createBrowserRouter (
             {path: "ego/certificates", element: <CertificatesList /> },
             {path: "ego/certificates/new", element: <CertificateForm /> },
             {path: "ego/certificates/edit", element: <CertificateForm /> },
-            {path: "ego/dashboard", element: <EgoDashboard /> },
+            {path: "ego/dashboard", element: <EgoToday /> },
             {path: "ego/analytics", element: <EgoAnalytics /> },
             {path: "ego/invoices", element: <EgoInvoicesList key="invoices" /> },
             {path: "ego/quotes", element: <EgoInvoicesList key="quotes" defaultKind="quote" /> },

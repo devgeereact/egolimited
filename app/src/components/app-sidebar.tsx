@@ -50,7 +50,7 @@ const NAV: EgoSection[] = [
   {
     label: "Overview",
     items: [
-      { title: "Dashboard", url: "ego/dashboard", icon: Gauge },
+      { title: "Today", url: "ego/dashboard", icon: Gauge },
       { title: "Analytics", url: "ego/analytics", icon: BarChart3 },
     ],
   },

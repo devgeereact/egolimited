@@ -2149,6 +2149,53 @@ switch ("$method $route") {
              ORDER BY m.id DESC LIMIT 8");
         foreach ($messages as &$m) { $m["id"] = (int)$m["id"]; $m["job_id"] = $m["job_id"] !== null ? (int)$m["job_id"] : null; $m["acknowledged"] = (int)$m["acknowledged"]; $m["rating"] = $m["rating"] !== null ? (int)$m["rating"] : null; }
         $unreadMsgs = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_messages WHERE direction='inbound' AND channel='review' AND acknowledged=0")["c"] ?? 0);
+
+        /* ---- the three work queues the Today cockpit is built around ----
+         * The old dashboard reported COUNTS ("3 awaiting invoice") and made you go hunting for the
+         * rows behind them. These return the actual rows, so the office can act on the item where
+         * they see it instead of navigating away and losing their place. */
+
+        // 1. At risk: open jobs whose SLA is breached or about to be. sla_for() is the same
+        //    function the jobs list and analytics use — one definition of "late", not three.
+        $targets = sla_targets($db);
+        $openForSla = db_all($db,
+            "SELECT j.id,j.reference,j.title,j.priority,j.status,j.created_at,j.completed_at,
+                    j.engineer_id,u.name AS engineer_name,c.name AS customer_name
+             FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id
+             LEFT JOIN ego_users u ON u.id=j.engineer_id
+             WHERE j.deleted_at IS NULL AND j.status NOT IN ('completed','invoiced','paid','closed','cancelled')");
+        $atRisk = [];
+        foreach ($openForSla as $j) {
+            $sla = sla_for($targets, $j["priority"] ?? "normal", $j["created_at"] ?? null, $j["completed_at"] ?? null, $j["status"]);
+            if (!in_array($sla["state"], ["at_risk", "breached"], true)) continue;
+            $atRisk[] = [
+                "id" => (int)$j["id"], "reference" => $j["reference"], "title" => $j["title"],
+                "priority" => $j["priority"], "status" => $j["status"], "customer_name" => $j["customer_name"],
+                "engineer_name" => $j["engineer_name"], "sla_state" => $sla["state"], "sla_due" => $sla["due"],
+            ];
+        }
+        // Breached before at-risk — the ones already late need attention first.
+        usort($atRisk, fn($a, $b) => [$a["sla_state"] === "at_risk", $a["sla_due"]] <=> [$b["sla_state"] === "at_risk", $b["sla_due"]]);
+
+        // 2. Work done but not billed. This is money EGO has earned and not asked for.
+        $toInvoice = db_all($db,
+            "SELECT j.id,j.reference,j.title,j.quoted_amount,j.completed_at,c.name AS customer_name
+             FROM ego_jobs j JOIN ego_customers c ON c.id=j.customer_id
+             WHERE j.deleted_at IS NULL AND j.status='completed'
+             ORDER BY j.completed_at ASC LIMIT 12");
+        foreach ($toInvoice as &$t) { $t["id"] = (int)$t["id"]; }
+        unset($t);
+
+        // 3. Overdue invoices, oldest first — chaseable from the cockpit itself.
+        $overdueList = db_all($db,
+            "SELECT i.id,i.number,i.total,i.due_date,i.payment_reference,c.name AS customer_name,
+                    DATEDIFF(CURDATE(), i.due_date) AS days_overdue
+             FROM ego_invoices i JOIN ego_customers c ON c.id=i.customer_id
+             WHERE i.deleted_at IS NULL AND i.kind='invoice' AND i.status='sent' AND i.due_date < CURDATE()
+             ORDER BY i.due_date ASC LIMIT 12");
+        foreach ($overdueList as &$o) { $o["id"] = (int)$o["id"]; $o["days_overdue"] = (int)$o["days_overdue"]; }
+        unset($o);
+
         send([
             "today_jobs" => $todayJobs, "to_schedule" => $toSchedule, "awaiting_invoice" => $awaitingInvoice,
             "in_progress" => $inProgress, "completed_today" => $completedToday, "open_jobs" => $openJobs,
@@ -2156,6 +2203,7 @@ switch ("$method $route") {
             "review_avg" => $reviewAvg, "review_count" => $reviewCount,
             "today" => $today, "recent" => $recent, "waitlist" => $waitlist,
             "messages" => $messages, "unread_messages" => $unreadMsgs,
+            "at_risk" => $atRisk, "to_invoice" => $toInvoice, "overdue_invoices" => $overdueList,
         ]);
     }
 
