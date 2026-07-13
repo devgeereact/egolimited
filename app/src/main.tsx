@@ -19,15 +19,43 @@ import "@/index.css"
 // job — e.g. they reopen the app on the Today tab, or land on the login screen.
 startOutbox()
 
-// Register the engineer-PWA service worker (prod only; dev path 404s harmlessly).
-// The ?v= query is part of the registration URL — bump it whenever sw.js's logic
-// changes so this deploy is fetched as a URL neither the browser nor Cloudflare's
-// edge has ever cached, guaranteeing every client picks up the fix immediately
-// instead of waiting out whatever cache TTL was in effect (root cause of the
-// 2026-07-08 white-screen: sw.js sat at Cloudflare's edge for ~9 days unrevalidated).
+/**
+ * Service worker registration — and the escape hatch from a stale one.
+ *
+ * THE TRAP THIS FIXES. The first version of sw.js was CACHE-FIRST for navigations. That makes a bad
+ * service worker IMMORTAL: it serves the cached index.html, which loads the cached old JS, which
+ * re-registers the old worker — the network is never touched, so a new deploy can never reach the
+ * user. The owner sat on a days-old build through repeated hard reloads (2026-07-13), and every
+ * engineer with the old worker on their phone was stuck the same way. A reload cannot fix it,
+ * because the worker answers before the network is asked.
+ *
+ * So: when a NEW worker takes over, we reload the page once, automatically. `controllerchange`
+ * fires exactly then. The one-shot guard stops a reload loop if anything else claims the page.
+ */
 if ("serviceWorker" in navigator && import.meta.env.PROD) {
+  let reloading = false
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (reloading) return
+    reloading = true
+    window.location.reload()
+  })
+
   window.addEventListener("load", () => {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js?v=3`).catch(() => {})
+    // The ?v= is part of the registration URL — bump it whenever sw.js changes, so the browser
+    // fetches a URL neither it nor Cloudflare's edge has ever cached (root cause of the 2026-07-08
+    // white-screen: sw.js sat at the edge for ~9 days unrevalidated).
+    navigator.serviceWorker
+      .register(`${import.meta.env.BASE_URL}sw.js?v=4`)
+      .then((reg) => {
+        // Don't wait for every tab to close before a fix reaches the user.
+        reg.addEventListener("updatefound", () => {
+          reg.installing?.addEventListener("statechange", function () {
+            if (this.state === "installed" && navigator.serviceWorker.controller) this.postMessage?.("skip-waiting")
+          })
+        })
+        void reg.update()
+      })
+      .catch(() => {})
   })
 }
 

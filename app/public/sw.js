@@ -18,10 +18,12 @@
 // after a deploy could load a cached shell whose hashed assets are gone. They'd see the error
 // boundary (not a white screen), and a reload with signal fixes it. That is a far smaller harm
 // than losing a day's fieldwork because the app wouldn't open in a plant room.
-const CACHE = "ego-shell-v3"
+const CACHE = "ego-shell-v4"
 const SHELL = "index.html"
 
+// skipWaiting on install: a fix must not wait for every tab in the building to be closed.
 self.addEventListener("install", () => self.skipWaiting())
+self.addEventListener("message", (e) => { if (e.data === "skip-waiting") self.skipWaiting() })
 self.addEventListener("activate", (e) =>
   e.waitUntil(
     caches
