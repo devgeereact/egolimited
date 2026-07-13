@@ -34,15 +34,27 @@ import { DashboardSkeleton } from "@/components/ego/Skeletons"
  * belong. If every queue is empty, the day is genuinely under control and the screen says so.
  */
 
+/**
+ * The three queue arrays are OPTIONAL on purpose.
+ *
+ * The app and the API deploy separately, so for the length of any deploy window a browser running
+ * new frontend code will be talking to an older API that doesn't return them yet. The first cut of
+ * this page assumed they'd be there and did `atRisk.length` — which throws on undefined and
+ * white-screens the very first page the office sees each morning. (Caught testing locally against
+ * the live API, which is exactly the mismatch a real deploy produces.)
+ *
+ * A screen must never assume the server has already been upgraded. Missing data degrades to an
+ * empty queue, not a crash.
+ */
 interface Dash {
   today_jobs: number; in_progress: number; completed_today: number
   unpaid_total: number; overdue_total: number; collected_30d: number
   open_jobs: number; review_avg: number | null; review_count: number
-  today: { id: number; reference: string; title: string; status: EgoStatus; scheduled_start: string | null; customer_name: string }[]
-  waitlist: { id: number; reference: string; title: string; priority: string; customer_name: string; reason: "schedule" | "assign" }[]
-  at_risk: { id: number; reference: string; title: string; priority: string; status: EgoStatus; customer_name: string; engineer_name: string | null; sla_state: "at_risk" | "breached"; sla_due: string | null }[]
-  to_invoice: { id: number; reference: string; title: string; quoted_amount: string | null; completed_at: string | null; customer_name: string }[]
-  overdue_invoices: { id: number; number: string | null; total: string; due_date: string | null; payment_reference: string; customer_name: string; days_overdue: number }[]
+  today?: { id: number; reference: string; title: string; status: EgoStatus; scheduled_start: string | null; customer_name: string }[]
+  waitlist?: { id: number; reference: string; title: string; priority: string; customer_name: string; reason: "schedule" | "assign" }[]
+  at_risk?: { id: number; reference: string; title: string; priority: string; status: EgoStatus; customer_name: string; engineer_name: string | null; sla_state: "at_risk" | "breached"; sla_due: string | null }[]
+  to_invoice?: { id: number; reference: string; title: string; quoted_amount: string | null; completed_at: string | null; customer_name: string }[]
+  overdue_invoices?: { id: number; number: string | null; total: string; due_date: string | null; payment_reference: string; customer_name: string; days_overdue: number }[]
 }
 
 const dayPart = () => {
@@ -95,6 +107,14 @@ export default function TodayPage() {
   const navigate = useNavigate()
   const { data: d } = useApi<Dash>("/dashboard")
 
+  // Every queue defaults to empty. An older API (mid-deploy) simply shows no queues rather than
+  // taking the whole screen down. See the note on the Dash interface.
+  const waitlist = d?.waitlist ?? []
+  const atRisk = d?.at_risk ?? []
+  const toInvoice = d?.to_invoice ?? []
+  const overdueInvoices = d?.overdue_invoices ?? []
+  const todayJobs = d?.today ?? []
+
   const [schedJob, setSchedJob] = useState<number | undefined>()
   const [chasing, setChasing] = useState<number | null>(null)
   const [ai, setAi] = useState<string | null>(null)
@@ -108,10 +128,10 @@ export default function TodayPage() {
     try {
       const lines = [
         `Jobs today: ${d.today_jobs}. In progress: ${d.in_progress}. Completed today: ${d.completed_today}.`,
-        `Needing a slot or an engineer: ${d.waitlist.length}.`,
-        `Late or about to breach SLA: ${d.at_risk.length}${d.at_risk.length ? ` (${d.at_risk.slice(0, 3).map((j) => `${j.reference} ${j.customer_name}`).join("; ")})` : ""}.`,
-        `Finished but not invoiced: ${d.to_invoice.length}.`,
-        `Overdue invoices: ${d.overdue_invoices.length}, ${gbp(d.overdue_total)} outstanding${d.overdue_invoices.length ? ` (oldest ${d.overdue_invoices[0].days_overdue} days)` : ""}.`,
+        `Needing a slot or an engineer: ${waitlist.length}.`,
+        `Late or about to breach SLA: ${atRisk.length}${atRisk.length ? ` (${atRisk.slice(0, 3).map((j) => `${j.reference} ${j.customer_name}`).join("; ")})` : ""}.`,
+        `Finished but not invoiced: ${toInvoice.length}.`,
+        `Overdue invoices: ${overdueInvoices.length}, ${gbp(d.overdue_total)} outstanding${overdueInvoices.length ? ` (oldest ${overdueInvoices[0].days_overdue} days)` : ""}.`,
       ].join("\n")
       const prompt =
         `You are the office assistant for EGO LIMITED, a maintenance company. Give a short ${dayPart().toLowerCase()} briefing ` +
@@ -142,7 +162,7 @@ export default function TodayPage() {
   if (!d) return <DashboardSkeleton />
 
   const needsAttention =
-    d.waitlist.length + d.at_risk.length + d.to_invoice.length + d.overdue_invoices.length
+    waitlist.length + atRisk.length + toInvoice.length + overdueInvoices.length
 
   return (
     <div className="flex flex-1 flex-col gap-5 p-4 md:p-6">
@@ -198,10 +218,10 @@ export default function TodayPage() {
           title="Needs scheduling or an engineer"
           icon={CalendarPlus}
           tone="bg-amber-500/15 text-amber-600"
-          items={d.waitlist}
+          items={waitlist}
           empty="Everything is scheduled and assigned"
         >
-          {d.waitlist.slice(0, 8).map((j) => (
+          {waitlist.slice(0, 8).map((j) => (
             <li key={j.id} className="flex items-center gap-3 px-4 py-2.5">
               <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md",
                 j.reason === "schedule" ? "bg-amber-500/15 text-amber-600" : "bg-blue-500/15 text-blue-600")}>
@@ -226,10 +246,10 @@ export default function TodayPage() {
           title="Late or about to be"
           icon={AlertTriangle}
           tone="bg-red-500/15 text-red-600"
-          items={d.at_risk}
+          items={atRisk}
           empty="Every open job is inside its SLA"
         >
-          {d.at_risk.slice(0, 8).map((j) => (
+          {atRisk.slice(0, 8).map((j) => (
             <li key={j.id} className="flex items-center gap-3 px-4 py-2.5">
               <Link to={`/ego/jobs/detail?id=${j.id}`} className="min-w-0 flex-1 hover:underline">
                 <p className="truncate text-sm font-medium">{j.title}</p>
@@ -254,10 +274,10 @@ export default function TodayPage() {
           title="Done — not invoiced yet"
           icon={FileText}
           tone="bg-orange-500/15 text-orange-600"
-          items={d.to_invoice}
+          items={toInvoice}
           empty="Everything finished has been invoiced"
         >
-          {d.to_invoice.slice(0, 8).map((j) => (
+          {toInvoice.slice(0, 8).map((j) => (
             <li key={j.id} className="flex items-center gap-3 px-4 py-2.5">
               <Link to={`/ego/jobs/detail?id=${j.id}`} className="min-w-0 flex-1 hover:underline">
                 <p className="truncate text-sm font-medium">{j.title}</p>
@@ -278,10 +298,10 @@ export default function TodayPage() {
           title="Overdue invoices"
           icon={BadgePoundSterling}
           tone="bg-red-500/15 text-red-600"
-          items={d.overdue_invoices}
+          items={overdueInvoices}
           empty="Nothing is overdue"
         >
-          {d.overdue_invoices.slice(0, 8).map((inv) => (
+          {overdueInvoices.slice(0, 8).map((inv) => (
             <li key={inv.id} className="flex items-center gap-3 px-4 py-2.5">
               <Link to={`/ego/invoices/detail?id=${inv.id}`} className="min-w-0 flex-1 hover:underline">
                 <p className="truncate text-sm font-medium">
@@ -320,11 +340,11 @@ export default function TodayPage() {
               <Link to="/ego/schedule">Schedule <ArrowRight className="size-4" /></Link>
             </Button>
           </div>
-          {d.today.length === 0 ? (
+          {todayJobs.length === 0 ? (
             <p className="py-8 text-center text-xs text-muted-foreground">Nothing booked in for today.</p>
           ) : (
             <ul className="divide-y">
-              {d.today.map((j) => (
+              {todayJobs.map((j) => (
                 <li key={j.id}>
                   <Link to={`/ego/jobs/detail?id=${j.id}`} className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/40">
                     <span className="w-12 shrink-0 text-xs font-semibold tabular-nums text-muted-foreground">
