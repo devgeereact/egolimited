@@ -167,6 +167,22 @@ function inbox_mailbox(mysqli $db): string {
 /** Detect a bounce / auto-reply (e.g. "Mail Delivery System", mailer-daemon). These
  *  pile up whenever mail is sent to an address that doesn't exist; we archive them on
  *  arrival so the inbox stays clean (they're still in Archived if anyone needs them). */
+/**
+ * Pull the address a bounce is ABOUT out of the notice body. The bounce itself comes from
+ * mailer-daemon@…, so suppressing its From: would suppress the postmaster and leave the actually
+ * dead address happily receiving the rest of the sequence.
+ */
+function inbox_bounced_address(string $text): ?string {
+    // Delivery reports name the failed recipient explicitly; prefer that over any address in the body.
+    if (preg_match('/(?:Final-Recipient|Original-Recipient)\s*:\s*[^;]*;\s*([^\s<>]+@[^\s<>]+)/i', $text, $m)) {
+        return strtolower(trim($m[1], " \t<>.,;"));
+    }
+    if (preg_match('/(?:failed|undelivered|not delivered|could not be delivered)[^\n]{0,80}?([^\s<>]+@[^\s<>]+)/i', $text, $m)) {
+        return strtolower(trim($m[1], " \t<>.,;"));
+    }
+    return null;
+}
+
 function inbox_is_bounce(string $fromEmail, string $fromName, string $subject): bool {
     $from = strtolower($fromEmail . " " . $fromName);
     if (preg_match('/mailer-daemon|postmaster|mail delivery (system|subsystem)|delivery status notif/i', $from)) return true;
@@ -230,6 +246,28 @@ function inbox_sync(mysqli $db): int {
         // attachment abort the whole sync — the message row is already stored.
         $mid = (int) $db->insert_id;
         try { inbox_store_attachments($db, $conn, $i, imap_fetchstructure($conn, $i), $mid); } catch (Throwable $e) { /* skip */ }
+
+        /* ---- campaigns: a bounce suppresses, a reply stops the sequence ----
+         * v1 only ARCHIVED the bounce notice. The lead stayed 'approved' and kept receiving every
+         * subsequent drip step forever — mailing an address the server has already told us is dead,
+         * which is the fastest way to destroy a sending reputation. And a lead who actually REPLIED
+         * kept getting nudged, which is simply rude and is the strongest "stop" signal there is.
+         * Both are handled here, at the one place inbound mail enters the system. */
+        try {
+            require_once __DIR__ . "/campaigns.php";
+            if ($fromEmail) {
+                if ($bounce) {
+                    // The bounce's own From: is the mail daemon, so find the address it's about.
+                    $target = inbox_bounced_address($body . " " . $subject) ?: $fromEmail;
+                    supp_add($db, $target, "bounced", "imap bounce", substr($subject, 0, 200));
+                    camp_stop_email($db, $target, "bounced", "hard bounce");
+                } else {
+                    // A human replied. Stop every sequence they're in — and say why.
+                    camp_stop_email($db, $fromEmail, "replied", "replied to us");
+                }
+            }
+        } catch (Throwable $e) { /* never let campaign bookkeeping break the mail sync */ }
+
         $count++;
     }
     imap_close($conn);

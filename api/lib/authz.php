@@ -208,23 +208,33 @@ const ROUTE_ROLES = [
     "POST /certificates"         => "office",
     "POST /certificates/update"  => "office",
     "POST /certificates/delete"  => "office",
-    // Campaigns / leads (see the transformation review — this module is a removal candidate)
-    "GET /subscribers"           => "office",
-    "POST /subscribers"          => "office",
-    "POST /subscribers/delete"   => "office",
-    "POST /campaigns/draft"      => "office",
-    "POST /campaigns/send"       => "office",
-    "GET /campaigns/automation"  => "office",
-    "POST /campaigns/automation" => "office",
-    "POST /campaigns/steps"      => "office",
+    // Campaigns v2 (docs/CAMPAIGNS-V2.md). Nothing here sends mail inline — sends are queued and
+    // drained by campaign_worker.php, so a killed request can never leave a half-finished broadcast.
+    "GET /campaigns"               => "office",
+    "GET /campaigns/get"           => "office",
+    "POST /campaigns"              => "office",
+    "POST /campaigns/status"       => "office",   // start / pause — the only thing that sends
+    "POST /campaigns/delete"       => "manager",
+    "POST /campaigns/steps"        => "office",
     "POST /campaigns/steps/delete" => "office",
+    "GET /campaigns/enrollments"   => "office",
+    "POST /campaigns/enroll"       => "office",
+    "POST /campaigns/unenroll"     => "office",
+    "POST /campaigns/preview"      => "office",   // server-side merge render — one source of truth
+    "POST /campaigns/test"         => "office",
+    "POST /campaigns/draft"        => "office",
+    // Suppression list: a first-class destination, not a hidden flag.
+    "GET /suppressions"            => "office",
+    "POST /suppressions"           => "office",
+    "POST /suppressions/delete"    => "manager", // un-suppressing is deliberate, logged, and refused
+                                                 // outright for anyone who actually opted out
+    // Leads (prospecting)
     "POST /leads/search"         => "office",
     "GET /leads"                 => "office",
     "POST /leads/approve"        => "office",
     "POST /leads/reject"         => "office",
     "POST /leads/delete"         => "office",
     "POST /leads/draft"          => "office",
-    "POST /leads/email"          => "office",
 
     // ---- manager and up: team, deletions, money reversals ----
     "GET /team"                  => "manager",

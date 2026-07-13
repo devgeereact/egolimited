@@ -11,6 +11,7 @@ require __DIR__ . "/lib/job_status.php";
 require __DIR__ . "/lib/invoicing.php";
 require __DIR__ . "/lib/brand.php";
 require __DIR__ . "/lib/authz.php";   // who may call what — enforced in one gate before the switch
+require __DIR__ . "/lib/campaigns.php"; // enrolment, suppression, merge, queueing
 
 /* ---------- CORS ---------- */
 $origin = $_SERVER["HTTP_ORIGIN"] ?? "";
@@ -3973,33 +3974,254 @@ switch ("$method $route") {
     // Newsletter signups (landing) and admin-added contacts live in ego_subscribers;
     // customers come from ego_customers. Admins compose + send bulk email to any
     // audience, with an AI draft helper. Human always approves before send.
-    case "GET /subscribers": {
+    /* ======================= CAMPAIGNS v2 (docs/CAMPAIGNS-V2.md) =======================
+     * A campaign is a real object: steps, enrollments, sends. Progress lives on the ENROLLMENT,
+     * so nothing outside a campaign can clobber it — v1 tracked progress with an enum on the lead,
+     * which is why a manual bulk send silently abandoned every in-flight sequence.
+     * Nothing here sends mail inline. Sends are QUEUED and drained by campaign_worker.php, which is
+     * what makes a killed process harmless instead of a half-finished broadcast nobody can trace.
+     */
+
+    case "GET /campaigns": {
         require_role($db, "admin");
-        ensure_subscribers_table($db);
-        $subs = db_all($db, "SELECT id,email,name,source,subscribed,created_at FROM ego_subscribers ORDER BY id DESC");
-        $cust = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL")["c"] ?? 0);
-        send(["subscribers" => $subs, "subscriber_count" => count(array_filter($subs, fn($s) => (int)$s["subscribed"] === 1)), "customer_email_count" => $cust]);
+        $rows = db_all($db,
+            "SELECT c.*,
+                (SELECT COUNT(*) FROM ego_campaign_enrollments e WHERE e.campaign_id=c.id) total,
+                (SELECT COUNT(*) FROM ego_campaign_enrollments e WHERE e.campaign_id=c.id AND e.state='active') active,
+                (SELECT COUNT(*) FROM ego_campaign_enrollments e WHERE e.campaign_id=c.id AND e.state='replied') replied,
+                (SELECT COUNT(*) FROM ego_campaign_enrollments e WHERE e.campaign_id=c.id AND e.state='completed') completed,
+                (SELECT COUNT(*) FROM ego_campaign_sends_v2 s WHERE s.campaign_id=c.id AND s.status='sent') sent,
+                (SELECT COUNT(*) FROM ego_campaign_sends_v2 s WHERE s.campaign_id=c.id AND s.status='queued') queued,
+                (SELECT COUNT(*) FROM ego_campaign_sends_v2 s WHERE s.campaign_id=c.id AND s.status='failed') failed,
+                (SELECT COUNT(*) FROM ego_campaign_steps_v2 st WHERE st.campaign_id=c.id) steps
+             FROM ego_campaigns c WHERE c.deleted_at IS NULL ORDER BY c.id DESC");
+        foreach ($rows as &$r) foreach (["id","total","active","replied","completed","sent","queued","failed","steps"] as $k) $r[$k] = (int)$r[$k];
+        unset($r);
+        $supp = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_suppressions")["c"] ?? 0);
+        send(["campaigns" => $rows, "suppressed" => $supp, "window" => camp_closed_reason()]);
     }
-    case "POST /subscribers": {
+
+    case "GET /campaigns/get": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $c = db_one($db, "SELECT * FROM ego_campaigns WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$c) fail("Campaign not found", 404);
+        $c["id"] = (int)$c["id"];
+        $steps = db_all($db, "SELECT id,step_no,delay_days,subject,body,image_url FROM ego_campaign_steps_v2 WHERE campaign_id=? ORDER BY step_no", "i", $id);
+        foreach ($steps as &$s) { $s["id"]=(int)$s["id"]; $s["step_no"]=(int)$s["step_no"]; $s["delay_days"]=(int)$s["delay_days"]; }
+        unset($s);
+        send(["campaign" => $c, "steps" => $steps]);
+    }
+
+    case "POST /campaigns": {
         $actor = require_role($db, "admin");
-        ensure_subscribers_table($db);
         $b = body();
-        $email = strtolower(trim($b["email"] ?? ""));
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail("A valid email is required");
-        $name = trim($b["name"] ?? "") ?: null;
-        $src = trim($b["source"] ?? "") ?: "manual";
-        db_exec($db, "INSERT INTO ego_subscribers (email,name,source) VALUES (?,?,?)
-                      ON DUPLICATE KEY UPDATE name=COALESCE(VALUES(name),name), subscribed=1", "sss", $email, $name, $src);
-        log_activity($db, null, (int)$actor["id"], "subscriber_added", ["email" => $email]);
-        send(["ok" => true], 201);
+        $id = (int)($b["id"] ?? 0);
+        $name = trim((string)($b["name"] ?? ""));
+        if ($name === "") fail("Give the campaign a name");
+        $audience = in_array($b["audience"] ?? "", ["leads","subscribers","customers"], true) ? $b["audience"] : "leads";
+        $fromName = trim((string)($b["from_name"] ?? "")) ?: null;
+        $fromEmail = trim((string)($b["from_email"] ?? "")) ?: null;
+        if ($fromEmail !== null && !filter_var($fromEmail, FILTER_VALIDATE_EMAIL)) fail("That sender address isn't valid");
+        if ($id) {
+            db_exec($db, "UPDATE ego_campaigns SET name=?, audience=?, from_name=?, from_email=? WHERE id=?",
+                "ssssi", $name, $audience, $fromName, $fromEmail, $id);
+        } else {
+            $st = db_exec($db, "INSERT INTO ego_campaigns (name, audience, from_name, from_email, created_by) VALUES (?,?,?,?,?)",
+                "ssssi", $name, $audience, $fromName, $fromEmail, (int)$actor["id"]);
+            $id = (int)$db->insert_id;
+        }
+        send(["ok" => true, "id" => $id]);
     }
-    case "POST /subscribers/delete": {
+
+    /** Start / pause / archive. Starting is what makes the worker pick it up — there is no other
+     *  switch, and nothing sends until a human does this deliberately. */
+    case "POST /campaigns/status": {
         require_role($db, "admin");
-        ensure_subscribers_table($db);
-        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
-        db_exec($db, "DELETE FROM ego_subscribers WHERE id=?", "i", $id);
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $to = (string)($b["status"] ?? "");
+        if (!in_array($to, ["draft","active","paused","completed","archived"], true)) fail("Unknown status");
+        $c = db_one($db, "SELECT id,status FROM ego_campaigns WHERE id=? AND deleted_at IS NULL", "i", $id);
+        if (!$c) fail("Campaign not found", 404);
+        if ($to === "active") {
+            $steps = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_campaign_steps_v2 WHERE campaign_id=?", "i", $id)["c"] ?? 0);
+            if ($steps === 0) fail("Add at least one step before starting");
+            $people = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_campaign_enrollments WHERE campaign_id=? AND state='active'", "i", $id)["c"] ?? 0);
+            if ($people === 0) fail("Add some recipients before starting");
+        }
+        db_exec($db, "UPDATE ego_campaigns SET status=?, started_at = IF(?='active' AND started_at IS NULL, NOW(), started_at) WHERE id=?",
+            "ssi", $to, $to, $id);
+        send(["ok" => true, "status" => $to]);
+    }
+
+    case "POST /campaigns/delete": {
+        require_min($db, "manager");
+        $id = (int)(body()["id"] ?? 0);
+        db_exec($db, "UPDATE ego_campaigns SET deleted_at=NOW(), status='archived' WHERE id=?", "i", $id);
         send(["ok" => true]);
     }
+
+    /** Upsert a step. image_url is round-tripped — v1's step editor never sent it, so editing a
+     *  step just to change its delay silently wiped the image off it. */
+    case "POST /campaigns/steps": {
+        require_role($db, "admin");
+        $b = body();
+        $cid = (int)($b["campaign_id"] ?? 0);
+        if (!db_one($db, "SELECT id FROM ego_campaigns WHERE id=? AND deleted_at IS NULL", "i", $cid)) fail("Campaign not found", 404);
+        $id = (int)($b["id"] ?? 0);
+        $subject = trim((string)($b["subject"] ?? ""));
+        $bodyTxt = trim((string)($b["body"] ?? ""));
+        if ($subject === "" || $bodyTxt === "") fail("A step needs a subject and a message");
+        $delay = max(0, min(365, (int)($b["delay_days"] ?? 0)));
+        $img = trim((string)($b["image_url"] ?? "")) ?: null;
+        if ($id) {
+            db_exec($db, "UPDATE ego_campaign_steps_v2 SET delay_days=?, subject=?, body=?, image_url=? WHERE id=? AND campaign_id=?",
+                "isssii", $delay, $subject, $bodyTxt, $img, $id, $cid);
+        } else {
+            $next = (int)(db_one($db, "SELECT COALESCE(MAX(step_no),0)+1 n FROM ego_campaign_steps_v2 WHERE campaign_id=?", "i", $cid)["n"] ?? 1);
+            db_exec($db, "INSERT INTO ego_campaign_steps_v2 (campaign_id, step_no, delay_days, subject, body, image_url) VALUES (?,?,?,?,?,?)",
+                "iiisss", $cid, $next, $delay, $subject, $bodyTxt, $img);
+            $id = (int)$db->insert_id;
+        }
+        send(["ok" => true, "id" => $id]);
+    }
+
+    case "POST /campaigns/steps/delete": {
+        require_role($db, "admin");
+        $id = (int)(body()["id"] ?? 0);
+        db_exec($db, "DELETE FROM ego_campaign_steps_v2 WHERE id=?", "i", $id);
+        send(["ok" => true]);
+    }
+
+    /* ---- who is in it, and exactly where each person has got to ---- */
+    case "GET /campaigns/enrollments": {
+        require_role($db, "admin");
+        $id = (int)($_GET["id"] ?? 0);
+        $state = (string)($_GET["state"] ?? "");
+        $sql = "SELECT e.*, (SELECT COUNT(*) FROM ego_campaign_sends_v2 s WHERE s.enrollment_id=e.id AND s.status='sent') sent_count
+                FROM ego_campaign_enrollments e WHERE e.campaign_id=?";
+        $rows = in_array($state, ["active","completed","replied","bounced","unsubscribed","stopped"], true)
+            ? db_all($db, $sql . " AND e.state=? ORDER BY e.id DESC LIMIT 500", "is", $id, $state)
+            : db_all($db, $sql . " ORDER BY e.id DESC LIMIT 500", "i", $id);
+        foreach ($rows as &$r) foreach (["id","campaign_id","current_step","sent_count"] as $k) $r[$k] = (int)$r[$k];
+        unset($r);
+        send(["enrollments" => $rows]);
+    }
+
+    /** Add recipients. Suppressed addresses are refused HERE as well as at send time, and the
+     *  response says exactly what happened to each one rather than claiming a flat success. */
+    case "POST /campaigns/enroll": {
+        require_role($db, "admin");
+        $b = body();
+        $cid = (int)($b["campaign_id"] ?? 0);
+        $c = db_one($db, "SELECT id,audience FROM ego_campaigns WHERE id=? AND deleted_at IS NULL", "i", $cid);
+        if (!$c) fail("Campaign not found", 404);
+
+        $people = [];
+        $ids = array_map("intval", (array)($b["lead_ids"] ?? []));
+        if ($ids) {
+            $in = implode(",", array_fill(0, count($ids), "?"));
+            $people = db_all($db, "SELECT id AS lead_id, email, name, company, website FROM ego_leads WHERE id IN ($in)",
+                str_repeat("i", count($ids)), ...$ids);
+        } elseif (($b["audience"] ?? "") === "subscribers") {
+            $people = db_all($db, "SELECT NULL AS lead_id, email, name, NULL AS company, NULL AS website FROM ego_subscribers WHERE subscribed=1");
+        } elseif (($b["audience"] ?? "") === "customers") {
+            $people = db_all($db, "SELECT NULL AS lead_id, email, name, NULL AS company, NULL AS website FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL");
+        } elseif (($b["audience"] ?? "") === "approved_leads") {
+            $people = db_all($db, "SELECT id AS lead_id, email, name, company, website FROM ego_leads WHERE status='approved' AND email IS NOT NULL AND email<>''");
+        }
+        if (!$people) fail("No recipients to add");
+
+        // Tell the truth about each one. v1's bulk approve returned count($ids) regardless of how
+        // many rows it actually touched, so it happily reported "Approved 12" having changed nothing.
+        $out = ["enrolled" => 0, "suppressed" => 0, "duplicate" => 0, "invalid" => 0];
+        foreach ($people as $p) {
+            $result = camp_enroll($db, $cid, $p);
+            $out[$result] = ($out[$result] ?? 0) + 1;
+        }
+        send(["ok" => true] + $out);
+    }
+
+    /** Stop one person's sequence. A stop is a STATE with a reason, never a delete — we keep the
+     *  record of what we already sent them. */
+    case "POST /campaigns/unenroll": {
+        require_role($db, "admin");
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $e = db_one($db, "SELECT id,email FROM ego_campaign_enrollments WHERE id=?", "i", $id);
+        if (!$e) fail("Not found", 404);
+        db_exec($db, "UPDATE ego_campaign_enrollments SET state='stopped', stop_reason='stopped by office', next_due_at=NULL WHERE id=?", "i", $id);
+        db_exec($db, "UPDATE ego_campaign_sends_v2 SET status='skipped', error='stopped by office' WHERE enrollment_id=? AND status='queued'", "i", $id);
+        send(["ok" => true]);
+    }
+
+    /** Live merge preview, rendered BY THE SERVER. v1 had a second merge implementation in the
+     *  browser that hardcoded the company name — so the preview could show something different from
+     *  what actually went out. There is now one answer to "what will this send?". */
+    case "POST /campaigns/preview": {
+        require_role($db, "admin");
+        $b = body();
+        $subject = (string)($b["subject"] ?? "");
+        $bodyTxt = (string)($b["body"] ?? "");
+        $r = ["name" => "", "company" => "", "website" => "", "email" => ""];
+        if (!empty($b["lead_id"])) {
+            $l = db_one($db, "SELECT email,name,company,website FROM ego_leads WHERE id=?", "i", (int)$b["lead_id"]);
+            if ($l) $r = $l;
+        } elseif (!empty($b["enrollment_id"])) {
+            $l = db_one($db, "SELECT email,name,company,website FROM ego_campaign_enrollments WHERE id=?", "i", (int)$b["enrollment_id"]);
+            if ($l) $r = $l;
+        }
+        send(camp_render($db, $r, $subject, $bodyTxt) + ["recipient" => $r]);
+    }
+
+    /** Send one step to yourself before it goes to a stranger. Every good mail tool has this. */
+    case "POST /campaigns/test": {
+        $actor = require_role($db, "admin");
+        $b = body();
+        $to = trim((string)($b["to"] ?? $actor["email"]));
+        if (!filter_var($to, FILTER_VALIDATE_EMAIL)) fail("Where should the test go?");
+        rate_write($db, "camp-test:" . (int)$actor["id"], 10, 60);
+        require_once __DIR__ . "/lib/mailer.php";
+        $sample = ["name" => $actor["name"], "company" => "Sample Company Ltd", "website" => "example-co.uk", "email" => $to];
+        $r = camp_render($db, $sample, (string)($b["subject"] ?? ""), (string)($b["body"] ?? ""));
+        $html = camp_email_html($db, nl2br(htmlspecialchars($r["body"])), $to, trim((string)($b["image_url"] ?? "")) ?: null);
+        if (!ego_send_mail_checked($db, $to, $actor["name"], "[TEST] " . $r["subject"], $html)) fail("Couldn't send — check SMTP in Settings → Integrations", 502);
+        send(["ok" => true, "to" => $to]);
+    }
+
+    /* ---- suppression list: a first-class thing, not a hidden flag ---- */
+    case "GET /suppressions": {
+        require_role($db, "admin");
+        $rows = db_all($db, "SELECT email, reason, source, note, created_at FROM ego_suppressions ORDER BY created_at DESC LIMIT 500");
+        send(["suppressions" => $rows, "total" => (int)(db_one($db, "SELECT COUNT(*) c FROM ego_suppressions")["c"] ?? 0)]);
+    }
+
+    case "POST /suppressions": {
+        $actor = require_role($db, "admin");
+        $email = strtolower(trim((string)(body()["email"] ?? "")));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail("That doesn't look like an email address");
+        supp_add($db, $email, "manual", "added by " . $actor["name"]);
+        camp_stop_email($db, $email, "unsubscribed", "added to the suppression list");
+        log_activity($db, null, (int)$actor["id"], "suppression_added", ["email" => $email]);
+        send(["ok" => true]);
+    }
+
+    /** Removing someone from the suppression list is a deliberate, LOGGED act — never a side effect
+     *  of retyping their address. v1's "add subscriber" did ON DUPLICATE KEY UPDATE subscribed=1,
+     *  which silently resurrected people who had opted out. That is the one thing PECR does not
+     *  forgive, and it is why un-suppressing is its own endpoint with its own audit entry. */
+    case "POST /suppressions/delete": {
+        $actor = require_min($db, "manager");
+        $email = strtolower(trim((string)(body()["email"] ?? "")));
+        $row = db_one($db, "SELECT email, reason FROM ego_suppressions WHERE email=?", "s", $email);
+        if (!$row) fail("Not on the list", 404);
+        if ($row["reason"] === "unsubscribed") fail("This person opted out. We don't email them again.", 409);
+        db_exec($db, "DELETE FROM ego_suppressions WHERE email=?", "s", $email);
+        log_activity($db, null, (int)$actor["id"], "suppression_removed", ["email" => $email, "was" => $row["reason"]]);
+        send(["ok" => true]);
+    }
+
     case "POST /campaigns/draft": {
         require_role($db, "admin");
         $b = body();
@@ -4014,72 +4236,6 @@ switch ("$method $route") {
         $subject = ""; $bodyTxt = trim($text);
         if (preg_match('/^\s*subject:\s*(.+?)\r?\n+(.*)$/is', $text, $m)) { $subject = trim($m[1]); $bodyTxt = trim($m[2]); }
         send(["subject" => $subject, "body" => $bodyTxt]);
-    }
-    case "POST /campaigns/send": {
-        $actor = require_role($db, "admin");
-        rate_write($db, "w:camp:" . $actor["id"], 5, 60); // bulk send — hard cap
-        ensure_subscribers_table($db);
-        $b = body();
-        $subject = trim($b["subject"] ?? ""); $bodyTxt = trim($b["body"] ?? "");
-        $audience = (string)($b["audience"] ?? "subscribers");
-        if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
-        // De-duped recipient map: email => ["name"=>?, "company"=>?]. Company is the RECIPIENT's
-        // own business (a lead's company) so {{company}}/{{agency_name}} personalise correctly.
-        $rows = [];
-        if ($audience === "list") {
-            foreach ((array)($b["emails"] ?? []) as $e) {
-                $e = strtolower(trim((string)$e));
-                if (filter_var($e, FILTER_VALIDATE_EMAIL)) $rows[$e] = $rows[$e] ?? ["name" => null, "company" => ""];
-            }
-        } elseif ($audience === "leads") {
-            ensure_leads_table($db);
-            foreach (db_all($db, "SELECT email,name,company FROM ego_leads WHERE status='approved' AND email IS NOT NULL") as $r)
-                $rows[strtolower($r["email"])] = ["name" => $r["name"] ?: $r["company"], "company" => (string)($r["company"] ?? "")];
-        } else {
-            if ($audience === "subscribers" || $audience === "all")
-                foreach (db_all($db, "SELECT email,name FROM ego_subscribers WHERE subscribed=1") as $r) $rows[strtolower($r["email"])] = ["name" => $r["name"], "company" => ""];
-            if ($audience === "customers" || $audience === "all")
-                foreach (db_all($db, "SELECT email,name FROM ego_customers WHERE email IS NOT NULL AND email<>'' AND deleted_at IS NULL") as $r)
-                    $rows[strtolower($r["email"])] = $rows[strtolower($r["email"])] ?? ["name" => $r["name"], "company" => ""];
-        }
-        // Honour opt-outs across EVERY audience (suppression list) — UK PECR.
-        foreach (db_all($db, "SELECT email FROM ego_subscribers WHERE subscribed=0") as $r) unset($rows[strtolower($r["email"])]);
-        if (!$rows) fail("No recipients for that audience yet");
-        require_once __DIR__ . "/lib/mailer.php";
-        // Optional header image makes the campaign read like a post, not a plain email.
-        $img = trim($b["image_url"] ?? "");
-        $imgHtml = ($img !== "" && filter_var($img, FILTER_VALIDATE_URL))
-            ? "<img src='" . htmlspecialchars($img) . "' alt='' style='display:block;width:100%;max-width:560px;height:auto;border-radius:12px;margin:0 0 18px'>"
-            : "";
-        $coNamePlain = (db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED";
-        $coName = htmlspecialchars($coNamePlain);
-        $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
-        $unsubBase = "$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe";
-        $sent = 0; $failed = 0;
-        foreach ($rows as $email => $rc) {
-            $name = $rc["name"]; $company = (string)($rc["company"] ?? "");
-            // Throttle so a big send doesn't saturate the SMTP relay (~8/sec).
-            if ($sent + $failed > 0) usleep(120000);
-            // Personalise per recipient: their first name + THEIR company filled into the tokens,
-            // so one bulk send addresses everyone individually rather than a generic blast.
-            $first = $name ? (preg_split('/\s+/', trim((string)$name))[0] ?? "") : "";
-            $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => (string)$name, "sender_name" => $coNamePlain, "company_name" => $company];
-            $subjR = ego_merge_tokens($subject, $ctx);
-            $bodyR = ego_merge_tokens($bodyTxt, $ctx);
-            // Per-recipient unsubscribe link so every marketing email carries a real opt-out.
-            $link = htmlspecialchars($unsubBase . "?e=" . rawurlencode($email) . "&t=" . ego_unsub_token($email));
-            $foot = "<p style='margin:18px 0 0;color:#9ca3af;font-size:12px'>You're receiving this from $coName. "
-                . "<a href='$link' style='color:#9ca3af'>Unsubscribe</a>.</p>";
-            $html = ego_email_shell($db, "", $imgHtml . nl2br(htmlspecialchars($bodyR)) . $foot);
-            try {
-                ego_send_mail($db, $email, $name ?: null, $subjR, $html);
-                $sent++;
-                db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subjR, $bodyR);
-                if ($audience === "leads") db_exec($db, "UPDATE ego_leads SET status='emailed', emailed_at=NOW() WHERE email=?", "s", $email);
-            } catch (Throwable $e) { $failed++; }
-        }
-        log_activity($db, null, (int)$actor["id"], "campaign_sent", ["audience" => $audience, "sent" => $sent, "failed" => $failed]);
-        send(["ok" => true, "sent" => $sent, "failed" => $failed, "recipients" => count($rows)]);
     }
 
     /* ===================== M17: LEAD PROSPECTING (AI web search, human-approved) ===================== */
@@ -4148,10 +4304,16 @@ switch ("$method $route") {
         if (!$ids) fail("Select at least one lead");
         $newStatus = str_ends_with($route, "approve") ? "approved" : "rejected";
         $place = implode(",", array_fill(0, count($ids), "?"));
-        db_exec($db, "UPDATE ego_leads SET status=? WHERE id IN ($place) AND status='found'",
-            "s" . str_repeat("i", count($ids)), $newStatus, ...$ids);
-        log_activity($db, null, (int)$actor["id"], "leads_$newStatus", ["ids" => $ids]);
-        send(["ok" => true, "count" => count($ids)]);
+        // approved_at is stamped HERE because that is what "send after approval" must measure from.
+        // v1 had no such column and measured step 1 from leads.created_at — the day we scraped them —
+        // so a lead approved a fortnight later got step 1 instantly.
+        $st = db_exec($db, "UPDATE ego_leads SET status=?, approved_at = IF(?='approved', NOW(), approved_at)
+                            WHERE id IN ($place) AND status='found'",
+            "ss" . str_repeat("i", count($ids)), $newStatus, $newStatus, ...$ids);
+        $n = $st->affected_rows;   // the REAL number. v1 returned count($ids) and cheerfully
+                                   // reported "Approved 12" having actually changed nothing.
+        log_activity($db, null, (int)$actor["id"], "leads_$newStatus", ["ids" => $ids, "changed" => $n]);
+        send(["ok" => true, "count" => $n]);
     }
     case "POST /leads/delete": {
         require_role($db, "admin");
@@ -4202,102 +4364,10 @@ switch ("$method $route") {
 
     // Send an individual email to ONE lead — merges {{first_name}}/{{company}} from the lead,
     // adds the PECR unsubscribe footer, records it in Sent, marks the lead emailed.
-    case "POST /leads/email": {
-        $actor = require_role($db, "admin");
-        ensure_leads_table($db);
-        rate_write($db, "w:leademail:" . $actor["id"], 60, 60);
-        $b = body();
-        $id = (int)($b["id"] ?? 0); if (!$id) fail("id required");
-        $subject = trim((string)($b["subject"] ?? "")); $bodyTxt = trim((string)($b["body"] ?? ""));
-        if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
-        $lead = db_one($db, "SELECT * FROM ego_leads WHERE id=?", "i", $id);
-        if (!$lead) fail("Lead not found", 404);
-        $email = strtolower(trim((string)($lead["email"] ?? "")));
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) fail("This lead has no valid email address");
-        if (db_one($db, "SELECT 1 FROM ego_subscribers WHERE email=? AND subscribed=0", "s", $email)) fail("This address has opted out — can't email it");
-        require_once __DIR__ . "/lib/mailer.php";
-        $coNamePlain = (db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED";
-        $coName = htmlspecialchars($coNamePlain);
-        $name = trim((string)($lead["name"] ?? "")) ?: trim((string)($lead["company"] ?? ""));
-        $first = $name !== "" ? (preg_split('/\s+/', $name)[0] ?? "") : "";
-        $ctx = ["first_name" => $first !== "" ? $first : "there", "name" => $name, "sender_name" => $coNamePlain,
-                "company_name" => trim((string)($lead["company"] ?? "")), "website" => trim((string)($lead["website"] ?? ""))];
-        $subjR = ego_merge_tokens($subject, $ctx);
-        $bodyR = ego_merge_tokens($bodyTxt, $ctx);
-        $scheme = (!empty($_SERVER["HTTPS"]) && $_SERVER["HTTPS"] !== "off") ? "https" : "http";
-        $unsub = htmlspecialchars("$scheme://" . ($_SERVER["HTTP_HOST"] ?? "egolimited.com") . "$base/unsubscribe?e=" . rawurlencode($email) . "&t=" . ego_unsub_token($email));
-        $foot = "<p style='margin:18px 0 0;color:#9ca3af;font-size:12px'>You're receiving this from $coName. <a href='$unsub' style='color:#9ca3af'>Unsubscribe</a>.</p>";
-        $html = ego_email_shell($db, "", nl2br(htmlspecialchars($bodyR)) . $foot);
-        try {
-            ego_send_mail($db, $email, $name ?: null, $subjR, $html);
-            db_exec($db, "INSERT INTO ego_messages (direction,channel,to_email,subject,body,status) VALUES ('outbound','campaign',?,?,?, 'sent')", "sss", $email, $subjR, $bodyR);
-            db_exec($db, "UPDATE ego_leads SET status='emailed', emailed_at=NOW() WHERE id=?", "i", $id);
-            log_activity($db, null, (int)$actor["id"], "lead_emailed", ["id" => $id, "email" => $email]);
-            send(["ok" => true, "to" => $email]);
-        } catch (Throwable $e) { client_error($e, "Send failed"); }
-    }
 
     /* ===================== M17: CAMPAIGN AUTOMATION (drip config for campaign_cron.php) ===================== */
-    case "GET /campaigns/automation": {
-        require_role($db, "admin");
-        ensure_campaign_automation($db);
-        ensure_leads_table($db);
-        $cfg2 = db_one($db, "SELECT enabled,batch_size FROM ego_campaign_automation WHERE id=1");
-        $steps = array_map(fn($s) => [
-            "id" => (int)$s["id"], "step_no" => (int)$s["step_no"], "delay_days" => (int)$s["delay_days"],
-            "subject" => $s["subject"], "body" => $s["body"], "image_url" => $s["image_url"],
-        ], db_all($db, "SELECT * FROM ego_campaign_steps ORDER BY step_no"));
-        $ready = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_leads WHERE status='approved'")["c"] ?? 0);
-        $done = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_leads WHERE status='emailed'")["c"] ?? 0);
-        send(["automation" => $cfg2, "steps" => $steps, "approved_leads" => $ready, "completed_leads" => $done]);
-    }
     // Global on/off + batch size (the per-touch content lives in /campaigns/steps).
-    case "POST /campaigns/automation": {
-        $actor = require_role($db, "admin");
-        ensure_campaign_automation($db);
-        $b = body();
-        $enabled = !empty($b["enabled"]) ? 1 : 0;
-        $batch = max(1, min(100, (int)($b["batch_size"] ?? 25)));
-        if ($enabled) {
-            $n = (int)(db_one($db, "SELECT COUNT(*) c FROM ego_campaign_steps WHERE subject<>'' AND body<>''")["c"] ?? 0);
-            if ($n === 0) fail("Add at least one step with a subject and message before turning the sequence on");
-        }
-        db_exec($db, "UPDATE ego_campaign_automation SET enabled=?,batch_size=?,updated_by=? WHERE id=1",
-            "iii", $enabled, $batch, (int)$actor["id"]);
-        log_activity($db, null, (int)$actor["id"], "campaign_automation_saved", ["enabled" => $enabled, "batch_size" => $batch]);
-        send(["ok" => true]);
-    }
     // Create or update one sequence step.
-    case "POST /campaigns/steps": {
-        $actor = require_role($db, "admin");
-        ensure_campaign_automation($db);
-        $b = body();
-        $subject = trim((string)($b["subject"] ?? ""));
-        $bodyTxt = trim((string)($b["body"] ?? ""));
-        if ($subject === "" || $bodyTxt === "") fail("A subject and message are required");
-        $delay = max(0, min(365, (int)($b["delay_days"] ?? 0)));
-        $img = trim((string)($b["image_url"] ?? "")) ?: null;
-        $id = (int)($b["id"] ?? 0);
-        if ($id) {
-            db_exec($db, "UPDATE ego_campaign_steps SET delay_days=?,subject=?,body=?,image_url=? WHERE id=?",
-                "isssi", $delay, $subject, $bodyTxt, $img, $id);
-        } else {
-            $next = (int)(db_one($db, "SELECT COALESCE(MAX(step_no),0)+1 n FROM ego_campaign_steps")["n"] ?? 1);
-            db_exec($db, "INSERT INTO ego_campaign_steps (step_no,delay_days,subject,body,image_url) VALUES (?,?,?,?,?)",
-                "iisss", $next, $delay, $subject, $bodyTxt, $img);
-            $id = (int)$db->insert_id;
-        }
-        log_activity($db, null, (int)$actor["id"], "campaign_step_saved", ["id" => $id]);
-        send(["id" => $id], 201);
-    }
-    case "POST /campaigns/steps/delete": {
-        $actor = require_role($db, "admin");
-        ensure_campaign_automation($db);
-        $id = (int)(body()["id"] ?? 0); if (!$id) fail("id required");
-        db_exec($db, "DELETE FROM ego_campaign_steps WHERE id=?", "i", $id);
-        log_activity($db, null, (int)$actor["id"], "campaign_step_deleted", ["id" => $id]);
-        send(["ok" => true]);
-    }
 
     case "POST /notes": {
         $actor = require_role($db, "admin");
@@ -4378,9 +4448,16 @@ switch ("$method $route") {
         ensure_subscribers_table($db);
         $e = strtolower(trim((string)($_GET["e"] ?? "")));
         $t = (string)($_GET["t"] ?? "");
-        $ok = filter_var($e, FILTER_VALIDATE_EMAIL) && hash_equals(ego_unsub_token($e), $t);
-        if ($ok) db_exec($db, "INSERT INTO ego_subscribers (email,source,subscribed) VALUES (?,'unsubscribe',0)
-                               ON DUPLICATE KEY UPDATE subscribed=0", "s", $e);
+        $ok = filter_var($e, FILTER_VALIDATE_EMAIL) && ego_unsub_token_valid($db, $e, $t);
+        if ($ok) {
+            // An opt-out must do three things, and v1 only did the first: record it, and then
+            // actually STOP the mail. A suppressed address that stays enrolled keeps getting drip
+            // steps, which is the exact complaint PECR exists to prevent.
+            db_exec($db, "INSERT INTO ego_subscribers (email,source,subscribed) VALUES (?,'unsubscribe',0)
+                          ON DUPLICATE KEY UPDATE subscribed=0", "s", $e);
+            supp_add($db, $e, "unsubscribed", "one-click unsubscribe");
+            camp_stop_email($db, $e, "unsubscribed", "unsubscribed");
+        }
         $co = htmlspecialchars((db_one($db, "SELECT company_name FROM ego_company_settings ORDER BY id LIMIT 1")["company_name"] ?? "") ?: "EGO LIMITED");
         $msg = $ok
             ? "<h2 style='color:#171816;margin:0 0 8px'>You're unsubscribed</h2><p style='color:#4b5563'>You won't receive any more marketing emails from $co. You'll still get essential messages about jobs you book with us.</p>"

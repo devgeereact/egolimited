@@ -722,3 +722,129 @@ ALTER TABLE ego_activity_log    ADD INDEX IF NOT EXISTS idx_ego_act_actor (actor
 -- ego_payments is a ledger: every read filters `deleted_at IS NULL`.
 ALTER TABLE ego_payments        ADD INDEX IF NOT EXISTS idx_ego_pay_invoice (invoice_id, deleted_at);
 ALTER TABLE ego_payments        ADD INDEX IF NOT EXISTS idx_ego_pay_paid_on (paid_on);
+
+-- ============================================================================
+-- CAMPAIGNS v2 (2026-07-13). See docs/CAMPAIGNS-V2.md.
+--
+-- v1 had no concept of "a campaign": one global drip toggle, and progress tracked by an enum on
+-- the lead itself. That meant a manual bulk send could flip leads.status and silently abandon every
+-- in-flight sequence. Here, ENROLLMENT is the spine: a lead's membership of a campaign is a row
+-- with its own state and cursor, so nothing outside the campaign can clobber its progress.
+--
+-- These tables also fix a real drift problem: ego_subscribers, ego_email_templates,
+-- ego_campaign_steps and ego_campaign_sends existed ONLY as runtime CREATE TABLE calls inside PHP
+-- (two of them duplicated verbatim in campaign_cron.php), so a fresh `mysql < schema.sql` produced
+-- a database missing them entirely. schema.sql is the source of truth.
+-- ============================================================================
+
+CREATE TABLE IF NOT EXISTS ego_campaigns (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  name        VARCHAR(160) NOT NULL,
+  status      ENUM('draft','active','paused','completed','archived') NOT NULL DEFAULT 'draft',
+  audience    ENUM('leads','subscribers','customers') NOT NULL DEFAULT 'leads',
+  from_name   VARCHAR(160) NULL,           -- falls back to company settings when null
+  from_email  VARCHAR(190) NULL,
+  created_by  INT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  started_at  DATETIME NULL,
+  deleted_at  DATETIME NULL,
+  INDEX idx_ego_camp_status (status, deleted_at),
+  CONSTRAINT fk_ego_camp_user FOREIGN KEY (created_by) REFERENCES ego_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Ordered touches. delay_days is measured from the PREVIOUS send (step 1: from enrolment) — v1
+-- measured step 1 from leads.created_at, i.e. when we scraped them, so a lead approved 10 days
+-- later fired step 1 instantly despite the UI promising a delay.
+CREATE TABLE IF NOT EXISTS ego_campaign_steps_v2 (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  campaign_id INT NOT NULL,
+  step_no     INT NOT NULL,
+  delay_days  INT NOT NULL DEFAULT 0,
+  subject     VARCHAR(255) NOT NULL,
+  body        MEDIUMTEXT NOT NULL,
+  image_url   VARCHAR(500) NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_camp_step (campaign_id, step_no),
+  CONSTRAINT fk_ego_step_camp FOREIGN KEY (campaign_id) REFERENCES ego_campaigns(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One row per recipient per campaign. THIS is where progress lives.
+-- Only 'active' is ever picked up by the worker; every other state is terminal and says why.
+CREATE TABLE IF NOT EXISTS ego_campaign_enrollments (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  campaign_id  INT NOT NULL,
+  lead_id      INT NULL,                    -- null when the audience isn't leads
+  email        VARCHAR(190) NOT NULL,
+  name         VARCHAR(160) NULL,
+  company      VARCHAR(190) NULL,
+  website      VARCHAR(255) NULL,
+  state        ENUM('active','completed','replied','bounced','unsubscribed','stopped') NOT NULL DEFAULT 'active',
+  current_step INT NOT NULL DEFAULT 0,      -- last step actually SENT (0 = none yet)
+  next_due_at  DATETIME NULL,               -- when the next step becomes eligible
+  stop_reason  VARCHAR(190) NULL,
+  enrolled_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_camp_email (campaign_id, email),   -- can't enrol the same address twice
+  INDEX idx_ego_enr_due (state, next_due_at),      -- the worker's hot query
+  INDEX idx_ego_enr_email (email),
+  CONSTRAINT fk_ego_enr_camp FOREIGN KEY (campaign_id) REFERENCES ego_campaigns(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ego_enr_lead FOREIGN KEY (lead_id) REFERENCES ego_leads(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- The send queue AND the send log — the same rows, moving through states. Being a queue is what
+-- makes a killed worker harmless: undrained rows are simply still 'queued'. v1 sent inside the HTTP
+-- request and lost the whole broadcast if PHP timed out, with no record of where it stopped.
+CREATE TABLE IF NOT EXISTS ego_campaign_sends_v2 (
+  id            INT AUTO_INCREMENT PRIMARY KEY,
+  campaign_id   INT NOT NULL,
+  enrollment_id INT NOT NULL,
+  step_no       INT NOT NULL,
+  email         VARCHAR(190) NOT NULL,
+  subject       VARCHAR(255) NULL,
+  status        ENUM('queued','sending','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+  error         VARCHAR(255) NULL,
+  queued_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at       DATETIME NULL,
+  UNIQUE KEY uq_enr_step (enrollment_id, step_no), -- a step can never be sent twice
+  INDEX idx_ego_send_status (status, queued_at),
+  CONSTRAINT fk_ego_send_camp FOREIGN KEY (campaign_id) REFERENCES ego_campaigns(id) ON DELETE CASCADE,
+  CONSTRAINT fk_ego_send_enr FOREIGN KEY (enrollment_id) REFERENCES ego_campaign_enrollments(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Suppression is a TABLE, not a flag on a subscriber row. Checked when enrolling and again
+-- immediately before every send (the list can change in between). Staff cannot un-suppress by
+-- retyping an address — v1's `ON DUPLICATE KEY UPDATE subscribed=1` silently resurrected people
+-- who had opted out, which is the one thing PECR does not forgive.
+CREATE TABLE IF NOT EXISTS ego_suppressions (
+  email      VARCHAR(190) PRIMARY KEY,
+  reason     ENUM('unsubscribed','bounced','complained','manual') NOT NULL,
+  source     VARCHAR(120) NULL,             -- e.g. 'campaign 4 step 2', 'imap bounce'
+  note       VARCHAR(255) NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ego_supp_reason (reason)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Tables that only ever existed at runtime in PHP. Declared properly now.
+CREATE TABLE IF NOT EXISTS ego_subscribers (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  email       VARCHAR(190) NOT NULL UNIQUE,
+  name        VARCHAR(160) NULL,
+  source      VARCHAR(60) NULL,          -- how they got here: 'unsubscribe', 'manual', …
+  subscribed  TINYINT(1) NOT NULL DEFAULT 1,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+ALTER TABLE ego_subscribers ADD COLUMN IF NOT EXISTS source VARCHAR(60) NULL;
+
+CREATE TABLE IF NOT EXISTS ego_email_templates (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  name       VARCHAR(160) NOT NULL,
+  subject    VARCHAR(255) NULL,
+  body       MEDIUMTEXT NOT NULL,
+  preset     TINYINT(1) NOT NULL DEFAULT 0,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Leads: when a human APPROVED them, which is what a "send after approval" delay must measure from.
+ALTER TABLE ego_leads ADD COLUMN IF NOT EXISTS approved_at DATETIME NULL;
+ALTER TABLE ego_leads ADD COLUMN IF NOT EXISTS website VARCHAR(255) NULL;

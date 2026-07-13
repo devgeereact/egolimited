@@ -77,9 +77,34 @@ function ego_merge_tokens(string $text, array $ctx): string {
     return $out;
 }
 
-/** Stable, non-trivial one-click unsubscribe token for a recipient (UK PECR opt-out). */
-function ego_unsub_token(string $email): string {
-    return substr(hash_hmac("sha256", strtolower(trim($email)), "ego-unsub-v1"), 0, 24);
+/**
+ * Stable one-click unsubscribe token (UK PECR opt-out).
+ *
+ * The key was the literal string "ego-unsub-v1", committed in this repository — so anyone who could
+ * read the source could forge an opt-out link for any address on earth. It is now a per-install
+ * secret, generated once and stored server-side in ego_integrations. Existing links keep working:
+ * if no secret exists yet we mint one and store it, and the old literal is accepted as a fallback
+ * so tokens already sitting in people's inboxes don't break.
+ */
+function ego_unsub_secret(mysqli $db): string {
+    $s = integ($db, "unsub_secret");
+    if ($s) return $s;
+    $s = bin2hex(random_bytes(32));
+    db_exec($db, "INSERT INTO ego_integrations (k, v) VALUES ('unsub_secret', ?) ON DUPLICATE KEY UPDATE v=VALUES(v)", "s", $s);
+    return $s;
+}
+
+function ego_unsub_token(mysqli $db, string $email): string {
+    return substr(hash_hmac("sha256", strtolower(trim($email)), ego_unsub_secret($db)), 0, 24);
+}
+
+/** Accepts the current token OR one minted under the old hardcoded key, so links already in the
+ *  wild keep unsubscribing people. An opt-out that 404s is worse than a weak token. */
+function ego_unsub_token_valid(mysqli $db, string $email, string $token): bool {
+    $e = strtolower(trim($email));
+    if (hash_equals(ego_unsub_token($db, $e), $token)) return true;
+    $legacy = substr(hash_hmac("sha256", $e, "ego-unsub-v1"), 0, 24);
+    return hash_equals($legacy, $token);
 }
 
 /** Readable plain-text from our HTML emails — for the multipart/alternative fallback. */
@@ -155,6 +180,31 @@ function ego_send_mail(mysqli $db, string $to, ?string $toName, string $subject,
         catch (Throwable $e) { /* fall back to local sendmail */ }
     }
     ego_send_phpmail($db, $to, $toName, $subject, $html, $attachments);
+}
+
+/**
+ * Same send, but it TELLS YOU when it failed.
+ *
+ * ego_send_mail() above swallows an SMTP exception and silently falls back to local sendmail, so a
+ * misconfigured relay never surfaces as an error — deliverability just quietly degrades and nobody
+ * finds out. That is tolerable for a one-off invoice email a human is watching; it is not tolerable
+ * for a campaign worker, which must record exactly which sends failed and why so the queue can show
+ * it and a person can act. Campaigns use this; nothing else changes.
+ *
+ * Returns true if the message was accepted by SMTP or by sendmail. Throws only on programmer error.
+ */
+function ego_send_mail_checked(mysqli $db, string $to, ?string $toName, string $subject, string $html, array $attachments = []): bool {
+    if (ego_is_undeliverable($to)) return false; // reserved/demo domain: not an error, but not a send either
+    $lastError = null;
+    if (integ($db, "smtp_host")) {
+        try { ego_send_smtp($db, $to, $toName, $subject, $html, $attachments); return true; }
+        catch (Throwable $e) { $lastError = $e; }
+    }
+    try { ego_send_phpmail($db, $to, $toName, $subject, $html, $attachments); return true; }
+    catch (Throwable $e) {
+        error_log("[ego mail] send to {$to} failed: " . ($lastError?->getMessage() ?? "") . " / " . $e->getMessage());
+        return false;
+    }
 }
 
 /** Local sendmail (works from web on cPanel; no outbound socket needed). */
