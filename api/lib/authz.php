@@ -218,6 +218,13 @@ const ROUTE_ROLES = [
     "POST /pipeline/note"     => "office",
     "POST /pipeline/owner"    => "office",
     "POST /pipeline/done"     => "office",
+    // Tenders — public-sector work notices pulled from the official Contracts Finder OCDS API.
+    // Reading and triaging is office work. /tenders/sync hits a third-party API, so it is capped
+    // by rate_write() as well; deciding is where a tender enters the Pipeline.
+    "GET /tenders"            => "office",
+    "GET /tenders/get"        => "office",
+    "POST /tenders/sync"      => "office",
+    "POST /tenders/decide"    => "office",
     // Campaigns v2 (docs/CAMPAIGNS-V2.md). Nothing here sends mail inline — sends are queued and
     // drained by campaign_worker.php, so a killed request can never leave a half-finished broadcast.
     "GET /campaigns"               => "office",

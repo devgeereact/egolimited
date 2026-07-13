@@ -58,10 +58,18 @@ export default function LeadsPane({ campaigns }: { campaigns: Campaign[] }) {
     if (!query.trim()) { toast.error("Describe the businesses you're looking for"); return }
     setSearching(true)
     try {
-      const r = await api<{ found: number; skipped: number }>("/leads/search", {
+      const r = await api<{ found: number; skipped: number; no_email: number }>("/leads/search", {
         method: "POST", body: { query, location: where },
       })
-      toast.success(`${r.found} new · ${r.skipped} already known`)
+      // Report what actually happened, including the businesses we had to drop. The old toast said
+      // "9 new" while the list stayed empty, because leads with no published email were counted as
+      // found and then filtered out of every view.
+      const bits = [
+        `${r.found} new`,
+        r.skipped ? `${r.skipped} already known` : null,
+        r.no_email ? `${r.no_email} had no public email` : null,
+      ].filter(Boolean)
+      toast.success(bits.join(" · "))
       setStatus("found")
       invalidate("/leads")
     } catch (e) {

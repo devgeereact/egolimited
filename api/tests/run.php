@@ -257,6 +257,123 @@ eq("dormant", stage_for(array_merge($base, [
     "has_job" => true, "last_job_at" => "2024-06-01 00:00:00", "now" => "2026-07-13 00:00:00",
 ])), "…and goes dormant on the same 12-month rule");
 
+// ---------------------------------------------------------------- tenders (Contracts Finder)
+/**
+ * Replayed against a REAL Contracts Finder payload, saved from the live OCDS API — not a fixture I
+ * invented. Hand-written fixtures only ever prove that the parser agrees with my assumptions about
+ * the feed, which is precisely the thing that is wrong when a feed breaks. This one caught the
+ * notice-URL bug: building the URL from tender.id looks right, reads right, and 403s.
+ */
+require_once __DIR__ . "/../lib/tenders.php";
+
+$fx = json_decode(file_get_contents(__DIR__ . "/fixtures/contracts_finder.json"), true);
+[$electrical, $landscaping, $taxi] = array_map("tender_parse", $fx["releases"]);
+
+$prefs = ["cpv" => explode(",", TENDER_CPV_DEFAULT), "keywords" => explode(",", TENDER_KEYWORDS_DEFAULT), "postcodes" => []];
+
+eq("CA18216 - R9309 Electrical Upgrade EGH Ph 2", $electrical["title"], "parses the title");
+eq("45317000", $electrical["cpv"], "parses the CPV code");
+eq("Epsom & St Helier University Hospitals NHS Trust", $electrical["buyer"], "parses the buyer");
+ok(str_starts_with((string) $electrical["url"], "https://www.contractsfinder.service.gov.uk/Notice/"),
+    "takes the notice URL from documents[] — building it from tender.id returns 403");
+ok($electrical["deadline_at"] !== null, "parses the closing date — the only field that makes the list urgent");
+ok($electrical["published_at"] !== null, "parses the publication date");
+
+// Delivery addresses are a grab-bag: one real postcode buried among "Europe", "Isle of Man" and
+// "Rest of the World". Taking the first COUNTRY would tell us nothing about sending a van.
+eq("BT34 2QU", $landscaping["postcode"], "digs the real postcode out of the delivery-address grab-bag");
+
+ok(tender_match($electrical, $prefs) !== null, "an electrical upgrade at an NHS trust is work EGO can do");
+ok(str_contains((string) tender_match($electrical, $prefs), "45317000"),
+    "…and says WHY it matched, so a human can triage in one glance");
+eq(null, tender_match($taxi, $prefs), "a taxi framework is not a maintenance job");
+
+// THE TRAP. This landscaping notice's DESCRIPTION contains "Ground Maintenance" and "Land
+// Clearance". Matching keywords against descriptions would pull in half the register — every
+// notice that merely mentions a trade on site. Keywords are matched on the TITLE only; this one
+// still matches, but on its CPV, which is the buyer's own classification rather than our guess.
+ok(str_contains(strtolower($landscaping["description"]), "maintenance"),
+    "the trap fixture really does say 'maintenance' in its description");
+$titleOnly = ["cpv" => [], "keywords" => ["maintenance"], "postcodes" => []];
+eq(null, tender_match($landscaping, $titleOnly),
+    "a description that merely mentions 'maintenance' must NOT match — titles only");
+
+// Area filter: only ever excludes when we KNOW the answer is no.
+eq(true,  tender_in_area($landscaping, ["cpv" => [], "keywords" => [], "postcodes" => []]), "no postcode filter set — the whole UK");
+eq(true,  tender_in_area($landscaping, ["cpv" => [], "keywords" => [], "postcodes" => ["bt"]]), "BT34 is inside a BT filter");
+eq(false, tender_in_area($landscaping, ["cpv" => [], "keywords" => [], "postcodes" => ["se", "sw"]]), "BT34 is not London");
+$noPostcode = array_merge($landscaping, ["postcode" => null]);
+eq(true, tender_in_area($noPostcode, ["cpv" => [], "keywords" => [], "postcodes" => ["se"]]),
+    "a notice with no stated postcode is kept — unknown is not the same as wrong");
+
+// ---------------------------------------------------------------- foreach-by-reference footgun
+/**
+ * A STATIC test, not a unit test — because the bug it catches is invisible to unit tests.
+ *
+ * `foreach ($rows as &$r)` leaves $r bound to the last element FOREVER: PHP has no block scope, so
+ * the reference outlives the loop. Any later `foreach (... as $r)` in the same request then writes
+ * each of its own rows straight through that reference, quietly destroying the last row of $rows.
+ *
+ * This shipped. GET /leads cast its rows by reference, then reused $r to build the status counts —
+ * so the last lead was replaced by ["status" => "found", "c" => 1]. The list said "1 lead" and drew
+ * a row with no name, no company and no email. Nothing failed, nothing logged, nothing 500'd; the
+ * lead was simply gone. index.php has 46 more by-reference loops, and today none of them are wrong.
+ * The point of this test is that the 47th cannot be.
+ */
+// Strip comments with PHP's own tokenizer before scanning. A regex over raw lines reads the comment
+// ABOVE the fix — which quotes the broken code as a warning — and flags it as the bug. A checker
+// that cannot tell code from prose about code will cry wolf until someone deletes it.
+$tokens = token_get_all(file_get_contents(__DIR__ . "/../index.php"));
+$stripped = "";
+foreach ($tokens as $t) {
+    if (is_array($t)) {
+        // Keep the line count identical, so every offence reports the real line number in index.php.
+        $stripped .= in_array($t[0], [T_COMMENT, T_DOC_COMMENT], true)
+            ? str_repeat("\n", substr_count($t[1], "\n"))
+            : $t[1];
+    } else {
+        $stripped .= $t;
+    }
+}
+$src = explode("\n", $stripped);
+$bind = '/foreach\s*\(.*\bas\s+(?:\$\w+\s*=>\s*)?&\$(\w+)\s*\)/';
+$use  = '/foreach\s*\(.*\bas\s+(?:\$\w+\s*=>\s*)?&?\$(\w+)\s*\)/';
+
+// Scope = one `case` of the switch: exactly one route runs per request, so that is the blast radius.
+$starts = [];
+foreach ($src as $i => $line) {
+    if (preg_match('/^\s*case "(GET|POST|PUT|DELETE|PATCH) /', $line)) $starts[] = $i;
+}
+$offences = [];
+foreach ($starts as $k => $start) {
+    $end = $starts[$k + 1] ?? count($src);
+    preg_match('/case "((?:GET|POST|PUT|DELETE|PATCH) [^"]+)"/', $src[$start], $m);
+    $route = $m[1] ?? "?";
+    $live = [];   // var => line where it was bound by reference and not yet released
+    for ($i = $start; $i < $end; $i++) {
+        $line = $src[$i];
+        $isBind = preg_match($bind, $line);
+        // Reuse of a still-live reference as a loop variable, or as an assignment target.
+        if (!$isBind && preg_match($use, $line, $u) && isset($live[$u[1]])) {
+            $offences[] = "$route: \$" . $u[1] . " bound by reference on line " . $live[$u[1]]
+                . " is reused as a loop variable on line " . ($i + 1) . " — it will overwrite the last element";
+            unset($live[$u[1]]);
+        }
+        foreach (array_keys($live) as $v) {
+            if (preg_match('/(?<![\w$])\$' . $v . '\s*=(?!=)/', $line)) {
+                $offences[] = "$route: \$$v bound by reference on line {$live[$v]} is assigned to on line "
+                    . ($i + 1) . " — it will overwrite the last element";
+                unset($live[$v]);
+            }
+        }
+        if ($isBind && preg_match($bind, $line, $b)) $live[$b[1]] = $i + 1;
+        if (preg_match_all('/unset\(\$(\w+)\)/', $line, $un)) {
+            foreach ($un[1] as $v) unset($live[$v]);   // unset($r) releases the reference — the correct fix
+        }
+    }
+}
+ok($offences === [], "no foreach-by-reference variable is reused after its loop\n    " . implode("\n    ", $offences));
+
 // ---------------------------------------------------------------- report
 printf("\n  %d passed, %d failed\n", $T["pass"], $T["fail"]);
 foreach ($T["failures"] as $f) printf("  FAIL: %s\n", $f);

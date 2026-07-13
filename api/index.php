@@ -269,6 +269,10 @@ function integration_fields(): array {
         "imap_host" => false, "imap_port" => false, "imap_user" => false, "imap_pass" => true, "imap_secure" => false,
         // Google reviews import (Places API)
         "google_places_key" => true, "google_place_id" => false,
+        // Contracts Finder tender feed. No key: the API is open. These tune WHAT we consider work —
+        // CPV code prefixes, title keywords, and optional postcode prefixes we can send a van to.
+        // Blank means "use the defaults in lib/tenders.php". Not secret, so not masked.
+        "tenders_cpv" => false, "tenders_keywords" => false, "tenders_postcodes" => false,
     ];
 }
 /** Read one integration value (server-side only). */
@@ -4144,6 +4148,122 @@ switch ("$method $route") {
         send(["ok" => true]);
     }
 
+    /* ============================ TENDERS (api/lib/tenders.php) ============================
+     * Public-sector work notices from the official Contracts Finder OCDS API. This is the only
+     * INBOUND source of work in the system: everything else is us emailing strangers and hoping.
+     *
+     * The list is ordered by DEADLINE, not by date found, because a tender is worthless the moment
+     * it closes and there is no second chance. Shortlisting is what makes this more than a reading
+     * list — it puts the buyer in the Pipeline with the deadline as their next action, so a tender
+     * cannot rot quietly in a tab.
+     */
+    case "GET /tenders": {
+        require_role($db, "admin");
+        require_once __DIR__ . "/lib/tenders.php";
+        ensure_tenders_table($db);
+        $status = trim((string)($_GET["status"] ?? "new"));
+        if (!in_array($status, ["new", "shortlisted", "rejected", "bid", "won", "lost"], true)) $status = "new";
+
+        // Soonest deadline first, and never show one that has already closed: a dead deadline at the
+        // top of a list sorted by urgency actively misleads. Notices with no stated deadline sort last.
+        $rows = db_all($db,
+            "SELECT id, ocid, title, buyer, buyer_email, cpv, cpv_label, value_amount, currency, postcode,
+                    region, sme, category, match_reason, url, published_at, deadline_at, status, customer_id
+             FROM ego_tenders
+             WHERE status=? AND (deadline_at IS NULL OR deadline_at >= NOW())
+             ORDER BY deadline_at IS NULL, deadline_at ASC LIMIT 300", "s", $status);
+        $rows = array_map(static function (array $r): array {
+            $r["id"] = (int) $r["id"];
+            $r["sme"] = (int) $r["sme"];
+            $r["value_amount"] = $r["value_amount"] !== null ? (float) $r["value_amount"] : null;
+            $r["customer_id"] = $r["customer_id"] !== null ? (int) $r["customer_id"] : null;
+            return $r;
+        }, $rows);
+
+        $counts = [];
+        foreach (db_all($db, "SELECT status, COUNT(*) c FROM ego_tenders
+                              WHERE deadline_at IS NULL OR deadline_at >= NOW() GROUP BY status") as $c) {
+            $counts[$c["status"]] = (int) $c["c"];
+        }
+        // The number that should make someone move: open notices closing inside a week.
+        $soon = db_one($db, "SELECT COUNT(*) c FROM ego_tenders
+                             WHERE status='new' AND deadline_at IS NOT NULL
+                               AND deadline_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 7 DAY)");
+        send(["tenders" => $rows, "counts" => $counts, "closing_soon" => (int) ($soon["c"] ?? 0)]);
+    }
+
+    case "GET /tenders/get": {
+        require_role($db, "admin");
+        require_once __DIR__ . "/lib/tenders.php";
+        ensure_tenders_table($db);
+        $id = (int)($_GET["id"] ?? 0);
+        $t = db_one($db, "SELECT * FROM ego_tenders WHERE id=?", "i", $id);
+        if (!$t) fail("Not found", 404);
+        $t["id"] = (int) $t["id"];
+        $t["sme"] = (int) $t["sme"];
+        $t["value_amount"] = $t["value_amount"] !== null ? (float) $t["value_amount"] : null;
+        $t["customer_id"] = $t["customer_id"] !== null ? (int) $t["customer_id"] : null;
+        send(["tender" => $t]);
+    }
+
+    case "POST /tenders/sync": {
+        $actor = require_role($db, "admin");
+        require_once __DIR__ . "/lib/tenders.php";
+        // A third-party API we do not own. The daily cron does the real work; this is the "check now"
+        // button, and it must not let an impatient click turn into a hammer on a public service.
+        rate_write($db, "w:tendersync:" . $actor["id"], 4, 3600);
+        $days = max(1, min(30, (int)(body()["days"] ?? 7)));
+        try { $r = tender_sync($db, $days); }
+        catch (Throwable $e) { client_error($e, "Couldn't reach Contracts Finder"); }
+        log_activity($db, null, (int)$actor["id"], "tenders_synced", $r);
+        send($r);
+    }
+
+    case "POST /tenders/decide": {
+        $actor = require_role($db, "admin");
+        require_once __DIR__ . "/lib/tenders.php";
+        require_once __DIR__ . "/lib/pipeline.php";
+        ensure_tenders_table($db);
+        $b = body();
+        $id = (int)($b["id"] ?? 0);
+        $decision = (string)($b["status"] ?? "");
+        if (!in_array($decision, ["shortlisted", "rejected", "bid", "won", "lost", "new"], true)) fail("Unknown decision");
+        $t = db_one($db, "SELECT * FROM ego_tenders WHERE id=?", "i", $id);
+        if (!$t) fail("Not found", 404);
+
+        $customerId = $t["customer_id"] !== null ? (int) $t["customer_id"] : null;
+
+        // Shortlisting is the moment a notice becomes WORK. Put the buyer in the Pipeline and give
+        // them the tender's own deadline, minus three days to actually write the thing. Without this
+        // the tender is just a bookmark, and bookmarks do not get bid on.
+        if ($decision === "shortlisted" && $customerId === null && $t["buyer_email"]) {
+            $customerId = contact_upsert_by_email($db, [
+                "email" => $t["buyer_email"],
+                "name" => $t["buyer"],
+                "company" => $t["buyer"],
+                "source" => "referral",   // inbound public notice — not us cold-emailing them
+            ]) ?: null;
+        }
+        if ($decision === "shortlisted" && $customerId) {
+            // Three working days is the difference between a bid and an apology. If the deadline is
+            // already inside that window the answer is "now", not a date in the past.
+            $due = $t["deadline_at"]
+                ? max(strtotime((string) $t["deadline_at"]) - 3 * 86400, time())
+                : time();
+            db_exec($db, "UPDATE ego_customers SET next_action_at=? WHERE id=? AND deleted_at IS NULL",
+                "si", date("Y-m-d H:i:s", $due), $customerId);
+            contact_log($db, $customerId, "tender",
+                "Shortlisted: " . (string) $t["title"]
+                . ($t["deadline_at"] ? " — closes " . date("j M Y, H:i", strtotime((string) $t["deadline_at"])) : ""),
+                (int) $actor["id"]);
+        }
+
+        db_exec($db, "UPDATE ego_tenders SET status=?, customer_id=?, decided_by=?, decided_at=NOW() WHERE id=?",
+            "siii", $decision, $customerId, (int) $actor["id"], $id);
+        log_activity($db, null, (int)$actor["id"], "tender_$decision", ["id" => $id, "title" => $t["title"]]);
+        send(["ok" => true, "customer_id" => $customerId]);
+    }
+
     /* ======================= CAMPAIGNS v2 (docs/CAMPAIGNS-V2.md) =======================
      * A campaign is a real object: steps, enrollments, sends. Progress lives on the ENROLLMENT,
      * so nothing outside a campaign can clobber it — v1 tracked progress with an enum on the lead,
@@ -4432,28 +4552,32 @@ switch ("$method $route") {
         if (preg_match('/\[.*\]/s', $text, $m)) $text = $m[0];
         $items = json_decode($text, true);
         if (!is_array($items)) fail("The search didn't return usable results — try rephrasing", 502);
-        $found = 0; $skipped = 0;
+        $found = 0; $skipped = 0; $noEmail = 0;
         foreach (array_slice($items, 0, 20) as $it) {
             if (!is_array($it)) continue;
             $email = strtolower(trim((string)($it["email"] ?? "")));
             $email = ($email === "" || strtolower($email) === "null" || !filter_var($email, FILTER_VALIDATE_EMAIL)) ? null : $email;
             $name = trim((string)($it["name"] ?? "")) ?: null;
             $company = trim((string)($it["company"] ?? "")) ?: null;
-            if (!$email && !$company) { $skipped++; continue; } // nothing to act on
+            // A business with no published address is not a lead — it is a black hole. The old rule
+            // was `if (!$email && !$company) skip`, so a company with no email WAS inserted, while
+            // GET /leads only ever returns rows that have one. The row could never be seen, could
+            // never be emailed, and still occupied the unique index on email — so a later search
+            // that DID find the address skipped it as "already known". The search reported "9 new"
+            // and the list showed nothing. Say so out loud instead.
+            if (!$email) { $noEmail++; continue; }
             $website = trim((string)($it["website"] ?? "")) ?: null;
             $src = trim((string)($it["source_url"] ?? "")) ?: null;
             $note = trim((string)($it["note"] ?? "")) ?: null;
-            if ($email) {
-                // De-dupe by email; leave existing status alone if it's already been triaged.
-                $exists = db_one($db, "SELECT id FROM ego_leads WHERE email=?", "s", $email);
-                if ($exists) { $skipped++; continue; }
-            }
+            // De-dupe by email; leave existing status alone if it's already been triaged.
+            if (db_one($db, "SELECT id FROM ego_leads WHERE email=?", "s", $email)) { $skipped++; continue; }
             db_exec($db, "INSERT INTO ego_leads (name,company,email,website,source_url,note,search_query,found_by) VALUES (?,?,?,?,?,?,?,?)",
                 "sssssssi", $name, $company, $email, $website, $src, $note, $query, (int)$actor["id"]);
             $found++;
         }
-        log_activity($db, null, (int)$actor["id"], "leads_searched", ["query" => $query, "found" => $found, "skipped" => $skipped]);
-        send(["found" => $found, "skipped" => $skipped], 201);
+        log_activity($db, null, (int)$actor["id"], "leads_searched",
+            ["query" => $query, "found" => $found, "skipped" => $skipped, "no_email" => $noEmail]);
+        send(["found" => $found, "skipped" => $skipped, "no_email" => $noEmail], 201);
     }
     case "GET /leads": {
         require_role($db, "admin");
@@ -4464,9 +4588,23 @@ switch ("$method $route") {
         $rows = $status !== ""
             ? db_all($db, "SELECT * FROM ego_leads WHERE status=? AND $emailOnly ORDER BY id DESC LIMIT 500", "s", $status)
             : db_all($db, "SELECT * FROM ego_leads WHERE $emailOnly ORDER BY id DESC LIMIT 500");
-        foreach ($rows as &$r) { $r["id"] = (int)$r["id"]; $r["found_by"] = $r["found_by"] !== null ? (int)$r["found_by"] : null; }
+        // No `as &$r` here, deliberately. It used to read:
+        //     foreach ($rows as &$r) { ...cast... }
+        //     foreach (db_all(... GROUP BY status) as $r) $counts[$r["status"]] = ...
+        // PHP has no block scope, so after the first loop $r was still a REFERENCE to the last lead.
+        // The second loop then wrote each status-count row straight THROUGH that reference, replacing
+        // the last lead with ["status" => "found", "c" => 1]. The list said "1 lead" and rendered a
+        // row with no name, no company and no email — because the lead had literally been overwritten
+        // by a count. With one lead you lose everything; with fifty you silently lose the fiftieth.
+        $rows = array_map(static function (array $r): array {
+            $r["id"] = (int) $r["id"];
+            $r["found_by"] = $r["found_by"] !== null ? (int) $r["found_by"] : null;
+            return $r;
+        }, $rows);
         $counts = [];
-        foreach (db_all($db, "SELECT status, COUNT(*) c FROM ego_leads WHERE $emailOnly GROUP BY status") as $r) $counts[$r["status"]] = (int)$r["c"];
+        foreach (db_all($db, "SELECT status, COUNT(*) c FROM ego_leads WHERE $emailOnly GROUP BY status") as $c) {
+            $counts[$c["status"]] = (int) $c["c"];
+        }
         send(["leads" => $rows, "counts" => $counts]);
     }
     case "POST /leads/approve":

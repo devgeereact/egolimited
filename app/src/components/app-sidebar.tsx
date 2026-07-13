@@ -108,6 +108,7 @@ const NAV: EgoSection[] = [
         min: "manager",
         items: [
           { title: "Pipeline", url: "ego/pipeline" },
+          { title: "Tenders", url: "ego/tenders" },
           { title: "Sequences", url: "ego/campaigns" },
         ],
       },

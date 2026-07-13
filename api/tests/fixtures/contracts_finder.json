@@ -1,0 +1,342 @@
+{
+ "releases": [
+  {
+   "ocid": "ocds-b5fd17-555ca74b-37f7-40b7-a516-e87f352b7b3a",
+   "id": "b0089365-fe63-4f99-8c0b-fe62a620d2e3-905675",
+   "language": "en",
+   "date": "2026-07-10T15:48:10+01:00",
+   "tag": [
+    "tender"
+   ],
+   "initiationType": "tender",
+   "tender": {
+    "id": "b69a0db8-5b49-468c-9945-bbc0e6462a37",
+    "title": "CA18216 - R9309 Electrical Upgrade EGH Ph 2",
+    "description": "The Trust intends to undertake an upgrade of the electrical infrastructure at Epsom General Hospital as part of the wider Electrical Infrastructure Condition Report (EICR) compliance programme. This package of works addresses identified defects and non compliances within the electrical and lighting installations across all floors of the Headley, Bradbury, and Denbies Wings of the estate.\r\nAs part of the EICR survey findings, the scope of works includes, but is not limited to:\r\n\u2022\tExisting electrical validation\r\n\u2022\tDecommissioning and removal of existing equipment\r\n\u2022\tInstallation, testing, and co",
+    "datePublished": "2026-07-10T15:48:10+01:00",
+    "status": "active",
+    "classification": {
+     "scheme": "CPV",
+     "id": "45317000",
+     "description": "Other electrical installation work"
+    },
+    "additionalClassifications": [
+     {
+      "scheme": "CPV",
+      "id": "45310000",
+      "description": "Electrical installation work"
+     },
+     {
+      "scheme": "CPV",
+      "id": "45311100",
+      "description": "Electrical wiring work"
+     }
+    ],
+    "items": [
+     {
+      "id": "1",
+      "deliveryAddresses": [
+       {
+        "postalCode": "KT17 1HB"
+       },
+       {
+        "countryName": "British Oversea Territories"
+       },
+       {
+        "countryName": "Channel Islands"
+       },
+       {
+        "countryName": "Europe"
+       },
+       {
+        "countryName": "Isle of Man"
+       },
+       {
+        "countryName": "Rest of the World"
+       },
+       {
+        "countryName": "United Kingdom"
+       }
+      ]
+     }
+    ],
+    "value": {
+     "amount": 200000,
+     "currency": "GBP"
+    },
+    "procurementMethod": "open",
+    "procurementMethodDetails": "Open procedure",
+    "tenderPeriod": {
+     "endDate": "2026-07-31T12:00:00+01:00"
+    },
+    "contractPeriod": {
+     "startDate": "2026-08-31T00:00:00+01:00",
+     "endDate": "2027-01-22T23:59:59Z"
+    },
+    "suitability": {
+     "sme": true,
+     "vcse": false
+    },
+    "mainProcurementCategory": "works",
+    "documents": [
+     {
+      "id": "1",
+      "documentType": "tenderNotice",
+      "description": "Opportunity notice on Contracts Finder",
+      "url": "https://www.contractsfinder.service.gov.uk/Notice/b0089365-fe63-4f99-8c0b-fe62a620d2e3",
+      "datePublished": "2026-07-10T15:48:10+01:00",
+      "format": "text/html",
+      "language": "en"
+     }
+    ]
+   },
+   "parties": [
+    {
+     "id": "GB-CFS-112445",
+     "name": "Epsom & St Helier University Hospitals NHS Trust",
+     "identifier": {
+      "legalName": "Epsom & St Helier University Hospitals NHS Trust"
+     },
+     "address": {
+      "streetAddress": "Procurement & Logistics Department, 70 East Street",
+      "locality": "Epsom",
+      "postalCode": "KT17 1HB",
+      "countryName": "England"
+     },
+     "contactPoint": {
+      "name": "kay rotowa",
+      "email": "support@multiquote.com",
+      "telephone": "0151 482 9230"
+     },
+     "details": {
+      "url": "https://suppliers.multiquote.com"
+     },
+     "roles": [
+      "buyer"
+     ]
+    }
+   ],
+   "buyer": {
+    "id": "GB-CFS-112445",
+    "name": "Epsom & St Helier University Hospitals NHS Trust"
+   }
+  },
+  {
+   "ocid": "ocds-b5fd17-fafbec10-9a9f-4cea-af69-322ffdc8dd29",
+   "id": "8370701e-6ab2-4bb7-b18e-375d027b6ba7-905744",
+   "language": "en",
+   "date": "2026-07-11T17:06:20+01:00",
+   "tag": [
+    "tender"
+   ],
+   "initiationType": "tender",
+   "tender": {
+    "id": "5be7bb7c-d7a3-4468-9f57-4d122d6bf800",
+    "title": "CA18219 - ITT 10/2026 - PEACEPLUS PP2014 - Moneydarragh community Hub Ltd - Creation of new outdoor classroom - Re-Tender",
+    "description": "Applications are invited from Contractors, under the terms of the NEC4 ECSC Short Contract,\r\n\r\nfor the following PEACEPLUS project: Moneydarragh Community Hub Ltd - Creation of new outdoor\r\n\r\nclassroom - PP2014: Supply and installation of new outdoor Messy Play activity area and\r\n\r\nassociated site works at Moneydarragh Community Hub, Annalong.\r\n\r\nThe works will be for Civil Engineering - 45200000-9, Landscaping - 45112700-2, Paved\r\n\r\nAreas - 45233200-1, Land Clearance - 45111220-6, Works for complete or part construction\r\n\r\nand civil engineering work - 45200000, Ground Maintenance - 77314000-4",
+    "datePublished": "2026-07-11T17:06:20+01:00",
+    "status": "active",
+    "classification": {
+     "scheme": "CPV",
+     "id": "45112700",
+     "description": "Landscaping work"
+    },
+    "additionalClassifications": [
+     {
+      "scheme": "CPV",
+      "id": "45111220",
+      "description": "Scrub-removal work"
+     },
+     {
+      "scheme": "CPV",
+      "id": "45200000",
+      "description": "Works for complete or part construction and civil engineering work"
+     },
+     {
+      "scheme": "CPV",
+      "id": "77314000",
+      "description": "Grounds maintenance services"
+     },
+     {
+      "scheme": "CPV",
+      "id": "45233200",
+      "description": "Various surface works"
+     }
+    ],
+    "items": [
+     {
+      "id": "1",
+      "deliveryAddresses": [
+       {
+        "postalCode": "BT34 2QU"
+       },
+       {
+        "countryName": "British Oversea Territories"
+       },
+       {
+        "countryName": "Channel Islands"
+       },
+       {
+        "countryName": "Europe"
+       },
+       {
+        "countryName": "Isle of Man"
+       },
+       {
+        "countryName": "Rest of the World"
+       },
+       {
+        "countryName": "United Kingdom"
+       }
+      ]
+     }
+    ],
+    "procurementMethod": "open",
+    "procurementMethodDetails": "Open procedure",
+    "tenderPeriod": {
+     "endDate": "2026-07-31T12:00:00+01:00"
+    },
+    "contractPeriod": {
+     "startDate": "2026-09-01T00:00:00+01:00",
+     "endDate": "2026-09-22T23:59:59+01:00"
+    },
+    "suitability": {
+     "sme": true,
+     "vcse": false
+    },
+    "mainProcurementCategory": "works",
+    "documents": [
+     {
+      "id": "1",
+      "documentType": "tenderNotice",
+      "description": "Opportunity notice on Contracts Finder",
+      "url": "https://www.contractsfinder.service.gov.uk/Notice/8370701e-6ab2-4bb7-b18e-375d027b6ba7",
+      "datePublished": "2026-07-11T17:06:20+01:00",
+      "format": "text/html",
+      "language": "en"
+     }
+    ]
+   },
+   "parties": [
+    {
+     "id": "GB-CFS-333373",
+     "name": "Newry, Mourne and Down District Council (NMD)",
+     "identifier": {
+      "legalName": "Newry, Mourne and Down District Council (NMD)"
+     },
+     "address": {
+      "streetAddress": "Unit 19 Rampart Road, Greenbank Industrial Estate",
+      "locality": "Newry",
+      "postalCode": "BT34 2QU",
+      "countryName": "England"
+     },
+     "contactPoint": {
+      "name": "Timothy Ervine",
+      "email": "support@multiquote.com",
+      "telephone": "0151 482 9230"
+     },
+     "details": {
+      "url": "https://suppliers.multiquote.com"
+     },
+     "roles": [
+      "buyer"
+     ]
+    }
+   ],
+   "buyer": {
+    "id": "GB-CFS-333373",
+    "name": "Newry, Mourne and Down District Council (NMD)"
+   }
+  },
+  {
+   "ocid": "ocds-b5fd17-f45f7a4b-90f9-4156-b3f9-5e8b3f682b2f",
+   "id": "0458ce86-181c-43cc-9bb3-e6a525dd849f-905460",
+   "language": "en",
+   "date": "2026-07-09T15:28:33+01:00",
+   "tag": [
+    "tender"
+   ],
+   "initiationType": "tender",
+   "tender": {
+    "id": "64A7E10B-CF48-4952-922C-CFF03AE9E900",
+    "title": "Taxi and MPV (1-8 seats) - Taxi and MPV (1-8 seats)",
+    "description": "Vehicle type: Saloon\r\nPassenger Assistant Required: No.\r\n\r\nProposed Taxi Route: \r\nFrom: TN3 9JN and TN7 4JE\r\nTo: Bennett Memorial, TN4 9SH\r\n\r\nFrequency: Monday to Friday\r\nDaily School Time: 08:45-15:35\r\n\r\n This opportunity has been distributed on SProc.net",
+    "datePublished": "2026-07-09T15:28:33+01:00",
+    "status": "active",
+    "classification": {
+     "scheme": "CPV",
+     "id": "60000000",
+     "description": "Transport services (excl. Waste transport)"
+    },
+    "items": [
+     {
+      "id": "1",
+      "deliveryAddresses": [
+       {
+        "countryName": "United Kingdom"
+       }
+      ]
+     }
+    ],
+    "procurementMethod": "selective",
+    "procurementMethodDetails": "Restricted procedure (above threshold)",
+    "tenderPeriod": {
+     "endDate": "2026-07-14T10:00:00+01:00"
+    },
+    "contractPeriod": {
+     "startDate": "2026-09-04T01:00:00+01:00",
+     "endDate": "2029-07-31T23:59:59+01:00"
+    },
+    "suitability": {
+     "sme": true,
+     "vcse": false
+    },
+    "mainProcurementCategory": "services",
+    "documents": [
+     {
+      "id": "1",
+      "documentType": "tenderNotice",
+      "description": "Opportunity notice on Contracts Finder",
+      "url": "https://www.contractsfinder.service.gov.uk/Notice/0458ce86-181c-43cc-9bb3-e6a525dd849f",
+      "datePublished": "2026-07-09T15:28:33+01:00",
+      "format": "text/html",
+      "language": "en"
+     },
+     {
+      "id": "2",
+      "url": "https://www.sproc.net"
+     }
+    ]
+   },
+   "parties": [
+    {
+     "id": "GB-CFS-334419",
+     "name": "East Sussex County Council",
+     "identifier": {
+      "legalName": "East Sussex County Council"
+     },
+     "address": {
+      "streetAddress": "County Hall, St Anne's Crescent",
+      "locality": "Lewes",
+      "postalCode": "BN7 1UE",
+      "countryName": "United Kingdom"
+     },
+     "contactPoint": {
+      "name": "Katia Lebon",
+      "email": "procurement@eastsussex.gov.uk"
+     },
+     "details": {
+      "url": "http://www.eastsussex.gov.uk"
+     },
+     "roles": [
+      "buyer"
+     ]
+    }
+   ],
+   "buyer": {
+    "id": "GB-CFS-334419",
+    "name": "East Sussex County Council"
+   }
+  }
+ ]
+}

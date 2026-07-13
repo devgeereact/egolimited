@@ -882,3 +882,41 @@ CREATE TABLE IF NOT EXISTS ego_contact_events (
   INDEX idx_ego_ev_cust (customer_id, created_at),
   CONSTRAINT fk_ego_ev_cust FOREIGN KEY (customer_id) REFERENCES ego_customers(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Tenders — public-sector work notices from the official Contracts Finder OCDS
+-- API (api/lib/tenders.php). The only INBOUND source of work in the system.
+--
+-- ocid is the notice's global id and the idempotency key: the daily cron
+-- deliberately overlaps its window (a missed tender just closes, there is no
+-- second chance), so re-ingesting the same notice must never duplicate it or
+-- reset a decision a human already made.
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS ego_tenders (
+  id           INT AUTO_INCREMENT PRIMARY KEY,
+  ocid         VARCHAR(120) NOT NULL,
+  title        VARCHAR(500) NOT NULL,
+  description  TEXT NULL,
+  buyer        VARCHAR(255) NULL,
+  buyer_email  VARCHAR(190) NULL,   -- the buyer's PUBLISHED procurement contact
+  cpv          VARCHAR(24) NULL,    -- the buyer's own classification, not our guess
+  cpv_label    VARCHAR(255) NULL,
+  value_amount DECIMAL(14,2) NULL,
+  currency     VARCHAR(8) NULL,
+  postcode     VARCHAR(16) NULL,
+  region       VARCHAR(190) NULL,
+  sme          TINYINT(1) NOT NULL DEFAULT 0,
+  category     VARCHAR(40) NULL,
+  match_reason VARCHAR(255) NULL,   -- WHY it is in front of a human
+  url          VARCHAR(500) NULL,   -- canonical notice page, taken from documents[]
+  published_at DATETIME NULL,
+  deadline_at  DATETIME NULL,       -- the only field that makes this screen urgent
+  status       ENUM('new','shortlisted','rejected','bid','won','lost') NOT NULL DEFAULT 'new',
+  customer_id  INT NULL,            -- set on shortlist: the buyer enters the Pipeline
+  decided_by   INT NULL,
+  decided_at   DATETIME NULL,
+  created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_tender_ocid (ocid),
+  INDEX idx_tender_status (status),
+  INDEX idx_tender_deadline (deadline_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
