@@ -848,3 +848,37 @@ CREATE TABLE IF NOT EXISTS ego_email_templates (
 -- Leads: when a human APPROVED them, which is what a "send after approval" delay must measure from.
 ALTER TABLE ego_leads ADD COLUMN IF NOT EXISTS approved_at DATETIME NULL;
 ALTER TABLE ego_leads ADD COLUMN IF NOT EXISTS website VARCHAR(255) NULL;
+
+-- ============================================================================
+-- PIPELINE (2026-07-13). See docs/superpowers/specs/2026-07-13-pipeline-restructure-design.md
+--
+-- ONE contact table: a prospect is a customer who hasn't bought yet. Before this a business could
+-- exist twice — once as a scraped lead, once as a paying customer — with nothing linking them, so
+-- the moment someone said "yes, quote me" it had nowhere to go.
+--
+-- The stage is DERIVED (see stage_for() in lib/pipeline.php), never hand-maintained.
+-- stage_locked=1 means a human overrode it and the derivation must not fight them.
+-- ============================================================================
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS stage ENUM('prospect','contacted','interested','quoted','customer','dormant','lost') NOT NULL DEFAULT 'customer';
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS source ENUM('enquiry','cold','phone','referral','repeat','unknown') NOT NULL DEFAULT 'unknown';
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS company VARCHAR(190) NULL;
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS website VARCHAR(255) NULL;
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS owner_id INT NULL;
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS next_action_at DATETIME NULL;
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS last_activity_at DATETIME NULL;
+ALTER TABLE ego_customers ADD COLUMN IF NOT EXISTS stage_locked TINYINT(1) NOT NULL DEFAULT 0;
+ALTER TABLE ego_customers ADD INDEX IF NOT EXISTS idx_ego_cust_stage (stage, deleted_at);
+ALTER TABLE ego_customers ADD INDEX IF NOT EXISTS idx_ego_cust_next (next_action_at);
+
+-- The timeline: every email, reply, quote, job and note against a business, in order. This is the
+-- screen that does not exist today — "what's the story with Marchmont?" currently has no answer.
+CREATE TABLE IF NOT EXISTS ego_contact_events (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  customer_id INT NOT NULL,
+  kind        VARCHAR(32) NOT NULL,   -- enquiry|email_out|reply|quote_sent|job|note|stage
+  summary     VARCHAR(255) NOT NULL,
+  actor_id    INT NULL,
+  created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_ego_ev_cust (customer_id, created_at),
+  CONSTRAINT fk_ego_ev_cust FOREIGN KEY (customer_id) REFERENCES ego_customers(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

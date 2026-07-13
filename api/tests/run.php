@@ -227,6 +227,27 @@ foreach (ROUTE_ROLES as $route => $lvl) {
     ok(isset($derived[$route]), "STALE MANIFEST ENTRY: lib/authz.php lists \"$route\" but index.php has no such case");
 }
 
+// ---------------------------------------------------------------- pipeline stages
+require_once __DIR__ . "/../lib/pipeline.php";
+
+$base = ["has_paid_invoice" => false, "has_open_quote" => false, "quote_declined" => false,
+         "has_replied" => false, "has_outbound" => false, "last_job_at" => null];
+
+eq("prospect",  stage_for($base), "never contacted -> prospect");
+eq("contacted", stage_for(array_merge($base, ["has_outbound" => true])), "we emailed them -> contacted");
+eq("interested", stage_for(array_merge($base, ["has_outbound" => true, "has_replied" => true])), "they replied -> interested");
+eq("quoted", stage_for(array_merge($base, ["has_replied" => true, "has_open_quote" => true])), "an open quote outranks a reply");
+eq("customer", stage_for(array_merge($base, ["has_open_quote" => true, "has_paid_invoice" => true])), "a paid invoice outranks everything");
+eq("lost", stage_for(array_merge($base, ["has_outbound" => true, "quote_declined" => true])), "declined quote -> lost");
+// Dormancy is the ONLY time-dependent rule, so the clock is injected. A test that depends on the
+// real date is a test that fails one day a year, at 3am, for no reason anyone can reproduce.
+eq("dormant", stage_for(array_merge($base, [
+    "has_paid_invoice" => true, "last_job_at" => "2024-01-01 00:00:00", "now" => "2026-07-13 00:00:00",
+])), "customer, no job in 12 months -> dormant");
+eq("customer", stage_for(array_merge($base, [
+    "has_paid_invoice" => true, "last_job_at" => "2026-01-01 00:00:00", "now" => "2026-07-13 00:00:00",
+])), "customer with a recent job stays a customer");
+
 // ---------------------------------------------------------------- report
 printf("\n  %d passed, %d failed\n", $T["pass"], $T["fail"]);
 foreach ($T["failures"] as $f) printf("  FAIL: %s\n", $f);
