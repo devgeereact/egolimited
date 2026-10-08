@@ -227,6 +227,31 @@ foreach (ROUTE_ROLES as $route => $lvl) {
     ok(isset($derived[$route]), "STALE MANIFEST ENTRY: lib/authz.php lists \"$route\" but index.php has no such case");
 }
 
+/**
+ * Public write routes must be throttled. These take no login (a job reference + surname, or a
+ * tracking token, is the only gate), so without a per-IP limit they can be used to guess tokens
+ * or flood the office inbox. Static check: each handler body must call rate_check() or rate_write().
+ */
+$caseBody = function (string $route) use ($lines): ?string {
+    foreach ($lines as $i => $line) {
+        if (strpos($line, 'case "' . $route . '":') === false) continue;
+        $body = "";
+        for ($j = $i + 1; $j < count($lines); $j++) {
+            if (preg_match('/^\s*case "[A-Z]+ \/[^"]*":/', $lines[$j])) break;
+            $body .= $lines[$j] . "\n";
+        }
+        return $body;
+    }
+    return null;
+};
+foreach (["POST /enquiry", "POST /track/lookup", "POST /track/review", "POST /track/message"] as $route) {
+    $body = $caseBody($route);
+    ok($body !== null, "public write route \"$route\" exists");
+    ok($body !== null && preg_match('/\brate_(check|write)\(\$db,/', $body) === 1, "public write route \"$route\" is rate-limited");
+}
+ok(preg_match('/mb_strlen\(\$bodyTxt\)\s*>\s*\d+/', (string) $caseBody("POST /track/review")) === 1, "review text has a length cap");
+ok(preg_match('/mb_strlen\(\$msg\)\s*>\s*\d+/', (string) $caseBody("POST /track/message")) === 1, "portal message has a length cap");
+
 // ---------------------------------------------------------------- pipeline stages
 require_once __DIR__ . "/../lib/pipeline.php";
 

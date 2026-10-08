@@ -5,7 +5,7 @@ project:
   risk: "production"
 
 gee_os:
-  minimum_version: "0.5.0"
+  minimum_version: "0.9.0"
   primary_mode: "EXISTING-APPLICATION"
   workflows:
     - "CHANGE-SAFETY"
@@ -16,7 +16,7 @@ gee_os:
     - "RELEASE-GATE"
 
 sources_of_truth:
-  project_memory: "CLAUDE.md, pending modularisation"
+  project_memory: "CLAUDE.md, pending modularisation (git-ignored and not present on this computer; README.md is the available record). Deploy mechanics: docs/DEPLOY.md, the tracked deploy record"
   product_overview: "README.md"
   implementation: "source tree and package.json"
   detailed_documentation: "docs/"
@@ -29,3 +29,5 @@ exclusions:
   - "remote fetch, pull, push, merge or rebase"
   - "deployment, production mutation or external messages"
   - "secret copying or credential discovery"
+
+mcp_profile: ".agent/MCP-PROFILE.yml"

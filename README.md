@@ -82,7 +82,7 @@ via `.htaccess` in each deployed folder.
 
 ## Deploy
 `./deploy.sh` builds + rsyncs landing + app to the `egolimited.com` cPanel docroot over the `cpanel`
-SSH alias. PHP API is rsynced manually (see `CLAUDE.md` → Deploy mechanics). `config.php` lives
+SSH alias. PHP API is rsynced manually (see `docs/DEPLOY.md`, the tracked deploy record). `config.php` lives
 server-side only — never deployed from the repo. Source folders + `docs/` stay in the repo, not deployed.
 
 > **GitHub Actions is billing-blocked — pushing to `main` deploys NOTHING.** Every deploy is a manual

@@ -1,7 +1,7 @@
 # GEE OS Adoption
 
 - Project: egolimited
-- Minimum GEE OS version: 0.5.0
+- Minimum GEE OS version: 0.9.0 (contract refreshed 2026-10-08; adopted at 0.5.0)
 - Adoption stage: Wave 1, local routing layer
 - Application behaviour changed: No
 - Remote systems changed: No
