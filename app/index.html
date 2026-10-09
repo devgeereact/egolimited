@@ -12,11 +12,12 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="EGO Engineer" />
     <link rel="apple-touch-icon" href="/app/ego-icon.svg?v=2" />
-    <link
-      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css"
-      rel="stylesheet"
-    />
-    <link href='https://cdn.boxicons.com/fonts/basic/boxicons.min.css' rel='stylesheet'>
+    <!-- No third-party stylesheets here on purpose. This file is also the shell for
+         the CUSTOMER portal (/app/track/:token), so anything loaded here discloses a
+         customer's IP address and referring URL to that third party before they have
+         been shown any notice or given any choice. The bootstrap-icons (jsDelivr) and
+         boxicons CDN links that used to sit here did exactly that for two icon fonts
+         no component in src/ ever referenced. Icons come from lucide-react, bundled. -->
   </head>
   <body>
     <div id="root"></div>
