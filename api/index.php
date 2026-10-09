@@ -3273,6 +3273,8 @@ switch ("$method $route") {
     }
 
     case "POST /track/review": {
+        // Public, token-gated write: throttle per IP (blunts token guessing and mail-alert spam).
+        rate_write($db, "track-review:" . client_ip(), 10, 3600);
         $jobId = verify_track_token($db, ($_GET["token"] ?? "") ?: (body()["token"] ?? ""));
         if (!$jobId) fail("Invalid link", 404);
         $job = db_one($db, "SELECT customer_id,status FROM ego_jobs WHERE id=? AND deleted_at IS NULL", "i", $jobId);
@@ -3282,6 +3284,7 @@ switch ("$method $route") {
         $rating = max(1, min(5, (int)($b["rating"] ?? 0)));
         if ($rating < 1) fail("Pick a star rating");
         $bodyTxt = trim($b["body"] ?? "");
+        if (mb_strlen($bodyTxt) > 5000) fail("Review is too long");
         $name = trim($b["name"] ?? "") ?: null;
         $existing = db_one($db, "SELECT id FROM ego_messages WHERE job_id=? AND channel='review' ORDER BY id DESC LIMIT 1", "i", $jobId);
         if ($existing) {
@@ -3309,6 +3312,8 @@ switch ("$method $route") {
     }
 
     case "POST /track/message": {
+        // Public, token-gated write: throttle per IP (blunts token guessing and inbox flooding).
+        rate_write($db, "track-message:" . client_ip(), 20, 3600);
         $jobId = verify_track_token($db, ($_GET["token"] ?? "") ?: (body()["token"] ?? ""));
         if (!$jobId) fail("Invalid link", 404);
         $b = body();

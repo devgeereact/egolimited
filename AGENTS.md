@@ -1,14 +1,25 @@
 # egolimited Agent Contract
 
-This existing project adopts the active shared GEE OS, minimum version 0.5.0. Read `.agent/PROJECT.yml` and `.agent/CURRENT-TASK.md`, then apply the constitution, loop and routing rules at `~/.agents/gee-os`.
+This existing project adopts the active shared GEE OS, minimum version 0.9.0. Read `.agent/PROJECT.yml` and `.agent/CURRENT-TASK.md`, then apply the constitution, loop and routing rules at `~/.agents/gee-os`.
 
 ## Read order
 
 1. `AGENTS.md`, this shared entry point.
 2. `.agent/PROJECT.yml`, project routing and risk.
 3. `.agent/CURRENT-TASK.md`, current scope and evidence.
-4. `CLAUDE.md`, preserved project knowledge pending modularisation.
-5. `README.md` and the relevant files under `docs/`.
+4. `CLAUDE.md`, preserved project knowledge pending modularisation (git-ignored, may be absent).
+5. `docs/DEPLOY.md`, the tracked deploy record: what deploys where, what must never be uploaded and how to verify.
+6. `README.md` and the relevant files under `docs/`.
+
+## Commands
+
+- Install: `npm ci` inside `app/` and inside `landing/` (no root `package.json`)
+- Develop: `cd landing && npm run dev` (port 5050) or `cd app && npm run dev` (port 5051). Both call the live API at egolimited.com.
+- Type check: `npx tsc -b` in each surface
+- Lint: `npm run lint` in each surface
+- Test: `cd app && npm test` (Vitest); `php api/tests/run.php` for the API
+- Build: `npx vite build --base=/app/` (app) and `npx vite build --base=/` (landing)
+- Deploy: `./deploy.sh` publishes to egolimited.com (see `docs/DEPLOY.md`). Production action, needs explicit approval.
 
 ## Shared rules
 

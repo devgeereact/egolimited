@@ -26,7 +26,8 @@ export default function CertificatesList() {
   const rows = useMemo(() => data?.certificates ?? [], [data])
   const loading = isPending
   const pager = usePager(rows)
-  useEffect(() => { pager.setPage(1) }, [q])
+  const setPagerPage = pager.setPage // useState setter: stable identity, so listing it never re-runs the effect
+  useEffect(() => { setPagerPage(1) }, [q, setPagerPage])
 
   return (
     <div className="flex flex-1 flex-col gap-6 p-4 md:p-6">

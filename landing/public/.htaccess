@@ -10,3 +10,12 @@
   RewriteCond %{REQUEST_FILENAME} !-d
   RewriteRule . /index.html [L]
 </IfModule>
+
+# Always revalidate HTML so a deploy's new hashed bundles are picked up at once (no stale
+# "failed to load" blank page). Deliberately no long-lived rule for .js/images here: this
+# file sits at the docroot, so it would cascade into /app/, whose sw.js is not hashed.
+<IfModule mod_headers.c>
+  <FilesMatch "\.html$">
+    Header set Cache-Control "no-cache, must-revalidate"
+  </FilesMatch>
+</IfModule>
