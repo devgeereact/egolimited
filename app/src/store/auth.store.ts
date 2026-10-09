@@ -24,6 +24,27 @@ const cachedUser = (): AuthUser | null => {
   } catch { return null }
 }
 
+/**
+ * Signing out must also drop the offline CUSTOMER data the app cached on the device.
+ *
+ * EngineerToday caches today's job list under `ego_today_<userId>` so the app opens
+ * instantly in a basement (see EngineerToday.tsx). Those rows carry customer names,
+ * site addresses and phone numbers. Clearing the token alone left them sitting in
+ * localStorage after sign-out, readable by the next person to pick the phone up — on
+ * a shared van handset that is a real disclosure, not a theoretical one.
+ *
+ * The offline OUTBOX is deliberately NOT cleared here: it holds writes the engineer
+ * has already made and the server has not yet accepted. Wiping it on sign-out would
+ * destroy their work, which is the exact failure the outbox exists to prevent.
+ */
+const clearDeviceCaches = () => {
+  try {
+    for (const k of Object.keys(localStorage)) {
+      if (k === "ego_today" || k.startsWith("ego_today_")) localStorage.removeItem(k)
+    }
+  } catch { /* private mode / storage blocked — nothing was cached either */ }
+}
+
 export type { Role }
 export { canAccess } from "@/lib/roles"
 
@@ -74,6 +95,7 @@ export const useAuth = create<AuthState>((set) => ({
     }
     setToken(null)
     cacheUser(null)
+    clearDeviceCaches()
     set({ user: null, status: "anon" })
   },
 
