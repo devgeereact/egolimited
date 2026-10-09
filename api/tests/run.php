@@ -374,6 +374,37 @@ foreach ($starts as $k => $start) {
 }
 ok($offences === [], "no foreach-by-reference variable is reused after its loop\n    " . implode("\n    ", $offences));
 
+/**
+ * STATIC GUARD — the public reviews feed may only publish what a customer agreed to publish.
+ *
+ * GET /public/reviews is the one handler that copies a customer's own words onto the open
+ * internet. Until the September 2026 privacy audit it published every 4-star-and-up review the
+ * moment it was written, and where the review carried no name it fell back to `c.name`, the
+ * full name on the customer record. So the way to stay anonymous, leaving the name blank,
+ * published your full name.
+ *
+ * A unit test cannot catch that reappearing, because the bug is one JOIN in one query. This
+ * reads the handler and fails the build if the consent filter goes missing or the customers
+ * table finds its way back in. Same shape as the authz drift guard above: fail on the class of
+ * bug, not on an instance of it.
+ */
+// Re-read rather than reuse $src: it is a loop variable by this point in the file.
+$frontController = file_get_contents(__DIR__ . "/../index.php");
+$reviewsBody = "";
+if (preg_match('/case "GET \/public\/reviews":.*?(?=\n\s*case ")/s', $frontController, $m)) {
+    // Strip comments first. The handler's own comment explains the bug it was fixed for and
+    // names the columns involved, and a guard that trips over the explanation of itself is a
+    // guard people delete.
+    $reviewsBody = preg_replace(['#/\*.*?\*/#s', '#//[^\n]*#'], "", $m[0]);
+}
+ok($reviewsBody !== "", "found the GET /public/reviews handler to inspect");
+ok(str_contains($reviewsBody, "publish_consent=1"),
+   "GET /public/reviews filters on publish_consent=1 — a review is public only if its author said so");
+ok(!str_contains($reviewsBody, "ego_customers"),
+   "GET /public/reviews does not read ego_customers — the public feed must not reach the customer record");
+ok(!str_contains($reviewsBody, "customer_name"),
+   "GET /public/reviews does not fall back to customer_name — a blank name must stay blank, not become the full name");
+
 // ---------------------------------------------------------------- report
 printf("\n  %d passed, %d failed\n", $T["pass"], $T["fail"]);
 foreach ($T["failures"] as $f) printf("  FAIL: %s\n", $f);
