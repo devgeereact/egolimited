@@ -23,7 +23,7 @@ interface Track {
   step: number
   cancelled: boolean
   completed: boolean
-  review: { rating: number; body: string | null; created_at: string } | null
+  review: { rating: number; body: string | null; publish_consent: number; created_at: string } | null
 }
 
 const STEPS = ["Booked", "Scheduled", "On the way", "On site", "Completed", "Paid"]
@@ -38,6 +38,10 @@ export default function TrackJob() {
   const [sending, setSending] = useState(false)
   const [rating, setRating] = useState(0)
   const [reviewBody, setReviewBody] = useState("")
+  // Publishing on the public website is opt-in and starts OFF. Leaving a review is
+  // feedback to the office; putting it on the homepage is a second, separate thing to
+  // agree to, so it never rides along on the first.
+  const [publishReview, setPublishReview] = useState(false)
   const [savingReview, setSavingReview] = useState(false)
   const [downloadingId, setDownloadingId] = useState<number | null>(null)
 
@@ -56,6 +60,7 @@ export default function TrackJob() {
           if (data.review) {
             setRating(data.review.rating)
             setReviewBody(data.review.body ?? "")
+            setPublishReview(data.review.publish_consent === 1)
           }
         }
       })
@@ -93,7 +98,11 @@ export default function TrackJob() {
     if (!rating) { toast.error("Pick a star rating"); return }
     setSavingReview(true)
     try {
-      await api("/track/review", { method: "POST", body: { token, rating, body: reviewBody, name: t?.job.customer_name }, auth: false })
+      await api("/track/review", {
+        method: "POST",
+        body: { token, rating, body: reviewBody, name: t?.job.customer_name, publish_consent: publishReview },
+        auth: false,
+      })
       toast.success("Thanks for your review!")
       setReviewBody("")
       load().catch(() => {})
@@ -230,7 +239,26 @@ export default function TrackJob() {
               })}
             </div>
             <Textarea rows={3} value={reviewBody} onChange={(e) => setReviewBody(e.target.value)} placeholder="Tell us about the work (optional)…" />
-            <Button className="mt-2 w-full" onClick={submitReview} disabled={savingReview || !(rating || t.review?.rating)}>
+
+            {/* Just-in-time notice. The customer is told what publishing means, in the
+                place where they decide it, and the box starts unticked. */}
+            <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-muted/40 p-3">
+              <input
+                type="checkbox"
+                checked={publishReview}
+                onChange={(e) => setPublishReview(e.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-[hsl(var(--accent))]"
+              />
+              <span className="text-sm text-muted-foreground">
+                You can show this review on the EGO website, with my first name only.
+                <span className="mt-1 block text-xs">
+                  Leave this unticked and your review goes to the office alone. You can change
+                  your mind here at any time, or email us and we will take it down.
+                </span>
+              </span>
+            </label>
+
+            <Button className="mt-3 w-full" onClick={submitReview} disabled={savingReview || !(rating || t.review?.rating)}>
               {savingReview ? <Loader2 className="animate-spin" /> : <Star className="size-4" />} {t.review ? "Update review" : "Submit review"}
             </Button>
           </CardContent>
@@ -274,6 +302,15 @@ export default function TrackJob() {
           {t.company.phone && <p className="mt-3 text-center text-xs text-muted-foreground">Or call {t.company.phone}</p>}
         </CardContent>
       </Card>
+
+      {/* The portal is a customer-facing page reached from an emailed link, so it needs its
+          own route to the privacy notice. Absolute path: in production the landing site and
+          /app/ share the egolimited.com origin. */}
+      <p className="mt-6 pb-2 text-center text-xs text-muted-foreground">
+        <a href="/privacy" className="underline underline-offset-2 hover:text-foreground">
+          How we handle your information
+        </a>
+      </p>
     </div>
   )
 }
