@@ -1,0 +1,82 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# CodeRabbit AI code review. CodeRabbit is a GitHub App (install on
+# devgeereact/egolimited at app.coderabbit.ai) — it reviews PULL REQUESTS only,
+# so it does nothing while work is pushed straight to main. No API key lives in
+# the repo; configuration is this file plus the GitHub App.
+language: en-GB
+
+reviews:
+  profile: assertive
+  request_changes_workflow: false
+  high_level_summary: true
+  auto_apply_labels: true
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/package-lock.json"
+    - "!**/dist/**"
+    - "!**/node_modules/**"
+  path_instructions:
+    - path: "api/**"
+      instructions: >
+        This PHP API is deployed to shared cPanel hosting and runs on the public
+        internet with no WAF in front of it.
+
+        SECRETS: config.php holds live DB credentials and exists ONLY on the
+        server — it must never appear in a diff. Flag any committed credential,
+        any new *.bak / *.old / *.zip / *.sql file, and any file that would sit
+        inside a webroot containing secrets. A .bak extension is not parsed by
+        PHP, so Apache serves the source as PLAIN TEXT: three live credential
+        leaks were found this way on 2026-07-21. Backups belong outside the
+        docroot.
+
+        CONFIG SHAPE: config.example.php is an array-return template
+        (`return [ 'db_host' => ... ];`) but the live config.php defines plain
+        $host/$dbuser/$dbpass/$dbname variables and opens the connection itself.
+        Copying the example verbatim produces a fatal parse error that takes the
+        whole API down. Flag any change that blurs these two shapes.
+
+        ERRORS: never echo a raw PHP or database error to the client — it leaks
+        paths, schema and sometimes credentials. Return a message we wrote and
+        log the detail server-side.
+
+        SQL: every query taking user input must be a prepared statement. Flag
+        string-interpolated SQL without exception.
+
+    - path: "app/src/**"
+      instructions: >
+        React + TypeScript SPA served from /app/ on shared hosting.
+
+        ROUTING: this SPA depends on a server-side .htaccess rewrite that is NOT
+        in this repo. Flag any change to router basename or Vite `base` — a
+        mismatch produces a blank page with an empty #root that still builds
+        clean and still returns HTTP 200, so no test or curl check catches it.
+
+        Flag secrets or API keys reaching client code: everything in this bundle
+        is public. Credentials belong server-side in the PHP API.
+
+    - path: "landing/src/**"
+      instructions: >
+        Marketing site. Prioritise accessibility and Core Web Vitals. Flag
+        unoptimised images (this project has an ImageKit CDN available), missing
+        alt text, and colour contrast below WCAG AA.
+
+    - path: "**/*.sql"
+      instructions: >
+        Schema changes. Flag any migration that drops or renames a column
+        without a stated backfill or rollback path, and anything touching an
+        uploads/media table — those files exist only on the server and are not
+        recoverable from this repo.
+
+  tools:
+    languagetool:
+      enabled: true
+
+code_generation:
+  docstrings:
+    language: en-GB
+
+chat:
+  auto_reply: true
