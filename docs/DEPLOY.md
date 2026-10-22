@@ -63,6 +63,7 @@ The CI landing upload owns the docroot root, so it excludes `app/`, `api/` and a
 
 - `app/public/.htaccess` is copied by Vite into `app/dist/`. It holds the SPA fallback to `/app/index.html` and forces `Cache-Control: no-cache, must-revalidate` on `sw.js` and `index.html`. Without that rule the host's default caching kept a year-old service worker alive (white-screen incident, 8 July 2026). `deploy.sh` must never overwrite this file.
 - `landing/public/.htaccess` is copied into `landing/dist/`. It holds the SPA fallback to `/index.html` and a `no-cache, must-revalidate` rule for `.html` files. It deliberately has no long-lived `immutable` rule for `.js` or images: this file sits at the docroot, so such a rule would also apply under `/app/`, where `sw.js` is not hashed. `deploy/landing.htaccess` contains that broader rule and is not used.
+- Cloudflare cache rule for `/app/sw.js`: this lives in Cloudflare, not in the repository. Cloudflare caches `.js` files by extension and the zone's Browser Cache TTL setting (4 hours) overrode the origin header, so `sw.js` reached browsers with `max-age=14400` even though `.htaccess` was correct. On 22 October 2026 a cache rule was added in the `egolimited.com` zone (phase `http_request_cache_settings`, rule id `2624217f49a141adb7f6af96834fcb30`): hosts `egolimited.com` and `www.egolimited.com`, URI path equals `/app/sw.js`, cache set to bypass. Do not delete it. If it is lost, `curl -sI https://egolimited.com/app/sw.js` shows `max-age=14400` again; recreate it under Caching, Cache Rules in the dashboard. Nothing in `deploy.sh` or CI touches it.
 
 ## Verify after a deploy
 
@@ -71,7 +72,7 @@ Cloudflare fronts the site, so a response can come from its edge. Check the orig
 ```sh
 # Public responses
 curl -fsS https://egolimited.com/api/health          # expect {"ok":true,...}
-curl -sI https://egolimited.com/app/sw.js   | grep -i '^cache-control'   # expect no-cache, must-revalidate
+curl -sI https://egolimited.com/app/sw.js   | grep -i -E '^(cache-control|cf-cache-status)'   # expect no-cache, must-revalidate and DYNAMIC (Cloudflare cache rule above)
 curl -sI https://egolimited.com/app/        | grep -i '^cache-control'   # expect no-cache, must-revalidate
 curl -sI https://egolimited.com/            | grep -i '^cache-control'   # expect no-cache, must-revalidate
 curl -fsS https://egolimited.com/app/ | grep -oE '/app/assets/index-[A-Za-z0-9_-]+\.js' | head -1   # a hashed bundle, which must itself return 200
