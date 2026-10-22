@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router-dom"
 import { toast } from "sonner"
 import { Phone, Mail, MapPin, Clock, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -34,6 +35,7 @@ export default function Contact() {
   const company = useCompany()
   const [form, setForm] = useState<FormState>(empty)
   const [sending, setSending] = useState(false)
+  const [mapOn, setMapOn] = useState(false)
 
   const set = (k: keyof FormState) => (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
@@ -136,9 +138,18 @@ export default function Contact() {
                 placeholder="The problem, and when suits you. A photo helps us price it accurately, so send one over by email if you have one."
               />
             </div>
+            {/* Just-in-time notice. The old line here said "we do not share your details with
+                anyone", which the privacy policy itself contradicts: an enquiry reaches the
+                engineer who does the work, the hosting provider, and the accountant. Say the
+                true and useful thing instead, and link the policy from the point of collection. */}
             <p className="mt-3 text-xs text-muted-foreground">
-              We will come back with a price and a date we can keep. We do not
-              share your details with anyone.
+              We will come back with a price and a date we can keep. We use these details to
+              answer your enquiry and quote for the work, we never sell them, and we never pass
+              them to anyone for their own marketing. See our{" "}
+              <Link to="/privacy" className="underline underline-offset-2 hover:text-foreground">
+                privacy policy
+              </Link>
+              .
             </p>
             <Button type="submit" size="lg" className="mt-6" disabled={sending}>
               {sending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -195,17 +206,35 @@ export default function Contact() {
               </div>
             </div>
 
-            {/* Clean, muted office map — keyless embed, desaturated to sit
-                quietly inside the brand rather than shout primary-blue. */}
+            {/* Office map, loaded ONLY when the visitor asks for it.
+                Embedding the iframe directly fired 17 requests to Google (maps.googleapis.com,
+                maps.gstatic.com, google.com) the instant the page opened, handing a visitor's IP
+                address and referring URL to Google before they had been shown anything or made
+                any choice. Nobody comes to /contact for the map. So it stays a static panel until
+                clicked, and the click is the choice. */}
             <div className="overflow-hidden rounded-xl border border-border shadow-sm">
-              <iframe
-                title={`Map showing ${company.name}`}
-                src={`https://maps.google.com/maps?q=${encodeURIComponent(company.address)}&z=14&output=embed`}
-                className="h-56 w-full grayscale-[35%] contrast-[0.95]"
-                style={{ border: 0 }}
-                loading="lazy"
-                referrerPolicy="no-referrer-when-downgrade"
-              />
+              {mapOn ? (
+                <iframe
+                  title={`Map showing ${company.name}`}
+                  src={`https://maps.google.com/maps?q=${encodeURIComponent(company.address)}&z=14&output=embed`}
+                  className="h-56 w-full grayscale-[35%] contrast-[0.95]"
+                  style={{ border: 0 }}
+                  loading="lazy"
+                  referrerPolicy="no-referrer-when-downgrade"
+                />
+              ) : (
+                <div className="flex h-56 flex-col items-center justify-center gap-3 bg-secondary/40 p-5 text-center">
+                  <MapPin className="h-6 w-6 text-accent" />
+                  <p className="text-sm font-medium">{company.address}</p>
+                  <p className="max-w-xs text-xs text-muted-foreground">
+                    The map is a Google service. Loading it shares your IP address with Google,
+                    so we do not load it until you ask.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setMapOn(true)}>
+                    Show the map
+                  </Button>
+                </div>
+              )}
             </div>
           </div>
         </div>

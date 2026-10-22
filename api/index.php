@@ -517,6 +517,14 @@ function ensure_message_cols(mysqli $db): void {
     $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS flagged TINYINT(1) NOT NULL DEFAULT 0");
 }
 
+/** Consent to publish a review on the public website. Separate from leaving the review:
+ *  feedback to the office and a testimonial on the homepage are two different acts, and
+ *  only the customer gets to say the second one is allowed. Defaults to 0, so a review
+ *  written before the tick box existed is never published retrospectively. */
+function ensure_review_consent_col(mysqli $db): void {
+    $db->query("ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS publish_consent TINYINT(1) NOT NULL DEFAULT 0");
+}
+
 /** Email attachments (inbound + outbound), stored on disk off the web root; one row per file.
  *  `storage` is the random on-disk filename; `filename` is the original name shown to users. */
 function ensure_message_attachments(mysqli $db): void {
@@ -3233,8 +3241,9 @@ switch ("$method $route") {
              WHERE job_id=? AND (channel='portal' OR direction='outbound') ORDER BY id ASC", "i", $jobId);
         foreach ($messages as &$mm) { $mm["acknowledged"] = (int)$mm["acknowledged"]; }
         $completed = in_array($job["status"], ["completed", "invoiced", "paid", "closed"], true);
-        $review = db_one($db, "SELECT rating, body, created_at FROM ego_messages WHERE job_id=? AND channel='review' ORDER BY id DESC LIMIT 1", "i", $jobId);
-        if ($review) $review["rating"] = (int)$review["rating"];
+        ensure_review_consent_col($db);
+        $review = db_one($db, "SELECT rating, body, publish_consent, created_at FROM ego_messages WHERE job_id=? AND channel='review' ORDER BY id DESC LIMIT 1", "i", $jobId);
+        if ($review) { $review["rating"] = (int)$review["rating"]; $review["publish_consent"] = (int)$review["publish_consent"]; }
         send([
             "job" => $job,
             "company" => ["company_name" => $company["company_name"] ?? "EGO LIMITED", "logo_url" => $company["logo_url"] ?? null, "phone" => $company["phone"] ?? null, "email" => $company["email"] ?? null],
@@ -3286,15 +3295,20 @@ switch ("$method $route") {
         $bodyTxt = trim($b["body"] ?? "");
         if (mb_strlen($bodyTxt) > 5000) fail("Review is too long");
         $name = trim($b["name"] ?? "") ?: null;
+        // Publishing on the public website is a SEPARATE, opt-in decision from leaving
+        // feedback for the office, and only the customer makes it. Absent or false means
+        // the review stays internal (see GET /public/reviews).
+        ensure_review_consent_col($db);
+        $publish = !empty($b["publish_consent"]) ? 1 : 0;
         $existing = db_one($db, "SELECT id FROM ego_messages WHERE job_id=? AND channel='review' ORDER BY id DESC LIMIT 1", "i", $jobId);
         if ($existing) {
-            db_exec($db, "UPDATE ego_messages SET rating=?, body=?, from_name=?, acknowledged=0 WHERE id=?",
-                "issi", $rating, $bodyTxt, $name, (int)$existing["id"]);
+            db_exec($db, "UPDATE ego_messages SET rating=?, body=?, from_name=?, publish_consent=?, acknowledged=0 WHERE id=?",
+                "issii", $rating, $bodyTxt, $name, $publish, (int)$existing["id"]);
         } else {
             db_exec($db,
-                "INSERT INTO ego_messages (customer_id,job_id,direction,channel,from_name,subject,body,rating,status)
-                 VALUES (?,?, 'inbound','review', ?,?,?,?, 'received')",
-                "iisssi", (int)$job["customer_id"], $jobId, $name, "Customer review", $bodyTxt, $rating);
+                "INSERT INTO ego_messages (customer_id,job_id,direction,channel,from_name,subject,body,rating,publish_consent,status)
+                 VALUES (?,?, 'inbound','review', ?,?,?,?,?, 'received')",
+                "iisssii", (int)$job["customer_id"], $jobId, $name, "Customer review", $bodyTxt, $rating, $publish);
             // Notify the office of a new review at the alerts email (falls back to company email).
             $cs = db_one($db, "SELECT company_name,email,notify_email FROM ego_company_settings ORDER BY id LIMIT 1");
             $to = trim($cs["notify_email"] ?? "") ?: trim($cs["email"] ?? "");
@@ -4799,19 +4813,32 @@ switch ("$method $route") {
         ]]);
     }
     case "GET /public/reviews": {
-        // Published customer reviews (4-star+ with text) that feed the landing
-        // testimonials. App reviews + any imported Google reviews (source column).
+        /* Published customer reviews (4-star+ with text) that feed the landing testimonials.
+         *
+         * TWO PRIVACY RULES LIVE HERE, and both used to be broken:
+         *
+         * 1. publish_consent = 1 is REQUIRED. This query used to publish every 4★+ review the
+         *    moment it was written, on a form that promised only "your feedback helps us
+         *    improve". A review is now public because the customer ticked a box that said so.
+         *
+         * 2. FIRST NAME ONLY, and never the customers table. The old fallback
+         *    `from_name ?: customer_name` meant a blank name field published the full name we
+         *    hold on file — the opposite of what leaving it blank asks for. `c.name` is not
+         *    even selected any more, so it cannot leak back in.
+         */
+        ensure_review_consent_col($db);
         $rows = db_all($db,
-            "SELECT m.rating, m.body, m.from_name, m.created_at, m.source, c.name AS customer_name
+            "SELECT m.rating, m.body, m.from_name, m.created_at, m.source
              FROM ego_messages m
-             LEFT JOIN ego_customers c ON c.id = m.customer_id
-             WHERE m.channel='review' AND m.rating >= 4 AND m.body IS NOT NULL AND TRIM(m.body) <> ''
+             WHERE m.channel='review' AND m.publish_consent=1 AND m.rating >= 4
+               AND m.body IS NOT NULL AND TRIM(m.body) <> ''
              ORDER BY m.id DESC LIMIT 12", "");
         $reviews = []; $sum = 0;
         foreach ($rows as $r) {
             $sum += (int)$r["rating"];
+            $first = preg_split('/\s+/', trim((string)($r["from_name"] ?? "")), -1, PREG_SPLIT_NO_EMPTY)[0] ?? "";
             $reviews[] = [
-                "name"   => trim($r["from_name"] ?? "") ?: ($r["customer_name"] ?? "Customer"),
+                "name"   => $first !== "" ? $first : "Customer",
                 "quote"  => $r["body"],
                 "score"  => (int)$r["rating"],
                 "date"   => $r["created_at"],
@@ -4836,9 +4863,14 @@ switch ("$method $route") {
         $name = trim($b["name"] ?? "") ?: "Customer";
         $source = in_array($b["source"] ?? "google", ["app","google"], true) ? $b["source"] : "google";
         if ($rating < 1 || $bodyTxt === "") fail("Rating and review text required");
+        // publish_consent=1: a review typed in here is one the office is copying from a place
+        // it is ALREADY public (Google, a card through the door), so republishing it is an
+        // editorial call, not a fresh collection. Portal reviews are the opposite and default
+        // to 0 — see POST /track/review.
+        ensure_review_consent_col($db);
         db_exec($db,
-            "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,acknowledged)
-             VALUES ('inbound','review',?,?,?, 'received',?,1)",
+            "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,acknowledged,publish_consent)
+             VALUES ('inbound','review',?,?,?, 'received',?,1,1)",
             "ssis", $name, $bodyTxt, $rating, $source);
         log_activity($db, null, (int)$actor["id"], "review_added", ["source" => $source]);
         send(["id" => (int)$db->insert_id], 201);
@@ -4856,6 +4888,7 @@ switch ("$method $route") {
         if ($code !== 200) fail("Google API error ($code) — check the key/Place ID", 400);
         $data = json_decode($resp ?: "[]", true);
         $revs = $data["result"]["reviews"] ?? [];
+        ensure_review_consent_col($db);   // imported reviews are already public on Google
         $n = 0;
         foreach ($revs as $r) {
             $rating = (int)($r["rating"] ?? 0); if ($rating < 1) continue;
@@ -4864,8 +4897,8 @@ switch ("$method $route") {
             $uid = "google:" . md5($name . ($r["time"] ?? "") . $text);
             if (db_one($db, "SELECT id FROM ego_messages WHERE uid=?", "s", $uid)) continue; // dedupe
             db_exec($db,
-                "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,uid,acknowledged)
-                 VALUES ('inbound','review',?,?,?, 'received','google',?,1)",
+                "INSERT INTO ego_messages (direction,channel,from_name,body,rating,status,source,uid,acknowledged,publish_consent)
+                 VALUES ('inbound','review',?,?,?, 'received','google',?,1,1)",
                 "ssis", $name, $text, $rating, $uid);
             $n++;
         }

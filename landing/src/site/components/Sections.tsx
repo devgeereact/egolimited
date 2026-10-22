@@ -581,6 +581,16 @@ export function NewsletterBand({
                   <ArrowRight className="ml-1 h-4 w-4" />
                 </Button>
               </form>
+              {/* Just-in-time notice at the point of collection: joining IS the consent, so
+                  say plainly what is being consented to and how to undo it. */}
+              <p className="mt-3 text-xs leading-relaxed text-white/55">
+                Joining adds your email to our seasonal upkeep list. Every one of those emails
+                carries a one-click unsubscribe link, and using it stops them for good. See our{" "}
+                <Link to="/privacy" className="underline underline-offset-2 hover:text-white">
+                  privacy policy
+                </Link>
+                .
+              </p>
               <p className="mt-4 flex items-center gap-1.5 border-t border-white/10 pt-4 text-xs text-white/55">
                 <Phone className="h-3.5 w-3.5 text-accent" />
                 Prefer to talk? Call {company.phone}

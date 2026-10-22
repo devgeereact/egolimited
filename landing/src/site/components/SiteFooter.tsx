@@ -15,6 +15,7 @@ import { areas } from "@/site/areas"
 import { useAuth } from "@/lib/auth"
 import { Button } from "@/components/ui/button"
 import Logo from "./Logo"
+import { openCookiePreferences } from "./CookieConsent"
 
 const trustBadges = [
   "Fully insured",
@@ -245,6 +246,14 @@ export default function SiteFooter() {
                 {l.label}
               </Link>
             ))}
+            {/* Withdrawing a cookie choice has to be as easy as making it was. Before this
+                there was no route back to the banner once it had been dismissed. */}
+            <button
+              onClick={openCookiePreferences}
+              className="transition-colors hover:text-accent"
+            >
+              Cookie preferences
+            </button>
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
               className="inline-flex items-center gap-1 transition-colors hover:text-accent"

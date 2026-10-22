@@ -920,3 +920,15 @@ CREATE TABLE IF NOT EXISTS ego_tenders (
   INDEX idx_tender_status (status),
   INDEX idx_tender_deadline (deadline_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- ---------------------------------------------------------------------------
+-- Review publication consent (2026-09-04, privacy audit).
+--
+-- A review left in the customer portal used to appear on the PUBLIC homepage
+-- (GET /public/reviews) under the customer's full name, taken from the
+-- customers table, with the portal form saying only "Your feedback helps us
+-- improve". Publication is now opt-in and defaults to 0, so nothing a customer
+-- has already written is published until they say so on a form that tells them
+-- what publishing means. Existing rows therefore stay private, deliberately.
+-- ---------------------------------------------------------------------------
+ALTER TABLE ego_messages ADD COLUMN IF NOT EXISTS publish_consent TINYINT(1) NOT NULL DEFAULT 0;
