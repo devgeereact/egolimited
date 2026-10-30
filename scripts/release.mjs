@@ -171,8 +171,9 @@ for (const part of cfg.parts) {
   const src = path.join(root, part.from);
   if (!existsSync(src) || !statSync(src).isDirectory()) fail(`${part.from} does not exist (did the build run?).`);
   const bad = [];
-  // Plain .sql migrations may ship when a part allows "*.sql"; dumps (.sql.gz), keys and .env never do.
-  const banned = (part.allow ?? []).includes('*.sql') ? /^\.env|\.(sql\.gz|pem|key)$/ : /^\.env|\.(sql|sql\.gz|pem|key)$/;
+  // Secrets and dumps stop the release outright. Plain .sql files are simply not sent (protected) unless a part
+  // allows "*.sql" for its migrations.
+  const banned = /^\.env|\.(sql\.gz|pem|key)$/;
   const skipped = new Set((part.exclude ?? []).filter((e) => /^\/[^*]+\/$/.test(e)).map((e) => path.join(src, e.slice(1, -1))));
   const walk = (d) => {
     for (const n of readdirSync(d)) {
