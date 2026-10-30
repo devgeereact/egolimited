@@ -131,3 +131,4 @@ PLANNED. Nothing changed outside this file and the local branch. Not pushed.
 - 30 Oct 2026: dry run showed the live server equal to `main`; FTP `deploy.yml` removed (and deploy.sh). Owner deletes GitHub FTP secrets and the FTP account with `~/Backups/scripts/remove-ftp-deploys.zsh`.
 - 30 Oct 2026: `docs/AUDIT.md` started (one audit file); release route and live parity recorded; `notion-export/` moved to `docs/notion-export/`.
 - 30 Oct 2026 (owner asked): push to `main` deploys again, now over SSH: `.github/workflows/deploy.yml` runs `scripts/release.mjs --go` with a restricted deploy key. Owner runs `~/Backups/scripts/setup-github-deploy.zsh --apply` once to set the key and secrets.
+- 30 Oct 2026 19:10: owner ran `pnpm release --go`: the review-publish consent privacy fix (`api/index.php`, `schema.sql`) is live; snapshot `~/backups/egolimited/releases/20261030T191039Z`. Repo made public; Actions deploy test at 19:1x found the server equal to `main`.

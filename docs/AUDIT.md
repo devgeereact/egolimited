@@ -2,6 +2,11 @@
 
 One audit file for this project. Every audit, check or review adds a dated section at the top; nothing is rewritten. Open work lives in `.agent/CURRENT-TASK.md`.
 
+## 30 October 2026 (evening): first SSH releases
+
+- Owner `pnpm release --go` at 19:10 shipped the review-publish consent privacy fix; smoke checks passed (`/`, `/app/`, `/api/health`).
+- GitHub Actions deploy (`deploy.yml`, workflow_dispatch) afterwards: checks passed (31 Vitest, 550 PHP), nothing to upload. Result: PASS.
+
 ## 30 October 2026: release route and live parity
 
 - Scope: the move to SSH releases (kit `scripts/release.mjs`) and whether the live server matches `main`.
