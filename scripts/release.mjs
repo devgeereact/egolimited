@@ -27,7 +27,7 @@ const known = new Set(['--go', '--skip-checks', '--rollback', '--list']);
 for (const a of argv) if (!known.has(a) && !a.startsWith('--config=')) fail(`unknown option ${a}. Options: ${[...known].join(', ')}, --config=FILE`);
 const go = argv.includes('--go');
 const KEEP = 3;
-const PROTECT = ['config.php', '.htaccess', '.user.ini', 'php.ini', '.env', '.env.*', '*.sql', '*.sql.gz', '*.pem', '*.key', 'error_log', '.well-known/'];
+const PROTECT = ['config.php', '.htaccess', '.user.ini', 'php.ini', '.env', '.env.*', '*.sql', '*.sql.gz', '*.pem', '*.key', 'error_log', '.well-known/', '.DS_Store'];
 const LAST = ['index.html', 'sw.js', 'manifest.webmanifest'];
 
 const cfgPath = path.join(root, argv.find((a) => a.startsWith('--config='))?.slice(9) ?? 'release.json');
