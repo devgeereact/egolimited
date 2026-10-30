@@ -34,7 +34,7 @@ Kit standard since 30 October 2026: no FTP, no GitHub Actions deploys. `scripts/
 
 Database migrations are separate: take a backup first (`~/backups/egolimited`), then run `php migrate_sql.php` in `~/egolimited.com/api` over SSH.
 
-`./deploy.sh` and `.github/workflows/deploy.yml` (FTPS, manual only since 30 October 2026) are the old routes; both are removed after the first successful `pnpm release --go`, together with the FTP secrets and the cPanel FTP account.
+The old routes (`./deploy.sh` and the FTPS workflow) were removed on 30 October 2026 after a dry run showed the server equal to `main`. The owner deletes the FTP secrets and the cPanel FTP accounts (`~/Backups/scripts/remove-ftp-deploys.zsh`).
 
 ## Never upload
 
