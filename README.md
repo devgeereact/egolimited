@@ -77,21 +77,11 @@ emails a prospect.
 - App → `https://egolimited.com/app/` (SPA; client-side routing)
 - API → `https://egolimited.com/api/`
 
-Vite `base` is `/` (landing) and `/app/` (app), set at build time by `deploy.sh`. SPA fallback handled
+Vite `base` is `/` (landing) and `/app/` (app), set at build time by the `release.json` build step. SPA fallback handled
 via `.htaccess` in each deployed folder.
 
 ## Deploy
-`./deploy.sh` builds + rsyncs landing + app to the `egolimited.com` cPanel docroot over the `cpanel`
-SSH alias. PHP API is rsynced manually (see `docs/DEPLOY.md`, the tracked deploy record). `config.php` lives
-server-side only — never deployed from the repo. Source folders + `docs/` stay in the repo, not deployed.
-
-> **GitHub Actions is billing-blocked — pushing to `main` deploys NOTHING.** Every deploy is a manual
-> rsync. Don't assume a green push means a live change; verify over SSH, not curl (Cloudflare fronts
-> the site).
-
-**The app build MUST set its base:** `cd app && npx vite build --base=/app/`. A plain `npm run build`
-uses base `/`, producing an `index.html` under `/app/` that points at `/assets/*` — 404s, blank app.
-Verify with `grep assets app/dist/index.html`.
+`pnpm release` (dry run) then `pnpm release --go`, from this Mac over SSH: landing, app and PHP API in one step, with a snapshot of every changed server file and an automatic restore if the smoke test fails. No FTP, no GitHub Actions deploys. `config.php` and the API `.htaccess` live server-side only. Details: `docs/DEPLOY.md`.
 
 ## Database
 Dedicated MySQL DB **`devgeereact_egolimited`** (`ego_`-prefixed tables). Schema: `api/schema.sql`.

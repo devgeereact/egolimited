@@ -127,3 +127,4 @@ PLANNED. Nothing changed outside this file and the local branch. Not pushed.
 ## Merged to main (30 Oct 2026)
 - `move/cpanel-clerk` (already live) merged into `main`, so `main` matches the server again.
 - `.github/workflows/deploy.yml` is now manual only (`workflow_dispatch`): no FTP deploy on push. Releases go over SSH (`pnpm release`, kit standard) once that script is added here.
+- 30 Oct 2026: `pnpm release` added (kit `scripts/release.mjs`, `release.json`: landing, app, API). Docs updated. First run = dry run only; `deploy.sh`, FTP `deploy.yml`, FTP secrets and FTP account go after the first successful `--go`.

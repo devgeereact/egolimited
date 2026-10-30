@@ -1,6 +1,6 @@
 # EGO LIMITED deploy record
 
-This is the tracked record of how EGO LIMITED reaches production. It replaces the "Deploy mechanics" section of the git-ignored `CLAUDE.md`, which is not present on every computer. Every fact here comes from files already in this repository: `deploy.sh`, `.github/workflows/deploy.yml`, `README.md`, `api/README.md`, `api/.htaccess`, `app/public/.htaccess`, `landing/public/.htaccess` and `notion-export/16-PROJECT-MEMORY-AND-DOCS.md`. When one of those changes, update this page in the same change.
+This is the tracked record of how EGO LIMITED reaches production. It replaces the "Deploy mechanics" section of the git-ignored `CLAUDE.md`, which is not present on every computer. Every fact here comes from files already in this repository: `release.json`, `scripts/release.mjs`, `README.md`, `api/README.md`, `api/.htaccess`, `app/public/.htaccess`, `landing/public/.htaccess` and `notion-export/16-PROJECT-MEMORY-AND-DOCS.md`. When one of those changes, update this page in the same change.
 
 Deploying publishes to the live site and is a production action. It needs the owner's explicit approval.
 
@@ -18,52 +18,39 @@ Only build output and API source are uploaded. `docs/`, `notion-export/`, `deplo
 
 The app build must set its base. A plain `npm run build` uses base `/`, so `/app/index.html` would point at `/assets/*` and the app would load blank. Check with `grep assets app/dist/index.html`, which must show `/app/assets/...`.
 
-## The two deploy paths
+## How to release: `pnpm release` (from this Mac, over SSH)
 
-### 1. CI: `.github/workflows/deploy.yml`
+Kit standard since 30 October 2026: no FTP, no GitHub Actions deploys. `scripts/release.mjs` reads `release.json` (no secrets in it) and uses the `cpanel` SSH alias (key authentication) from the operator's SSH config.
 
-Runs on every push to `main` and on manual dispatch. It runs blocking gates (PHP `php -l` on every API file, `php api/tests/run.php`, app Vitest, app and landing lint, `tsc -b` for both), builds both SPAs, uploads landing, app and API over FTPS, then smoke-tests the live site (`/api/health`, the hashed app bundle, the landing page).
+1. `pnpm release` (dry run): checks that `main` is clean and pushed; runs the gates (app `tsc -b` and Vitest, landing `tsc -b`, `php -l` on every API file, `php api/tests/run.php`); builds the landing (`--base=/`) and the app (`--base=/app/`, live public Clerk key) and checks the app SPA fallback; then lists every file that would change in the three parts below. Nothing changes.
+2. `pnpm release --go`: copies every server file about to change to `~/backups/egolimited/releases/<time>/` (newest 3 kept), uploads (index.html, sw.js and the manifest last; nothing deleted), then smoke-tests `/`, `/app/` and `/api/health`. A failed smoke test restores the copied files automatically.
+3. Undo: `pnpm release --rollback`, then `pnpm release --rollback --go`.
 
-`README.md` records that GitHub Actions has been billing-blocked, in which case a push deploys nothing. Do not treat a pushed commit as a live change: check the workflow run, then check the live site.
+| Part | From | To |
+|---|---|---|
+| Landing | `landing/dist/` (with its own `.htaccess`) | `~/egolimited.com/` |
+| App | `app/dist/` (with its own `.htaccess`) | `~/egolimited.com/app/` |
+| API | `api/` without `uploads/`, `.impeccable/`, `tests/`, `config.sample.php`, Markdown | `~/egolimited.com/api/` |
 
-### 2. Manual: `./deploy.sh` (landing and app only)
+Database migrations are separate: take a backup first (`~/backups/egolimited`), then run `php migrate_sql.php` in `~/egolimited.com/api` over SSH.
 
-`deploy.sh` runs from any directory and:
-
-1. Runs fail-closed gates: app `npx --no-install tsc -b` and `npm test`, landing `npx --no-install tsc -b`. Any failure stops the script before anything is built or uploaded.
-2. Builds the landing (`--base=/`) and the app (`--base=/app/`) with `npx --no-install vite build`.
-3. Checks that `app/dist/.htaccess` still holds the SPA fallback and the `sw.js`/`index.html` no-cache rule, and stops if not.
-4. Rsyncs `landing/dist/` to `cpanel:egolimited.com/` and `app/dist/` to `cpanel:egolimited.com/app/` (`rsync -az --no-perms --omit-dir-times`, no `--delete`).
-
-It uses the `cpanel` SSH alias (key authentication, port 21098) from the operator's own SSH config. The script does not deploy the API.
-
-### Manual API upload
-
-The API is uploaded by hand with rsync over the same alias, without `--delete`, so the server's own files survive:
-
-```sh
-rsync -az --itemize-changes -n \
-  --exclude config.php --exclude error_log --exclude uploads --exclude .impeccable --exclude .htaccess \
-  api/ cpanel:~/egolimited.com/api/
-```
-
-Run it with `-n` (dry run) first, read the itemised list, then run it again without `-n`. The same `--itemize-changes -n` dry run is advisable before any manual rsync.
+`./deploy.sh` and `.github/workflows/deploy.yml` (FTPS, manual only since 30 October 2026) are the old routes; both are removed after the first successful `pnpm release --go`, together with the FTP secrets and the cPanel FTP account.
 
 ## Never upload
 
 - `api/config.php`: production secrets live only on the server. Never commit it, never upload it, never overwrite it.
 - `api/error_log`, `api/uploads/`, `api/.impeccable/`: server-side state.
-- `api/.htaccess` from the repository: both the CI workflow and the manual rsync exclude it, so the server keeps its own copy. If the server copy ever needs the repository rules (front controller, `Authorization` passthrough, blocking `lib/`, `tests/` and the CLI scripts), change it deliberately on the server and record that here.
-- `api/config.sample.php`: excluded by CI; it is a template only.
+- `api/.htaccess` from the repository: `pnpm release` never uploads it (protected name), so the server keeps its own copy. If the server copy ever needs the repository rules (front controller, `Authorization` passthrough, blocking `lib/`, `tests/` and the CLI scripts), change it deliberately on the server and record that here.
+- `api/config.sample.php`: excluded in `release.json`; it is a template only.
 - Anything from the separate `egolimited_com` (underscore) project folder. It is a different project.
 
-The CI landing upload owns the docroot root, so it excludes `app/`, `api/` and a stale `egolimited.com/` folder on the server to avoid uploading into or deleting them.
+The landing part owns the docroot root; it never deletes, so `app/`, `api/` and other server folders are left alone.
 
 ## Cache and routing rules that must ship
 
-- `app/public/.htaccess` is copied by Vite into `app/dist/`. It holds the SPA fallback to `/app/index.html` and forces `Cache-Control: no-cache, must-revalidate` on `sw.js` and `index.html`. Without that rule the host's default caching kept a year-old service worker alive (white-screen incident, 8 July 2026). `deploy.sh` must never overwrite this file.
+- `app/public/.htaccess` is copied by Vite into `app/dist/`. It holds the SPA fallback to `/app/index.html` and forces `Cache-Control: no-cache, must-revalidate` on `sw.js` and `index.html`. Without that rule the host's default caching kept a year-old service worker alive (white-screen incident, 8 July 2026). It is part of the build and ships with the app (`allow` in `release.json`).
 - `landing/public/.htaccess` is copied into `landing/dist/`. It holds the SPA fallback to `/index.html` and a `no-cache, must-revalidate` rule for `.html` files. It deliberately has no long-lived `immutable` rule for `.js` or images: this file sits at the docroot, so such a rule would also apply under `/app/`, where `sw.js` is not hashed. `deploy/landing.htaccess` contains that broader rule and is not used.
-- Cloudflare cache rule for `/app/sw.js`: this lives in Cloudflare, not in the repository. Cloudflare caches `.js` files by extension and the zone's Browser Cache TTL setting (4 hours) overrode the origin header, so `sw.js` reached browsers with `max-age=14400` even though `.htaccess` was correct. On 22 October 2026 a cache rule was added in the `egolimited.com` zone (phase `http_request_cache_settings`, rule id `2624217f49a141adb7f6af96834fcb30`): hosts `egolimited.com` and `www.egolimited.com`, URI path equals `/app/sw.js`, cache set to bypass. Do not delete it. If it is lost, `curl -sI https://egolimited.com/app/sw.js` shows `max-age=14400` again; recreate it under Caching, Cache Rules in the dashboard. Nothing in `deploy.sh` or CI touches it.
+- Cloudflare cache rule for `/app/sw.js`: this lives in Cloudflare, not in the repository. Cloudflare caches `.js` files by extension and the zone's Browser Cache TTL setting (4 hours) overrode the origin header, so `sw.js` reached browsers with `max-age=14400` even though `.htaccess` was correct. On 22 October 2026 a cache rule was added in the `egolimited.com` zone (phase `http_request_cache_settings`, rule id `2624217f49a141adb7f6af96834fcb30`): hosts `egolimited.com` and `www.egolimited.com`, URI path equals `/app/sw.js`, cache set to bypass. Do not delete it. If it is lost, `curl -sI https://egolimited.com/app/sw.js` shows `max-age=14400` again; recreate it under Caching, Cache Rules in the dashboard. Nothing in `pnpm release` touches it.
 
 ## Verify after a deploy
 

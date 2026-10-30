@@ -1,0 +1,54 @@
+{
+  "host": "cpanel",
+  "project": "egolimited",
+  "url": "https://egolimited.com",
+  "checks": [
+    "cd app && npx --no-install tsc -b && npm test",
+    "cd landing && npx --no-install tsc -b",
+    "for f in $(find api -name '*.php' -not -path 'api/uploads/*'); do php -l \"$f\" >/dev/null || exit 1; done",
+    "php api/tests/run.php"
+  ],
+  "build": "cd landing && npx --no-install vite build --base=/ && cd ../app && VITE_CLERK_PUBLISHABLE_KEY=pk_live_Y2xlcmsuZWdvbGltaXRlZC5jb20k npx --no-install vite build --base=/app/ && grep -qF 'RewriteRule . /app/index.html' dist/.htaccess",
+  "parts": [
+    {
+      "from": "landing/dist",
+      "to": "egolimited.com",
+      "allow": [
+        ".htaccess"
+      ]
+    },
+    {
+      "from": "app/dist",
+      "to": "egolimited.com/app",
+      "allow": [
+        ".htaccess"
+      ]
+    },
+    {
+      "from": "api",
+      "to": "egolimited.com/api",
+      "exclude": [
+        "/uploads/",
+        "/.impeccable/",
+        "/tests/",
+        "/config.sample.php",
+        "*.md"
+      ]
+    }
+  ],
+  "smoke": [
+    {
+      "path": "/",
+      "status": 200
+    },
+    {
+      "path": "/app/",
+      "status": 200
+    },
+    {
+      "path": "/api/health",
+      "status": 200,
+      "contains": "\"ok\":true"
+    }
+  ]
+}

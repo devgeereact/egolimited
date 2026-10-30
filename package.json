@@ -1,0 +1,7 @@
+{
+  "name": "egolimited",
+  "private": true,
+  "scripts": {
+    "release": "node scripts/release.mjs"
+  }
+}
