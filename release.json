@@ -33,6 +33,9 @@
         "/tests/",
         "/config.sample.php",
         "*.md"
+      ],
+      "allow": [
+        "*.sql"
       ]
     }
   ],

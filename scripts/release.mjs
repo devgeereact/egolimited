@@ -171,11 +171,15 @@ for (const part of cfg.parts) {
   const src = path.join(root, part.from);
   if (!existsSync(src) || !statSync(src).isDirectory()) fail(`${part.from} does not exist (did the build run?).`);
   const bad = [];
+  // Plain .sql migrations may ship when a part allows "*.sql"; dumps (.sql.gz), keys and .env never do.
+  const banned = (part.allow ?? []).includes('*.sql') ? /^\.env|\.(sql\.gz|pem|key)$/ : /^\.env|\.(sql|sql\.gz|pem|key)$/;
+  const skipped = new Set((part.exclude ?? []).filter((e) => /^\/[^*]+\/$/.test(e)).map((e) => path.join(src, e.slice(1, -1))));
   const walk = (d) => {
     for (const n of readdirSync(d)) {
       const f = path.join(d, n);
+      if (skipped.has(f)) continue;
       if (statSync(f).isDirectory()) walk(f);
-      else if (/^\.env|\.(sql|sql\.gz|pem|key)$/.test(n)) bad.push(path.relative(root, f));
+      else if (banned.test(n)) bad.push(path.relative(root, f));
     }
   };
   walk(src);
