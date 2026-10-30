@@ -20,7 +20,9 @@ The app build must set its base. A plain `npm run build` uses base `/`, so `/app
 
 ## How to release: `pnpm release` (from this Mac, over SSH)
 
-Kit standard since 30 October 2026: no FTP, no GitHub Actions deploys. `scripts/release.mjs` reads `release.json` (no secrets in it) and uses the `cpanel` SSH alias (key authentication) from the operator's SSH config.
+No FTP. **Automatic:** every push to `main` deploys through GitHub Actions (`.github/workflows/deploy.yml`): the same checks, build and `scripts/release.mjs --go` over SSH with a restricted deploy key (secrets `CPANEL_SSH_KEY`, `CPANEL_KNOWN_HOSTS`; set by `~/Backups/scripts/setup-github-deploy.zsh`). Docs-only pushes and `[skip ci]` commits do not deploy. Each deploy uses a few Actions minutes. The steps below are the same release run by hand from the Mac.
+
+`scripts/release.mjs` reads `release.json` (no secrets in it) and uses the `cpanel` SSH alias (key authentication) from the operator's SSH config.
 
 1. `pnpm release` (dry run): checks that `main` is clean and pushed; runs the gates (app `tsc -b` and Vitest, landing `tsc -b`, `php -l` on every API file, `php api/tests/run.php`); builds the landing (`--base=/`) and the app (`--base=/app/`, live public Clerk key) and checks the app SPA fallback; then lists every file that would change in the three parts below. Nothing changes.
 2. `pnpm release --go`: copies every server file about to change to `~/backups/egolimited/releases/<time>/` (newest 3 kept), uploads (index.html, sw.js and the manifest last; nothing deleted), then smoke-tests `/`, `/app/` and `/api/health`. A failed smoke test restores the copied files automatically.

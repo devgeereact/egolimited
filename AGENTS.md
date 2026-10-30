@@ -19,7 +19,7 @@ This existing project adopts the active shared GEE OS, minimum version 0.9.0. Re
 - Lint: `npm run lint` in each surface
 - Test: `cd app && npm test` (Vitest); `php api/tests/run.php` for the API
 - Build: `npx vite build --base=/app/` (app) and `npx vite build --base=/` (landing)
-- Deploy: `pnpm release` (dry run), then `pnpm release --go`, publishes to egolimited.com (see `docs/DEPLOY.md`). Production action, needs explicit approval.
+- Deploy: a push to `main` deploys to egolimited.com through Actions (`deploy.yml`, SSH); by hand: `pnpm release`, then `pnpm release --go` (see `docs/DEPLOY.md`). Production action, needs explicit approval.
 
 ## Shared rules
 

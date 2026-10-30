@@ -81,7 +81,7 @@ Vite `base` is `/` (landing) and `/app/` (app), set at build time by the `releas
 via `.htaccess` in each deployed folder.
 
 ## Deploy
-`pnpm release` (dry run) then `pnpm release --go`, from this Mac over SSH: landing, app and PHP API in one step, with a snapshot of every changed server file and an automatic restore if the smoke test fails. No FTP, no GitHub Actions deploys. `config.php` and the API `.htaccess` live server-side only. Details: `docs/DEPLOY.md`.
+`pnpm release` (dry run) then `pnpm release --go`, from this Mac over SSH: landing, app and PHP API in one step, with a snapshot of every changed server file and an automatic restore if the smoke test fails. Every push to `main` runs the same release in GitHub Actions (SSH, no FTP); docs-only pushes do not deploy. `config.php` and the API `.htaccess` live server-side only. Details: `docs/DEPLOY.md`.
 
 ## Database
 Dedicated MySQL DB **`devgeereact_egolimited`** (`ego_`-prefixed tables). Schema: `api/schema.sql`.
