@@ -1,6 +1,6 @@
 # EGO LIMITED deploy record
 
-This is the tracked record of how EGO LIMITED reaches production. It replaces the "Deploy mechanics" section of the git-ignored `CLAUDE.md`, which is not present on every computer. Every fact here comes from files already in this repository: `release.json`, `scripts/release.mjs`, `README.md`, `api/README.md`, `api/.htaccess`, `app/public/.htaccess`, `landing/public/.htaccess` and `notion-export/16-PROJECT-MEMORY-AND-DOCS.md`. When one of those changes, update this page in the same change.
+This is the tracked record of how EGO LIMITED reaches production. It replaces the "Deploy mechanics" section of the git-ignored `CLAUDE.md`, which is not present on every computer. Every fact here comes from files already in this repository: `release.json`, `scripts/release.mjs`, `README.md`, `api/README.md`, `api/.htaccess`, `app/public/.htaccess`, `landing/public/.htaccess` and `docs/notion-export/16-PROJECT-MEMORY-AND-DOCS.md`. When one of those changes, update this page in the same change.
 
 Deploying publishes to the live site and is a production action. It needs the owner's explicit approval.
 
@@ -14,7 +14,7 @@ One cPanel docroot, `~/egolimited.com/`, serves three surfaces:
 | Field-service app (PWA) | `app/` | `npx vite build --base=/app/` into `app/dist/` | `egolimited.com/app/` |
 | PHP API | `api/` | none, PHP is uploaded as source | `egolimited.com/api/` |
 
-Only build output and API source are uploaded. `docs/`, `notion-export/`, `deploy/` and the frontend source folders stay in the repository.
+Only build output and API source are uploaded. `docs/` (with `docs/notion-export/`), `deploy/` and the frontend source folders stay in the repository.
 
 The app build must set its base. A plain `npm run build` uses base `/`, so `/app/index.html` would point at `/assets/*` and the app would load blank. Check with `grep assets app/dist/index.html`, which must show `/app/assets/...`.
 
