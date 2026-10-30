@@ -2,9 +2,8 @@ name: Deploy to cPanel (FTP)
 
 # Builds the landing + app and uploads landing, app and the PHP API to the
 # egolimited.com cPanel host over FTP on every push to main (or run manually).
+# Manual only (30 Oct 2026): releases go over SSH with `pnpm release`, not on push. See docs/DEPLOYMENT.md.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 concurrency:

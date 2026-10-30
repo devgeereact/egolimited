@@ -123,3 +123,7 @@ PLANNED. Nothing changed outside this file and the local branch. Not pushed.
 - DONE (dry run then applied): production `auth_access_control.sign_up_mode` = restricted. Login page no longer shows "Sign up" (checked in browser).
 - RULE NOW: a new staff member needs BOTH a Team-page record (role) AND a Clerk user (create in Clerk dashboard > Users, or ask Claude). Rollback: set sign_up_mode back to public.
 - STILL OPEN: remove legacy password/session/TOTP/invite code after ~1 week of use; update the invite email wording; TEST records to remove (staff row 14 + Clerk Founder TEST users); owner decision on the undeployed privacy fix (review-publish consent).
+
+## Merged to main (30 Oct 2026)
+- `move/cpanel-clerk` (already live) merged into `main`, so `main` matches the server again.
+- `.github/workflows/deploy.yml` is now manual only (`workflow_dispatch`): no FTP deploy on push. Releases go over SSH (`pnpm release`, kit standard) once that script is added here.
