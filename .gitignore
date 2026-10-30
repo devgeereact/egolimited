@@ -60,3 +60,7 @@ Thumbs.db
 
 # Local project context (creds/notes) — never commit/deploy
 CLAUDE.md
+
+# local scratch (tests, temp, logs, recovery)
+.local-test/
+.local-state/

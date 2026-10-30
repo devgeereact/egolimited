@@ -5,6 +5,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
+import { clerkEnabled } from "@/lib/clerk"
 import { useApi, invalidate } from "@/lib/query"
 import { useAuth } from "@/store/auth.store"
 import { Button } from "@/components/ui/button"
@@ -15,6 +16,25 @@ import { Separator } from "@/components/ui/separator"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function AccountSecurity() {
+  // Passwords and 2FA are handled by Clerk (email code); nothing to manage here.
+  if (clerkEnabled) {
+    return (
+      <div className="mx-auto max-w-xl p-4">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2"><ShieldCheck className="size-5" /> Sign-in security</CardTitle>
+            <CardDescription>
+              You sign in with a one-time code sent to your email. There is no password to change.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
+  }
+  return <LegacyAccountSecurity />
+}
+
+function LegacyAccountSecurity() {
   const [params] = useSearchParams()
   const forced = params.get("force") === "1"
   const { loadMe } = useAuth()
