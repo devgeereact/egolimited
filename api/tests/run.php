@@ -430,6 +430,52 @@ ok(!str_contains($reviewsBody, "ego_customers"),
 ok(!str_contains($reviewsBody, "customer_name"),
    "GET /public/reviews does not fall back to customer_name — a blank name must stay blank, not become the full name");
 
+// ---------------------------------------------------------------- Clerk session tokens (sign-in)
+require_once __DIR__ . "/../lib/clerk_auth.php";
+$b64u = fn(string $x): string => rtrim(strtr(base64_encode($x), "+/", "-_"), "=");
+$mkKey = function () {
+    $k = openssl_pkey_new(["private_key_bits" => 2048, "private_key_type" => OPENSSL_KEYTYPE_RSA]);
+    $d = openssl_pkey_get_details($k);
+    return [$k, ["kty" => "RSA", "kid" => "k1", "n" => rtrim(strtr(base64_encode($d["rsa"]["n"]), "+/", "-_"), "="), "e" => rtrim(strtr(base64_encode($d["rsa"]["e"]), "+/", "-_"), "=")]];
+};
+[$clerkKey, $clerkJwk] = $mkKey();
+[$otherKey, ] = $mkKey();
+$iss = "https://clerk.egolimited.com";
+$now = 1_800_000_000;
+$sign = function ($key, array $claims, array $hdr = []) use ($b64u) {
+    $h = $b64u(json_encode($hdr + ["alg" => "RS256", "kid" => "k1", "typ" => "JWT"]));
+    $p = $b64u(json_encode($claims));
+    openssl_sign("$h.$p", $sig, $key, OPENSSL_ALGO_SHA256);
+    return "$h.$p." . $b64u($sig);
+};
+$good = ["iss" => $iss, "sub" => "user_abc", "azp" => "https://egolimited.com", "exp" => $now + 60, "nbf" => $now - 5, "email" => "a@b.co"];
+$cacheDir = sys_get_temp_dir() . "/ego-clerk-test-" . getmypid();
+@mkdir($cacheDir, 0700, true);
+$verifier = fn() => new EgoClerkJwt($iss, ["https://egolimited.com", "https://local.egolimited.com"], $cacheDir, fn($u) => json_encode(["keys" => [$clerkJwk]]), $now);
+$rejects = function (string $tok, string $what) use ($verifier) {
+    foreach (glob(sys_get_temp_dir() . "/ego-clerk-test-" . getmypid() . "/*") ?: [] as $f) @unlink($f);
+    throws(fn() => $verifier()->verify($tok), $what);
+};
+eq("user_abc", $verifier()->verify($sign($clerkKey, $good))["sub"], "Clerk: a correctly signed token verifies");
+eq("user_abc", $verifier()->verify($sign($clerkKey, ["azp" => "https://local.egolimited.com"] + $good))["sub"], "Clerk: local-live origin is accepted");
+$rejects($sign($otherKey, $good), "Clerk: token signed by another key is rejected");
+$rejects($sign($clerkKey, ["iss" => "https://clerk.evil.com"] + $good), "Clerk: wrong issuer is rejected");
+$rejects($sign($clerkKey, ["exp" => $now - 60] + $good), "Clerk: expired token is rejected");
+$rejects($sign($clerkKey, ["nbf" => $now + 600] + $good), "Clerk: not-yet-valid token is rejected");
+$rejects($sign($clerkKey, ["azp" => "https://evil.example"] + $good), "Clerk: unlisted azp is rejected");
+$noAzp = $good; unset($noAzp["azp"]);
+$rejects($sign($clerkKey, $noAzp), "Clerk: missing azp is rejected");
+$noSub = $good; unset($noSub["sub"]);
+$rejects($sign($clerkKey, $noSub), "Clerk: missing sub is rejected");
+$rejects($sign($clerkKey, $good, ["alg" => "HS256"]), "Clerk: non-RS256 alg is rejected");
+$rejects("a.b", "Clerk: malformed token is rejected");
+$none = $b64u(json_encode(["alg" => "none", "kid" => "k1"])) . "." . $b64u(json_encode($good)) . ".";
+$rejects($none, "Clerk: alg=none is rejected");
+$rejects($sign($clerkKey, $good, ["kid" => "unknown"]), "Clerk: unknown kid is rejected");
+ok(looks_like_jwt("a.b.c") && !looks_like_jwt(bin2hex(random_bytes(32))), "Clerk: JWT bearer is told apart from a legacy session token");
+ok(!clerk_configured([]) && clerk_configured(["clerk_issuer" => $iss, "clerk_authorized_parties" => ["x"]]), "Clerk: not configured => disabled, configured => enabled");
+throws(fn() => new EgoClerkJwt("http://clerk.example.com", ["x"], $cacheDir, fn($u) => ""), "Clerk: http issuer is refused");
+
 // ---------------------------------------------------------------- report
 printf("\n  %d passed, %d failed\n", $T["pass"], $T["fail"]);
 foreach ($T["failures"] as $f) printf("  FAIL: %s\n", $f);

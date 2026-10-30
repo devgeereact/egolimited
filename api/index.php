@@ -10,6 +10,7 @@ $cfg = require __DIR__ . "/config.php";
 require __DIR__ . "/lib/job_status.php";
 require __DIR__ . "/lib/invoicing.php";
 require __DIR__ . "/lib/brand.php";
+require __DIR__ . "/lib/clerk_auth.php"; // Clerk session tokens -> ego_users row
 require __DIR__ . "/lib/authz.php";   // who may call what — enforced in one gate before the switch
 require __DIR__ . "/lib/campaigns.php"; // enrolment, suppression, merge, queueing
 require __DIR__ . "/lib/pipeline.php";  // one contact table; stages derived from facts
@@ -215,6 +216,13 @@ function attach_url(int $attId, int $ttl = 86400): string {
 function current_user(mysqli $db): ?array {
     $tok = bearer();
     if (!$tok) return null;
+    if (looks_like_jwt($tok)) {
+        // Clerk session token. Verified once per request; called from the gate and again from handlers.
+        global $cfg;
+        static $memo = [];
+        return $memo[$tok] ??= clerk_current_user($db, $cfg, $tok);
+    }
+    // Legacy own-session token (removed once the Clerk path is proven in production).
     return db_one($db,
         "SELECT u.id,u.name,u.email,u.role,u.active,u.phone,u.available,u.must_change_password,u.totp_enabled
          FROM ego_sessions s JOIN ego_users u ON u.id = s.user_id

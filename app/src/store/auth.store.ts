@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { api, ApiError, setToken, getToken } from "@/lib/api"
 import type { Role } from "@/lib/roles"
+import { clerkEnabled, clerkToken, clerkSignOut } from "@/lib/clerk"
 
 /**
  * The last known signed-in user, kept so the app can boot with NO NETWORK.
@@ -69,7 +70,7 @@ interface AuthState {
 
 export const useAuth = create<AuthState>((set) => ({
   user: null,
-  status: getToken() ? "loading" : "anon",
+  status: clerkEnabled || getToken() ? "loading" : "anon",
 
   login: async (email, password, code) => {
     const res = await api<{ token?: string; user?: AuthUser; totp_required?: boolean }>("/auth/login", {
@@ -88,19 +89,38 @@ export const useAuth = create<AuthState>((set) => ({
   },
 
   logout: async () => {
-    try {
-      await api("/auth/logout", { method: "POST" })
-    } catch {
-      /* ignore */
+    if (!clerkEnabled) {
+      try {
+        await api("/auth/logout", { method: "POST" })
+      } catch {
+        /* ignore */
+      }
     }
     setToken(null)
     cacheUser(null)
     clearDeviceCaches()
     set({ user: null, status: "anon" })
+    if (clerkEnabled) {
+      try { await clerkSignOut() } catch { /* already signed out, or offline */ }
+    }
   },
 
   loadMe: async () => {
-    if (!getToken()) {
+    if (clerkEnabled) {
+      const t = await clerkToken()
+      if (t.kind === "signed-out") {
+        cacheUser(null)
+        set({ user: null, status: "anon" })
+        return
+      }
+      if (t.kind === "unavailable") {
+        // Clerk could not load or give a token (offline). Same rule as a dead spot below: keep the
+        // last known user; the server still authorises every request.
+        const u = cachedUser()
+        set(u ? { user: u, status: "authed" } : { user: null, status: "anon" })
+        return
+      }
+    } else if (!getToken()) {
       set({ user: null, status: "anon" })
       return
     }

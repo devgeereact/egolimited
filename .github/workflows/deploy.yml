@@ -53,6 +53,10 @@ jobs:
       # ---- build the two SPAs ----
       - name: Build app (base /app/)
         working-directory: app
+        env:
+          # Public Clerk key (repository variable, not a secret). Without it the app falls back to the
+          # legacy own-login, so set it under Settings > Secrets and variables > Actions > Variables.
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ vars.VITE_CLERK_PUBLISHABLE_KEY }}
         run: |
           npx tsc -b
           npx vite build --base=/app/

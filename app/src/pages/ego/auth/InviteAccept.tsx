@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { Navigate, useNavigate, useParams } from "react-router-dom"
+import { clerkEnabled } from "@/lib/clerk"
 import { KeyRound, Loader2, CheckCircle2 } from "lucide-react"
 
 import { api } from "@/lib/api"
@@ -9,6 +10,12 @@ import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 export default function InviteAccept() {
+  // With Clerk there is no invite password: people sign in with their email code.
+  if (clerkEnabled) return <Navigate to="/ego/login" replace />
+  return <LegacyInviteAccept />
+}
+
+function LegacyInviteAccept() {
   const { token = "" } = useParams()
   const navigate = useNavigate()
   const [pass, setPass] = useState("")

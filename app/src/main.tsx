@@ -4,12 +4,15 @@ import { RouterProvider } from "react-router-dom"
 import { ThemeProvider } from "next-themes"
 import { Toaster } from "sonner"
 
+import { ClerkProvider } from "@clerk/clerk-react"
 import { QueryClientProvider } from "@tanstack/react-query"
 
 import ErrorBoundary from "@/components/ego/ErrorBoundary"
 import UIThemeProvider from "@/providers/ui-theme-provider"
 
 import { queryClient } from "@/lib/query"
+import ClerkBridge from "@/components/ego/ClerkBridge"
+import { CLERK_KEY, clerkEnabled } from "@/lib/clerk"
 import { startOutbox } from "@/lib/outbox"
 import { router } from "@/routes"
 import "@/index.css"
@@ -59,6 +62,12 @@ if ("serviceWorker" in navigator && import.meta.env.PROD) {
   })
 }
 
+const routerTree = (
+  <ErrorBoundary label="app root">
+    <RouterProvider router={router} />
+  </ErrorBoundary>
+)
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ThemeProvider
@@ -70,9 +79,14 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
       
       <UIThemeProvider>
         <QueryClientProvider client={queryClient}>
-          <ErrorBoundary label="app root">
-            <RouterProvider router={router} />
-          </ErrorBoundary>
+          {clerkEnabled ? (
+            <ClerkProvider publishableKey={CLERK_KEY} afterSignOutUrl={`${import.meta.env.BASE_URL}ego/login`}>
+              <ClerkBridge />
+              {routerTree}
+            </ClerkProvider>
+          ) : (
+            routerTree
+          )}
         </QueryClientProvider>
       </UIThemeProvider>
     </ThemeProvider>

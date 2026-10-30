@@ -16,11 +16,20 @@ export const API_BASE =
   (import.meta.env.VITE_API_BASE as string | undefined) ??
   (import.meta.env.DEV ? "https://egolimited.com/api" : "/api")
 
+import { clerkEnabled, clerkToken } from "@/lib/clerk"
+
 const TOKEN_KEY = "ego_token"
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const setToken = (t: string | null) =>
   t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY)
+
+/** The bearer for the next request: a fresh Clerk session token, or the legacy own-login token. */
+async function authToken(): Promise<string | null> {
+  if (!clerkEnabled) return getToken()
+  const r = await clerkToken()
+  return r.kind === "token" ? r.token : null
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -34,8 +43,8 @@ export async function api<T = unknown>(
 ): Promise<T> {
   const { method = "GET", body, auth = true } = opts
   const headers: Record<string, string> = {}
-  const token = getToken()
-  if (auth && token) headers["Authorization"] = `Bearer ${token}`
+  const token = auth ? await authToken() : null
+  if (token) headers["Authorization"] = `Bearer ${token}`
 
   // The host's mod_security 403s empty POST bodies — always send at least {}.
   const sendsBody = method !== "GET" && method !== "HEAD"
@@ -58,7 +67,7 @@ export async function api<T = unknown>(
  */
 export async function apiForm<T = unknown>(path: string, form: FormData): Promise<T> {
   const headers: Record<string, string> = {}
-  const token = getToken()
+  const token = await authToken()
   if (token) headers["Authorization"] = `Bearer ${token}`
   const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers, body: form })
   return handle<T>(res)
@@ -70,7 +79,7 @@ export async function apiForm<T = unknown>(path: string, form: FormData): Promis
  */
 export async function apiDownload(path: string, filename: string): Promise<void> {
   const headers: Record<string, string> = {}
-  const token = getToken()
+  const token = await authToken()
   if (token) headers["Authorization"] = `Bearer ${token}`
   const res = await fetch(`${API_BASE}${path}`, { headers })
   if (!res.ok) {
