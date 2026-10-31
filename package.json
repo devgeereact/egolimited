@@ -2,6 +2,7 @@
   "name": "egolimited",
   "private": true,
   "scripts": {
+    "verify": "node scripts/release.mjs --verify",
     "release": "node scripts/release.mjs"
   }
 }
